@@ -624,12 +624,13 @@ class WaferStack:
 def wafer_stack_list_initialize(
     cfg_dict: dict,
     pad_bitmap_collection_dict: dict,
-    num_stack_samples: int,
+    num_stack_samples: int,mode: str = 'simulation',
 ):
     """
     Inputs:
     - cfg_dict: Configuration dictionary containing parameters
     - num_stack_samples: Number of wafer stack samples to generate
+    - mode: 'simulation' or 'modeling'
     Outputs:
     - wafer_stacks: WaferStack object containing the initialized wafer stack samples
     Output Structure:
@@ -640,6 +641,7 @@ def wafer_stack_list_initialize(
         wafer_stack = WaferStack(
             cfg_dict=cfg_dict,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
+            mode=mode,
         )
         wafer_stack_list.append(wafer_stack)
         
