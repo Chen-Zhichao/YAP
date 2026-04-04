@@ -70,8 +70,8 @@ def main():
     convert_time = time.time()
     print("Pad bitmap collection generation finished in {:.2f} seconds.".format(convert_time - cfg_loading_time))
 
-    # Step 2: generate pad-level yield map
-    print("Calculating pad-level yield map...")
+    # Step 2: calculate stack assembly yield
+    print("Calculating stack assembly yield...")
     start_time = time.time()
     stack_assembly_yield, stack_assembly_yield_list = Assembly_Yield_Calculator(
         input_args=vars(args),
