@@ -40,10 +40,7 @@ def overall_yield_simulator(
                 print("Simulating die stack {}/{} ".format(stack_ind+1, NUM_STACKS), end='\r')
             pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
             cfg = cfg_dict[interface_name]
-<<<<<<< HEAD
-=======
             temp_overall_fail_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))  # This map is used to store the fail pads for this die stack for all mechanisms, which will be used for visualization. It is reset for each die stack.
->>>>>>> b317a1d (test)
 
             # Read the configuration parameters for this interface
             PAD_ARR_ROW, PAD_ARR_COL            = cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL
@@ -115,10 +112,7 @@ def overall_yield_simulator(
                 die_interface.pad_misalignment = die_interface.pad_misalignment.reshape(cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL)
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['overlay'] += (die_interface.pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um).astype(int) 
-<<<<<<< HEAD
-=======
                     temp_overall_fail_map |= (die_interface.pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um).astype(int)
->>>>>>> b317a1d (test)
 
                 critical_pad_misalignment = die_interface.pad_misalignment * die_critical_pad_bitmap
                 # Check if any critical pad misalignment is greater than the maximum allowed misalignment
@@ -214,15 +208,10 @@ def overall_yield_simulator(
                         check_redundant_pad_bitmap = die_redundant_pad_bitmap[PAD_ARR_ROW-j_max-1:PAD_ARR_ROW-j_min, i_min:i_max+1]
                         # Record the fail pads due to voids
                         if cfg.verbose:
-<<<<<<< HEAD
-                            epoch_fail_map_per_interface_dict[interface_name]['particle'][PAD_ARR_ROW-j_max-1:PAD_ARR_ROW-j_min, i_min:i_max+1][overlap_void_pad_mask] += 1
-
-=======
                             sub_fail_map_particle = epoch_fail_map_per_interface_dict[interface_name]['particle'][PAD_ARR_ROW-j_max-1:PAD_ARR_ROW-j_min, i_min:i_max+1]
                             sub_fail_map_particle[overlap_void_pad_mask] += 1
                             sub_fail_map_overall = temp_overall_fail_map[PAD_ARR_ROW-j_max-1:PAD_ARR_ROW-j_min, i_min:i_max+1]
                             sub_fail_map_overall[overlap_void_pad_mask] = 1
->>>>>>> b317a1d (test)
                         # Check if any void overlaps with the critical pads
                         overlap_critical = overlap_void_pad_mask & check_critical_pad_bitmap.astype(bool)
                         if np.any(overlap_critical):
@@ -283,10 +272,7 @@ def overall_yield_simulator(
 
             if cfg.verbose:
                 epoch_fail_map_per_interface_dict[interface_name]['mechanical'] += ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
-<<<<<<< HEAD
-=======
                 temp_overall_fail_map |= ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
->>>>>>> b317a1d (test)
 
             # Check critical pad Cu gap
             critical_pad_Cu_gap = Cu_gap_map * die_critical_pad_bitmap  # shape: (PAD_ARR_ROW, PAD_ARR_COL)
@@ -344,10 +330,7 @@ def overall_yield_simulator(
                 r_idx, c_idx = first_contact_pad_idx // PAD_ARR_COL, first_contact_pad_idx % PAD_ARR_COL
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['ESD'][r_idx, c_idx] += 1
-<<<<<<< HEAD
-=======
                     temp_overall_fail_map[r_idx, c_idx] = 1
->>>>>>> b317a1d (test)
                 if die_esd_critical_pad_bitmap[r_idx, c_idx] == 1:  # If the failing pad is critical w.r.t. ESD
                     die_interface.survival = False
                     die_stack.survival = False
@@ -366,11 +349,8 @@ def overall_yield_simulator(
                             epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
                         break
             
-<<<<<<< HEAD
-=======
             if cfg.verbose:
                 epoch_fail_map_per_interface_dict[interface_name]['overall'] += temp_overall_fail_map
->>>>>>> b317a1d (test)
         if die_stack.survival:
             pass_die_stack_count += 1
 
