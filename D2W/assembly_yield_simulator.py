@@ -47,7 +47,7 @@ def Assembly_Yield_Simulator(
 
     for epoch in range(num_sim_epoch):
         # Record the time for each epoch
-        start_time = time.time()
+        start_time = time.perf_counter()
         # Initialize the die list (Extract the base pad coordinates seperately for later use, so that a lot of memory can be saved)
         die_stack_list = die_stack_list_initialize(
             cfg_dict                    =       cfg_dict,
@@ -88,7 +88,7 @@ def Assembly_Yield_Simulator(
                         = epoch_fail_vec_per_interface_dict[interface_name][failure_mechanism]
 
         print(f"Simulation progress: {(epoch+1) * SIM_BATCH_SIZE} / {NUM_DIE_STACKS} die stacks simulated. \
-              Epoch yield: {np.mean(yield_list):.4f}. Time taken: {time.time() - start_time:.2f} seconds.", end='\r')
+              Epoch yield: {np.mean(yield_list):.4f}. Time taken: {time.perf_counter() - start_time:.2f} seconds.", end='\r')
 
         del die_stack_list
 
