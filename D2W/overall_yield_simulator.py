@@ -145,11 +145,7 @@ def overall_yield_simulator(
 
             # Delete the die.pad_misalignment to save memory
             del die_interface.pad_misalignment
-
-            # # If all the redundant pad replicas fail, then the die fails
-            # if any(redundant_bumpid_set.issubset(fail_bump_id_set) for net, redundant_bumpid_set in redundant_net_to_bumpids.items()):
-            #         die.survival = False
-            #         break
+            
             if not die_stack.survival and not cfg.verbose:
                 continue
 
