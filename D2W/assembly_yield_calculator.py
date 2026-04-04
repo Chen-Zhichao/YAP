@@ -10,7 +10,7 @@ from overlay_yield_calculator import stack_overlay_yield_calculator
 from defect_yield_calculator import stack_defect_yield_calculator
 from Cu_expansion_yield_calculator import stack_stress_yield_calculator
 from esd_yield_calculator import stack_esd_yield_calculator
-from utils.util import DieStack
+from wafer_die_stack_initialization import DieStack
 
 
 
