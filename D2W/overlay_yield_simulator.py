@@ -17,7 +17,7 @@ from scipy.stats import norm
 
 # Calculate the misalignment of the pad based on the systematic translation, rotation, and magnification
 def die_pad_misalignment(
-    die,
+    die_interface,
     base_pad_coords,
     system_translation_x_um,
     system_translation_y_um,
@@ -27,7 +27,7 @@ def die_pad_misalignment(
     RANDOM_MISALIGNMENT_STD_um,
     approximate_set,
 ):
-    die_pad_coords = base_pad_coords + die.die_center
+    die_pad_coords = base_pad_coords + die_interface.die_center
     pad_misalignment = np.zeros(len(die_pad_coords))
     dx = (system_translation_x_um - system_rotation_rad * die_pad_coords[:, 1] + system_magnification_ppm * die_pad_coords[:, 0])
     dy = (system_translation_y_um + system_rotation_rad * die_pad_coords[:, 0] + system_magnification_ppm * die_pad_coords[:, 1])

@@ -10,7 +10,7 @@ import time
 import os
 from overlay_yield_simulator import die_pad_misalignment
 from Cu_gap_simulator import Cu_gap_simulator
-from debond import debond_dishing_bounds_calculator
+from debond import debond_dishing_intervals_from_coords
 from esd_hybrid import esd_failure_simulator
 
 def overall_yield_simulator(
@@ -36,8 +36,8 @@ def overall_yield_simulator(
 
     for stack_ind, die_stack in enumerate(die_stack_list):
         for interface_ind, (interface_name, die_interface) in enumerate(die_stack.interfaces.interface_dict.items()):
-            if stack_ind % 10 == 0:
-                print("Simulating die stack {}/{} ".format(stack_ind+1, NUM_STACKS), end='\r')
+            # if stack_ind % 10 == 0:
+            #     print("Simulating die stack {}/{} ".format(stack_ind+1, NUM_STACKS), end='\r')
             pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
             cfg = cfg_dict[interface_name]
             temp_overall_fail_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))  # This map is used to store the fail pads for this die stack for all mechanisms, which will be used for visualization. It is reset for each die stack.
@@ -69,7 +69,7 @@ def overall_yield_simulator(
                 if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/'):
                     os.makedirs(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/')
                 # start_time = time.time()
-                valid_pad_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
+                valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
                 # print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
                 np.save(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "_dishing_bound_array.npy", valid_pad_dishing_bound_array)
             else:
@@ -97,7 +97,7 @@ def overall_yield_simulator(
             Check the overlay errors
             """
             # Check the pad misalignment
-            die_interface.pad_misalignment = die_pad_misalignment(die=die_interface, 
+            die_interface.pad_misalignment = die_pad_misalignment(die_interface=die_interface, 
                                                         base_pad_coords=base_pad_coords,
                                                         system_translation_x_um=system_translation_x_um,
                                                         system_translation_y_um=system_translation_y_um,
