@@ -1,550 +1,395 @@
-# Hybrid Bonding Yield Analysis Platform: Technical Documentation
+# YAP-stack Technical Documentation
+
+This document describes the current `yap-stack` repository state. The active
+D2W example in this branch is `design_6`. The D2W flow has been updated with the
+newer YAP+ style setup for arbitrary 3dblox interfaces, pad-level risk maps,
+criticality profiles, and per-interface simulation summaries. HBM and
+paper-specific D2W inputs/configs from `YAP_IO_Assign` are intentionally not part
+of this repo.
 
 ## Table of Contents
 
-1.  [**System Architecture and Simulation Flow**](#1-system-architecture-and-simulation-flow)
-    *   [Entry Points and Configuration Management](#entry-points-and-configuration-management)
-    *   [The Assembly Yield Simulation Loop](#the-assembly-yield-simulation-loop)
-    *   [Analytical Calculators vs. Monte Carlo Simulators](#analytical-calculators-vs-monte-carlo-simulators)
-    *   [Data Structures for Yield Aggregation](#data-structures-for-yield-aggregation)
+1. [Repository Scope](#1-repository-scope)
+2. [Entry Points](#2-entry-points)
+3. [Configuration Resolution](#3-configuration-resolution)
+4. [Input Files and Criticality](#4-input-files-and-criticality)
+5. [Pad Bitmap Collections](#5-pad-bitmap-collections)
+6. [D2W Pad Risk Map Flow](#6-d2w-pad-risk-map-flow)
+7. [D2W Monte Carlo Simulation Flow](#7-d2w-monte-carlo-simulation-flow)
+8. [Failure Mechanisms](#8-failure-mechanisms)
+9. [Output Files and Runtime Caches](#9-output-files-and-runtime-caches)
+10. [W2W Notes](#10-w2w-notes)
+11. [Maintainer Notes](#11-maintainer-notes)
 
-2.  [**Wafer, Die, and Pad Initialization**](#2-wafer-die-and-pad-initialization)
-    *   [Geometric Coordinate Systems (Wafer vs. Die frames)](#geometric-coordinate-systems)
-    *   [Pad Bitmap Generation and Downsampling](#pad-bitmap-generation-and-downsampling)
-    *   [Redundancy Allocation Logic (Clustering and Multi-to-One mapping)](#redundancy-allocation-logic)
-    *   [Boundary Conditions for Critical Areas](#boundary-conditions-for-critical-areas)
+## 1. Repository Scope
 
-3.  [**Overlay Yield Modeling**](#3-overlay-yield-modeling)
-    *   [Systematic vs. Random Misalignment Models](#systematic-vs-random-misalignment-models)
-    *   [Constraint Logic: Contact Area and Critical Distance](#constraint-logic-contact-area-and-critical-distance)
-    *   [D2W vs. W2W Alignment Mechanisms](#d2w-vs-w2w-alignment-mechanisms)
-    *   [Yield Calculation: Analytical Integration vs. Geometric Approximation](#yield-calculation-analytical-integration-vs-geometric-approximation)
+YAP-stack is a Python platform for hybrid-bonding yield modeling and simulation.
+It contains both D2W and W2W code paths:
 
-4.  [**Defect and Void Yield Modeling**](#4-defect-and-void-yield-modeling)
-    *   [Particle Size Distributions and Density Models ($D_0$)](#particle-size-distributions-and-density-models-d_0)
-    *   [Void Mechanics: Main Voids and Void Tails](#void-mechanics-main-voids-and-void-tails)
-    *   [Monte Carlo Critical Area Estimation](#monte-carlo-critical-area-estimation)
-    *   [Dilation-based Defect Interaction Logic](#dilation-based-defect-interaction-logic)
+- `D2W/`: current D2W simulation/modeling flow for 3dblox interfaces.
+- `W2W/`: wafer-to-wafer flow. Some W2W modules are older and should be updated
+  separately from D2W.
+- `D2W/configs/design_6/design_6.yaml`: active D2W skeleton config.
+- `D2W/input/design_6/`: active D2W 3dblox, bump-map, and criticality inputs.
+- `README.md`: command-oriented quick start.
+- `yap-doc.md`: this technical overview.
 
-5.  [**Copper Expansion and Surface Roughness**](#5-copper-expansion-and-surface-roughness)
-    *   [Thermal Expansion Mechanics ($\zeta_0$)](#thermal-expansion-mechanics-zeta_0)
-    *   [Surface Roughness and Contact Mechanics ($\zeta_1$)](#surface-roughness-and-contact-mechanics-zeta_1)
-    *   [Dishing Distribution Modeling](#dishing-distribution-modeling)
-    *   [Gap Closure Criteria](#gap-closure-criteria-and-yield)
+D2W and W2W share concepts, but their implementation details are not identical.
+Avoid copying D2W-only cleanup into W2W unless the W2W call sites have also been
+checked.
 
-6.  [**Yield Aggregation and Redundancy Logic**](#6-yield-aggregation-and-redundancy-logic)
-    *   [The "Scoreboard" Mechanism for Logical Pads](#the-scoreboard-mechanism-for-logical-pads)
-    *   [Hierarchical Failure Evaluation (Overlay → Defects → Cu Gap)](#hierarchical-failure-evaluation)
-    *   [Approximation Sets and Performance Optimization](#approximation-sets-and-performance-optimization)
-    *   [Output Metrics and Visualization](#output-metrics-and-visualization)
+## 2. Entry Points
 
----
+Run commands from the repository root.
 
-# 1. System Architecture and Simulation Flow
+### D2W
 
-The Hybrid Bonding Yield Analysis Platform (YAP) is a modular Python-based simulation environment designed to quantify yield losses in hybrid bonding processes. The system supports two distinct operational modes: Die-to-Wafer (D2W) and Wafer-to-Wafer (W2W). The architecture separates configuration management, geometry initialization, stochastic error generation, and yield aggregation into discrete modules.
+- `D2W/pad_risk_map_calculator.py`
+  - Current D2W modeling entry point.
+  - Produces per-pad ESD, overlay, particle, mechanical, and overall risk maps.
+  - `D2W/calculator_main.py` is a compatibility wrapper for this path.
 
-### Entry Points and Configuration Management
+- `D2W/simulator_main.py`
+  - Current D2W Monte Carlo assembly simulation entry point.
+  - Produces stack assembly yield, per-interface yield, optional failure vectors,
+    and optional failure heatmaps.
 
-The execution flow is initiated via Jupyter notebooks (`simulator_main.ipynb`, `calculator_main.ipynb`) or Python scripts (`simulator_main.py`) within the `D2W/` or `W2W/` directories. These scripts utilize `OmegaConf` to parse YAML configuration files (`configs/config.yaml`). The configuration object (`cfg`) is a global data structure passed sequentially to all sub-modules, containing physical parameters (dimensions, moduli), process parameters (temperatures, particle densities), and simulation settings (iteration counts, grid resolution).
+- `D2W/spatial_correlation_coefficients_main.py`
+  - Precomputes spatial correlation coefficients for D2W simulation workflows.
 
-The `load_modeling_config()` function in `utils/util.py` loads the configuration and computes derived parameters such as:
-*   `PAD_ARR_ROW`, `PAD_ARR_COL`: Number of pads in the array (derived from die dimensions and pitch)
-*   `PAD_BOT_R_um`, `PAD_TOP_R_um`: Pad radii (derived from pitch and ratio parameters)
-*   `pad_block_size`: Block size for bitmap operations (derived from `pad_block_dim` and pitch)
+### W2W
 
-The main scripts perform parameter sweeps (e.g., varying particle density $D_0$ or pitch) by iterating through defined ranges, updating the `cfg` object, and invoking the `Assembly_Yield_Simulator` for each configuration state. Results are aggregated into yield lists and serialized to `.npy` files for post-processing.
+- `W2W/calculator_main.py`
+  - W2W modeling/risk-map style entry point.
 
-### The Assembly Yield Simulation Loop
+- `W2W/simulator_main.py`
+  - W2W Monte Carlo simulation entry point.
 
-The core orchestration logic resides in `Assembly_Yield_Simulator` (in `assembly_yield_simulator.py`). This function encapsulates the Monte Carlo simulation lifecycle. For a given configuration, it performs the following steps:
+## 3. Configuration Resolution
 
-1.  **Static Parameter Calculation:** Computes physics-based constants that remain invariant across iterations, specifically the thermal expansion limit ($\zeta_0$) and the surface roughness effective contact parameter ($\zeta_1$) via `roughness_parameters()`.
-2.  **Batch Iteration:** Executes a loop defined by `cfg.simulation_times`.
-3.  **Initialization:** 
-    *   **W2W Mode:** Calls `wafer_initialize()` to instantiate `Wafer` objects containing lists of `Die` objects.
-    *   **D2W Mode:** Calls `die_initialize()` to instantiate a list of independent `Die` objects.
-4.  **Stochastic Injection:**
-    *   **Overlay:** Calls `overlay_term_simulator()` to generate global misalignment vectors (translation $X/Y$, rotation $\theta$, magnification $M$) and compute `MAX_ALLOWED_MISALIGNMENT`.
-    *   **Defects:** Calls `defect_yield_simulator()` to generate discrete particle coordinates and void radii based on density distributions. Voids are stored in `waf_list[i].voids` (W2W) or `die_list[i].voids` (D2W).
-5.  **Yield Evaluation:** Passes the initialized geometry and generated error vectors to `overall_yield_simulator()`, which determines survival based on geometric overlap and critical constraints.
+YAP uses `OmegaConf` YAML sections as skeleton configs. For the active design,
+the important sections are:
 
-### Analytical Calculators vs. Monte Carlo Simulators
+- `d2w_simulation`
+- `d2w_modeling`
+- `w2w_simulation`
+- `w2w_modeling`
 
-The codebase distinguishes between **Calculators** and **Simulators**.
+D2W loads `D2W/configs/design_6/design_6.yaml`, selects the requested section,
+then resolves interface-specific values through `D2W/utils/util.py`.
 
-*   **Simulators** (e.g., `overlay_yield_simulator.py`, `defect_yield_simulator.py`): These function within the Monte Carlo loop. They generate discrete random variables (e.g., a specific misalignment value drawn from a Gaussian distribution) and return coordinate sets or modify object state for specific dies/wafers.
-*   **Calculators** (e.g., `overlay_yield_calculator.py`, `defect_yield_calculator.py`, `Cu_expansion_yield_calculator.py`): These perform analytical integration or dense map generation. They use `scipy.integrate.quad` or statistical Cumulative Distribution Functions (CDFs) to compute expected yield probabilities ($Y_{ovl}$, $Y_{df}$, $Y_{Cu}$) and generate spatial yield heatmaps. These are typically invoked by `Assembly_Yield_Calculator` (in `calculator_main.ipynb`) or as a post-processing step in the simulator.
+### D2W 3dblox Mode
 
-### Data Structures for Yield Aggregation
+When the design input directory contains:
 
-Yield aggregation relies on specific object classes and dictionaries:
+- `generated_chiplet_definitions.3dbv`
+- `generated_stack_config.3dbx`
 
-*   **Pad Bitmap Collection:** A dictionary returned by `pad_bitmap_generate_random()` or `convert_3dblox_to_pad_bitmap()` containing:
-    *   `CRITICAL_PAD_BITMAP`, `REDUNDANT_PAD_BITMAP`, `DUMMY_PAD_BITMAP`: Dense boolean arrays of shape `(PAD_ARR_ROW, PAD_ARR_COL)`.
-    *   `CRITICAL_PAD_BLOCK_BITMAP`: Downsampled bitmap for efficient critical area computation.
-    *   `redundant_logical_to_physical_arr`: Lookup table of shape `(Num_Logical, Copies)` mapping logical signals to physical pad IDs.
-    *   `redundant_physical_to_logical_arr`: Array of length `Total_Pads` mapping physical pad IDs to logical signal IDs (or -1 for non-redundant pads).
-    *   `critical_pad_boundary_bitmap_row_col_block_ind`: Block indices of the four corner critical pads.
-*   **Die/Wafer Objects:** These objects maintain state during a simulation iteration.
-    *   `Die.pad_array_box`: Bounding box coordinates for critical area checks.
-    *   `Die.survival`: Boolean flag toggled to `False` upon constraint violation.
-    *   `Die.voids`: List of void coordinates and radii affecting this die.
-    *   `Wafer.die_list`: List of `Die` objects on the wafer (W2W mode).
-    *   `Wafer.voids`: List of void coordinates and radii on the wafer (W2W mode).
-*   **Yield Lists:** `single_config_yield_list` aggregates the yield rates across the Monte Carlo batch to produce a scalar yield percentage for the specific input parameter set.
+the D2W entry points call `get_config_dict()`. It walks each connection in the
+stack config and creates one resolved config per bonding interface.
 
-```mermaid
-graph TD
-    subgraph Configuration
-    A[config.yaml] --> B(simulator_main.py/.ipynb)
-    B --> C{Parameter Sweep Loop}
-    end
+For each interface, the loader resolves:
 
-    subgraph Assembly_Yield_Simulator
-    C -->|Update cfg| D[Calculate Static Params zeta_0, zeta_1]
-    D --> E[Monte Carlo Batch Loop]
-    
-    E --> F[Geometry Initialization]
-    F -->|Pad Coords & Bitmaps| G[Wafer/Die Objects]
-    
-    E --> H[Overlay Term Simulator]
-    H -->|Translation/Rot/Mag Vectors| I[Misalignment Data]
-    
-    E --> J[Defect Yield Simulator]
-    J -->|Particle coords & radii| K[Void Data]
-    end
+- `INTERFACE_TOP`, `INTERFACE_BOT`, `INTERFACE`
+- `DIE_W_um`, `DIE_L_um`
+- `PITCH_r_um`, `PITCH_c_um`
+- `PAD_TOP_R_um`, `PAD_BOT_R_um`
+- `PAD_ARR_ROW`, `PAD_ARR_COL`
+- `PAD_ARR_L_um`, `PAD_ARR_W_um`
+- `ITF_TOP_THICK_um`, `ITF_BOT_THICK_um`
+- derived terms such as `SYSTEM_MAGNIFICATION_*`, `eff_DIE_R`, `S_INIT_A_M`,
+  and `S_INIT_B_M`
 
-    subgraph Yield Aggregation
-    G & I & K --> L[Overall Yield Simulator]
-    L --> M{Constraint Checks}
-    M -->|Overlay Check| N[Die Survival Flag]
-    M -->|Void Overlap Check| N
-    M -->|Cu Gap Check| N
-    N --> O[Batch Yield Calculation]
-    end
+The resolved configs are written back into the design config folder with the
+interface name and output suffix, for example:
 
-    O -->|Return Yield| C
-    C --> P[Serialize .npy Results]
+```text
+D2W/configs/design_6/<interface>__design_6__default.yaml
 ```
 
-# 2. Wafer, Die, and Pad Initialization
+### Legacy Single-Interface Mode
 
-This section details the construction of the geometric environment used for yield simulation. The system models the physical layout of pads, their aggregation into dies, and the placement of dies upon a wafer (in W2W mode). This initialization phase is deterministic for a given seed and configuration set.
+If the 3dblox wrapper files are absent, D2W can still run a single-interface
+flow through `get_single_interface_config_dict()`. In that mode the YAML must
+define `INTERFACE`, and the corresponding `<INTERFACE>.bmap` file must exist in
+the input directory.
 
-### Geometric Coordinate Systems
+### No Hidden D2W Runtime Defaults
 
-The platform utilizes a local-to-global coordinate transformation approach.
+D2W no longer uses `apply_d2w_runtime_defaults()` or `_set_default_if_missing()`.
+Required model knobs should be explicit in `design_6.yaml`. In particular, the
+active D2W config now explicitly contains:
 
-*   **Pad Array Generation:** Pad coordinates are generated relative to a die center $(0,0)$. The functions `die_initialize()` (D2W) or `wafer_initialize()` (W2W) construct a grid based on `PAD_ARR_ROW`, `PAD_ARR_COL`, and `PITCH_um`.
-    *   $x_{coord} = -\frac{PAD\_ARR\_W\_um}{2} + col \times PITCH\_um$
-    *   $y_{coord} = \frac{PAD\_ARR\_L\_um}{2} - row \times PITCH\_um$
-*   **Die Objects (`Die` class):** Stores the geometric state of a single die.
-    *   `vertices_coords`: Four corners of the die boundary.
-    *   `pad_array_box`: Bounding box of the pad array (typically smaller than the die boundary).
-    *   `ovl_critical_pad_boundary_coords`: Specific coordinates of the outermost critical pads, used for efficient "worst-case" overlay calculation without iterating through every pad.
-*   **Wafer Objects (`Wafer` class):** Used in W2W mode. It procedurally populates a circular area defined by `WAF_R_um` with `Die` objects based on computed `die_center` positions.
-*   **Transformation:** Global coordinates for any specific pad are computed dynamically during simulation by broadcasting the die center coordinate to the local pad array: $\vec{P}_{global} = \vec{P}_{base} + \vec{C}_{die}$.
+- `WARPAGE_LIMIT_UM`
+- `D1`
+- `EDGE_REGION_WIDTH_um`
+- `CU_RECESS_PAD_FAIL_RATIO`
+- `CU_RECESS_DIE_LEVEL_THRESHOLD_PADS`
+- `V_MIN_V`, `V_MAX_V`
+- `WEIBULL_K`, `WEIBULL_LAMBDA`
+- `CUTOFF_MIN_A`
+- `ESD_PAD_MAP_SUB_FACTOR`
+- `verbose`
+- `ITF_TOP_THICK_um`, `ITF_BOT_THICK_um`
 
-### Pad Bitmap Generation and Downsampling
+This makes the YAML the source of truth. If a paper experiment needs different
+values, edit the config rather than adding fallback defaults in code.
 
-To manage the complexity of millions of pads, the system uses bitmap masks generated by `pad_bitmap_generate_random()` or loaded via `convert_3dblox_to_pad_bitmap()`.
+## 4. Input Files and Criticality
 
-*   **Bitmaps:** Three primary boolean arrays of shape `(PAD_ARR_ROW, PAD_ARR_COL)` identify pad types:
-    1.  `CRITICAL_PAD_BITMAP`: Pads essential for device function.
-    2.  `REDUNDANT_PAD_BITMAP`: Pads allocated for signal and power redundancy.
-    3.  `DUMMY_PAD_BITMAP`: Mechanical support pads (yield neutral).
-*   **Block-Level Abstraction:** To optimize spatial assignment, the pad array is divided into blocks of size `pad_block_size` (derived from `pad_block_dim / PITCH_um`). Pad spatial assignment patterns (Peripheral, Center, Sparse) are calculated at the block level using `assign_pad_blocks()`, then projected to the full pixel bitmap.
-*   **Downsampling:** For rapid critical area integration in defect simulations, `downsample_bitmap()` creates coarse-grained versions of the maps using max-pooling (OR-pooling) logic.
+### Bump Map
 
-### Redundancy Allocation Logic
+The current `.bmap` format is:
 
-The system implements complex logic to map **Logical Pads** (signals) to **Physical Pads** (bumps). This logic handles the "Scoreboard" mechanism used later in yield calculation.
-
-*   **Cluster-Based Allocation:** If `redundant_logical_pad_dist` allows, main pads and their copies are placed within the same block or adjacent clusters.
-*   **KD-Tree Allocation:** If the required distance between a signal and its redundant copy exceeds block dimensions, the system builds a `scipy.spatial.KDTree` of pad block coordinates. It queries this tree to find block pairs separated by at least `redundant_logical_pad_dist`.
-*   **Mapping Arrays:**
-    *   `redundant_logical_to_physical_arr`: A lookup table of shape `(Num_Logical, Copies)`. Row $i$ contains the physical IDs of all bumps associated with logical signal $i$.
-    *   `redundant_physical_to_logical_arr`: An array of length `Total_Pads`. Index $j$ returns the logical signal ID for physical pad $j$ (or -1 if not a redundant pad).
-*   **Multi-to-One Architecture:** When `multi2one_flag` is True, the allocator assigns multiple main pads to share a single copy pad block, adjusting the mapping arrays to reflect shared redundancy resources.
-
-### Boundary Conditions for Critical Areas
-
-The initialization calculates specific boundary indices to optimize overlay simulation.
-*   `critical_pad_boundary_bitmap_row_col_block_ind`: Stores the block indices of the four corners (Top-Left, Top-Right, Bottom-Left, Bottom-Right) of the critical pad region.
-*   This pre-calculation allows the overlay simulator to check only the corner pads of the critical region (the "approximate set") to determine die failure, assuming rigid body transformation implies worst-case error at the perimeter.
-
-```mermaid
-graph TD
-    subgraph Configuration
-    A[Config: Pitch, Array Size, Ratios] --> B[Pad Bitmap Generator]
-    end
-
-    subgraph Bitmap Generation
-    B --> C{Layout Mode}
-    C -->|Center/Peripheral| D[Block Assigner]
-    C -->|Sparse| E[KD-Tree Distancer]
-    D & E --> F[Bitmaps: Critical, Redundant, Dummy]
-    F --> G[Logical-Physical Mapping Tables]
-    end
-
-    subgraph Geometry Construction
-    A --> H[Base Pad Grid Generation]
-    H --> I[Die Initialization]
-    I -->|W2W Mode| J[Wafer Population Loop]
-    I -->|D2W Mode| K[Die List Instance]
-    J --> L[List of Die Objects]
-    
-    F -->|Masks| I
-    G -->|Lookups| I
-    end
-
-    subgraph Object State
-    L --> M[Die Object]
-    M --> N[Local Pad Coords]
-    M --> O[Pad Array Bounding Box]
-    M --> P[Critical Boundary Indices]
-    end
+```text
+<instance> <bump_type> <x> <y> <port> <net>
 ```
 
-# 3. Overlay Yield Modeling
+Coordinates are in microns. `convert_3dblox_to_pad_bitmap()` sorts bump entries
+from top-left to bottom-right into a run-specific temp copy before generating
+pad bitmaps.
 
-The Overlay Yield Modeling module quantifies the probability of electrical failure caused by the misalignment of top and bottom copper pads. This module operates through two distinct computational paths: an analytical calculator for generating probability maps (`overlay_yield_calculator.py`) and a stochastic simulator (`overlay_yield_simulator.py`) for the Monte Carlo assembly loop.
+### 3dblox Files
 
-### Systematic vs. Random Misalignment Models
+- `.3dbv`: chiplet definitions, design areas, and chiplet thickness.
+- `.3dbx`: stack connectivity.
+- `.3dbf`: per-chiplet bump type and pitch metadata.
 
-The total misalignment vector $\vec{\Delta}_{total}$ for a specific pad at coordinates $(x, y)$ is modeled as the superposition of systematic rigid-body errors and random placement noise.
+The loader supports `Chiplet_Grid.pitch` or explicit
+`Chiplet_Grid.pitch_r`/`Chiplet_Grid.pitch_c`.
 
-1.  **Systematic Components:** The simulator models translation ($T_x, T_y$), rotation ($\theta$), and magnification ($M$). The displacement $(\delta x, \delta y)$ is calculated using a linearized transformation matrix, valid for small angles and magnification factors:
-    $$ \delta x = T_x - \theta \cdot y + M \cdot x $$
-    $$ \delta y = T_y + \theta \cdot x + M \cdot y $$
-    *   **Translation ($T_x, T_y$):** Sampled from Gaussian distributions defined by `SYSTEM_TRANSLATION_{X/Y}_{MEAN/STD}_um`.
-    *   **Rotation ($\theta$):** Sampled from `SYSTEM_ROTATION_{MEAN/STD}_rad`.
-    *   **Magnification ($M$):** Derived from wafer bow differences. The configuration defines a magnification coefficient $k_{mag}$ and an offset $M_0$.
-        $$ M = k_{mag} \cdot \Delta_{bow} + M_0$$
+### Criticality Files
 
-2.  **Random Component:** A Gaussian noise vector $\mathcal{N}(\mu_{rand}, \sigma_{rand})$ is added to the magnitude of the systematic error vector, defined by `RANDOM_MISALIGNMENT_{MEAN/STD}_um`.
+The current generated D2W criticality format is:
 
-### Constraint Logic: Contact Area and Critical Distance
-
-The system dynamically calculates a `MAX_ALLOWED_MISALIGNMENT` threshold based on geometric constraints. This threshold is the tighter (minimum) of two physical limits:
-
-1.  **Contact Area Constraint ($C_{area}$):** Ensures sufficient overlap for electrical connectivity. The code calculates the intersection area $A(d)$ of two circles (radii $R_{top}, R_{bot}$) separated by distance $d$. Using `scipy.optimize.fsolve`, it solves for $d$ such that:
-    $$ \frac{A(d)}{\pi R_{top}^2} = C_{area} $$
-    where $C_{area}$ is the `CONTACT_AREA_CONSTRAINT` (e.g., 0.5).
-
-2.  **Critical Distance Constraint ($C_{dist}$):** Prevents short circuits between adjacent pads. It calculates the maximum shift allowed before the spacing between a top pad and a neighbor's bottom pad violates the breakdown margin:
-    $$ d_{max, CD} = (1 - C_{dist}) \cdot P - R_{top} + (C_{dist} - 0.5) \cdot 2 R_{bot} $$
-    where $P$ is the pitch and $C_{dist}$ is `CRITICAL_DIST_CONSTRAINT`.
-
-### D2W vs. W2W Alignment Mechanisms
-
-*   **W2W (Wafer-to-Wafer):** Systematic errors are global. Rotation and magnification effects scale with the distance from the wafer center. A single set of $(T_x, T_y, \theta, M)$ parameters is generated per wafer (indexed by `waf_ind`), affecting all dies simultaneously.
-*   **D2W (Die-to-Wafer):** Systematic errors are local placement events. Each die receives independent draws of $(T_x, T_y, \theta, M)$ indexed by `die_ind`. Magnification effects are calculated relative to the die center rather than the wafer center.
-
-### Yield Calculation: Analytical Integration vs. Geometric Approximation
-
-The module calculates yield metrics using two methods:
-
-1.  **Analytical Integration (`overlay_yield_calculator`):**
-    Used for generating heatmaps and expected yields. For a given pad at $(x,y)$, it computes the systematic offset magnitude $|\vec{\delta}_{sys}|$. The yield probability is computed by integrating the random error PDF over the allowable margin:
-    $$ P_{success} = \Phi\left(\frac{L_{max} - |\vec{\delta}_{sys}| - \mu_{rand}}{\sigma_{rand}}\right) - \Phi\left(\frac{-L_{max} - |\vec{\delta}_{sys}| - \mu_{rand}}{\sigma_{rand}}\right) $$
-    where $\Phi$ is the standard normal CDF (`scipy.stats.norm.cdf`) and $L_{max}$ is `MAX_ALLOWED_MISALIGNMENT`.
-
-2.  **Monte Carlo Boolean Check (`overall_yield_simulator`):**
-    Used in the main simulation loop. It computes the actual misalignment for critical boundary pads (corners) or all pads depending on `approximate_set`. If any critical pad's total misalignment exceeds `MAX_ALLOWED_MISALIGNMENT`, the die `survival` flag is set to `False`. When `approximate_set != 1`, the check is restricted to the boundary pads of the critical pad array, as rigid-body transformations maximize displacement at the periphery. When `approximate_set == 1`, all pads are checked.
-
-```mermaid
-graph TD
-    subgraph Constraints
-    A[Pad Radii R_top, R_bot] --> C{Solve Limits}
-    B[Pitch, Area %, Dist %] --> C
-    C -->|fsolve| D[Limit_ContactArea]
-    C -->|Algebraic| E[Limit_CriticalDist]
-    D & E -->|Min| F[MAX_ALLOWED_MISALIGNMENT]
-    end
-
-    subgraph Error Generation
-    G[Config Distributions] --> H[Sample Systematic Terms T, Theta, M]
-    I[Pad Coordinates x,y] --> J[Linear Transform]
-    H --> J
-    J --> K[Systematic Vector d_sys]
-    K --> L[Add Random Noise N_rand]
-    L --> M[Total Misalignment d_total]
-    end
-
-    subgraph Evaluation
-    F --> N{Comparison}
-    M --> N
-    N -->|d_total > Max| O[Pad Fail]
-    N -->|d_total <= Max| P[Pad Pass]
-    
-    O --> Q{Pad Type?}
-    Q -->|Critical| R[Die Fail]
-    Q -->|Redundant| S[Decrement Scoreboard]
-    end
+```text
+<net> <group_size> <tolerated_esd_failures> <tolerated_mechanical_failures>
 ```
 
-# 4. Defect and Void Yield Modeling
+Use `D2W/utils/generate_criticality.py` to generate these files. Supported
+profiles are:
 
-The Defect and Void Yield Modeling module quantifies yield loss resulting from particulate contamination that prevents bonding, creating "voids" in the interface. This module bridges particle physics (distributions) with geometric analysis (critical area) through both analytical integration and discrete Monte Carlo placement.
+- `default`: replicated nets tolerate `group_size - 1` ESD failures and
+  `group_size - 1` mechanical failures.
+- `esd_strict`: redundant signal nets tolerate `0` ESD failures and
+  `group_size - 1` mechanical failures.
 
-### Particle Size Distributions and Density Models ($D_0$)
+The loader resolves profile filenames through `resolve_criticality_path()`:
 
-The system operates on the premise that particles of varying thickness $t$ cause voids of varying radii. Particle generation is driven by a power-law probability density function (PDF).
+- `*_criticality.txt`
+- `*_criticality_esd_strict.txt`
 
-*   **Inverse Transform Sampling:** In `defect_yield_simulator.py`, particle thicknesses are generated using inverse CDF sampling derived from the power law:
-    $$ t = \frac{t_0}{(1 - u)^{\frac{1}{z-1}}} $$
-    Where:
-    *   $u$: A uniform random variable $[0, 1)$.
-    *   $t_0$: Minimum particle thickness (`cfg.t_0`).
-    *   $z$: Power-law index (`cfg.z`).
-*   **Spatial Distribution:**
-    *   **W2W:** Particles are distributed via uniform disk sampling ($\theta \in [0, 2\pi]$, $r = R \sqrt{U}$) over the wafer radius `WAF_R_um`.
-    *   **D2W:** Particles are distributed uniformly over the die area plus a drop margin.
-*   **Total Count:** The total number of particles is derived from the defect density parameter $D_0$ (defects/$\mu m^2$) multiplied by the total area (Wafer area or Total Die area).
+## 5. Pad Bitmap Collections
 
-### Void Mechanics: Main Voids and Void Tails
+`convert_3dblox_to_pad_bitmap()` converts each interface `.bmap` plus its
+criticality file into a bitmap collection saved as:
 
-The platform models two distinct morphological components of a defect, governed by empirical transfer functions:
-
-1.  **Main Voids:** The primary circular delamination caused by the particle. The radius $r_{mv}$ scales with particle thickness and radial position on the wafer (simulating CMP non-uniformity):
-    $$ r_{mv} = (k_r \cdot r_{dist} + k_{r0}) \cdot \sqrt{t} $$
-    Where $r_{dist}$ is the distance from the wafer center (W2W) or die center (D2W).
-
-2.  **Void Tails:** Linear streaks of micro-voids trailing the main void, often caused by slurry residue or wiper effects.
-    *   **Tail Generation:** Defined by length $L$, area $S$, and count $n$, all scaling with the suare root of the particle thickness $\sqrt{t}$ and the distance from the wafer center $r_{dist}$ via coefficients $k_L, k_S, k_n$.
-    *   **Discretization:** The tail is rasterized as a linear array of $n$ sub-voids extending from the main particle coordinates, with radii that increase along the tail.
-
-### Monte Carlo Critical Area Estimation
-
-To calculate the average number of fatal defects ($\lambda$) for analytical yield estimation ($Y = e^{-\lambda}$), the system employs a rigorous morphological approach in `pad_bitmap_generation.py` and `defect_yield_calculator.py`.
-
-*   **Defect Kernels:** The system constructs binary kernels representing the defect shapes (circles for main voids, lines for tails) using `build_struture()`.
-*   **Morphological Dilation:** The Critical Area ($A_{cr}$) is computed by dilating the `CRITICAL_PAD_BLOCK_BITMAP` with the defect kernel using `cv2.dilate()`.
-    $$ A_{cr}(r) = \sum \text{Dilate}(\text{Bitmap}_{pads}, \text{Kernel}_{defect}(r)) \times \text{PixelArea} $$
-*   **Integration:** For void tails, which have orientation dependence, the system integrates the critical area across rotation angles $\theta$ via `A_critical_l_across_theta()`.
-*   **Yield Calculation:** The final defect yield is computed by integrating the product of the defect size PDF and the Critical Area function:
-    $$ \lambda = \int_{t_{min}}^{\infty} f_{size}(x) \cdot A_{cr}(x) \, dx $$
-    $f_{size}(x)$ is the probability density function of the defect with a specific size.
-
-### Dilation-based Defect Interaction Logic
-
-In the runtime `overall_yield_simulator.py`, the interaction between discrete voids and pads is resolved using geometric checks ("Hit Tests"):
-
-1.  **Broad Phase:** A bounding box check (`closest_x`, `closest_y`) filters voids that are too far from the die to matter.
-2.  **Narrow Phase:** For voids overlapping the pad array box, the simulator calculates the squared Euclidean distance to every relevant pad center.
-3.  **Failure Logic:**
-    *   Overlap with **Critical Pad**: Triggers immediate `die.survival = False`.
-    *   Overlap with **Redundant Pad**: Marks specific pads in `redundant_pad_fail_map` and decrements the redundancy scoreboard.
-
-```mermaid
-graph TD
-    subgraph Particle Generation
-    A[Config: D0, t0, z] --> B{Inverse CDF Sampling}
-    B --> C[Particle Thickness t]
-    D[Wafer Geometry] --> E[Spatial coords x,y]
-    C & E --> F[Particle List]
-    end
-
-    subgraph Void Transformation
-    F --> G[Main Void Radius Calc]
-    G -->|r_mv = f r_dist, t| H[Main Void Circle]
-    F --> I[Void Tail Calc]
-    I -->|L, n, S| J[Void Tail Line/Sub-voids]
-    end
-
-    subgraph Yield Evaluation Paths
-    H & J --> K{Method?}
-    
-    K -->|Analytical Calculator| L[Morphological Dilation]
-    L --> M[Convolve Bitmap w/ Defect Kernel]
-    M --> N[Calculate Critical Area A_cr]
-    N --> O[Integrate PDF * A_cr]
-    
-    K -->|MC Simulator| P[Geometric Hit Test]
-    P --> Q{Overlap Type}
-    Q -->|Critical| R[Die Failure]
-    Q -->|Redundant| S[Decrement Redundancy]
-    S --> T[Check Survival Ratio]
-    end
+```text
+output/<design>/<interface>/<interface>_bitmap_collection.npy
 ```
 
-# 5. Copper Expansion and Surface Roughness
+Important fields include:
 
-This module models the vertical dimension of the hybrid bonding process, specifically the interaction between Copper (Cu) pad dishing/protrusion, thermal expansion during annealing, and dielectric surface roughness. The yield is determined by whether the Cu gap closes sufficiently to form an electrical connection without inducing excessive stress that causes dielectric delamination.
+- `CRITICAL_PAD_BITMAP`
+- `REDUNDANT_PAD_BITMAP`
+- `DUMMY_PAD_BITMAP`
+- `ESD_CRITICAL_PAD_BITMAP`
+- `pad_coords`
+- `mapping_physical_to_bumpid`
+- `redundant_net_to_bumpids`
+- `redundant_net_to_1d_physical_mask`
+- `criticality_info`
+- `redundant_group_id_per_pad`
+- `redundant_tolerated_esd_failures`
+- `redundant_tolerated_mechanical_failures`
 
-### Thermal Expansion Mechanics ($\zeta_0$)
+`ESD_CRITICAL_PAD_BITMAP` is separate from mechanical/overlay criticality. For
+redundant nets, ESD criticality depends on the selected criticality profile.
 
-The parameter $\zeta_0$ represents the total potential vertical expansion of the copper pads during the annealing phase. It is treated as a deterministic limit derived from the Coefficient of Thermal Expansion (CTE) and process temperatures.
+The D2W flow also collapses identical interfaces when possible, so repeated
+interfaces can reuse bitmap, risk-map, and simulation artifacts instead of
+recomputing them.
 
-In `Assembly_Yield_Simulator`, $\zeta_0$ is calculated as:
-$$ \zeta_0 = k_{et} \times (T_{anl} - T_{R}) + k_{eb} \times (T_{anl} - T_{R}) $$
-Where:
-*   $k_{et}, k_{eb}$: Expansion coefficients for top and bottom pads (nm/K).
-*   $T_{anl}$: Annealing temperature (`cfg.T_anl`).
-*   $T_{R}$: Room temperature (`cfg.T_R`).
+## 6. D2W Pad Risk Map Flow
 
-This value establishes the physical upper bound for the gap size that can be bridged by thermal expansion.
+`D2W/pad_risk_map_calculator.py` performs the analytical/modeling path:
 
-### Surface Roughness and Contact Mechanics ($\zeta_1$)
+1. Load and resolve per-interface configs.
+2. Resolve the selected criticality profile.
+3. Generate or reuse bitmap collections.
+4. Collapse risk-equivalent interfaces when possible.
+5. Call `Pad_Yield_Map_Generator()`.
+6. Write text risk maps and PNG mechanism maps.
 
-The parameter $\zeta_1$ defines the "safe" limit for pad dishing to prevent delamination. It is calculated in `roughness_parameters.py` using a contact mechanics model (a variation of the Greenwood-Williamson model) to account for surface asperities.
+`Pad_Yield_Map_Generator()` computes pad-level yield maps:
 
-1.  **Dimensionless Roughness Parameter ($\theta$):**
-    $$ \theta = \frac{E'}{w} \sqrt{\frac{\sigma^3}{R}} $$
-    Where $E'$ is the effective Young's modulus (renormalized by 0.5), $w$ is adhesion energy, $\sigma$ is roughness RMS (renormalized by $\sqrt{2}$), and $R$ is asperity radius.
+- Overlay: `overlay_yield_calculator.pad_overlay_yield_map_generator()`
+- Particle/void: `defect_yield_calculator.pad_defect_yield_map_generator()`
+- Mechanical/Cu recess: `Cu_expansion_yield_calculator.pad_Cu_expansion_yield_map_generator()`
+- ESD: `esd_yield_calculator.pad_esd_yield_map_generator()`
 
-2.  **Effective Contact Area ($A^*$):**
-    The module solves for a dimensionless separation parameter $s^*$ using `scipy.optimize.root_scalar` where $P^*(s^*) = 0$, then computes the normalized effective contact area $A^*$ by numerical integration of probability functions `integrand_A` and `integrand_P`.
+Large ESD maps may be subsampled. The config field
+`ESD_PAD_MAP_SUB_FACTOR` controls this:
 
-3.  **Max Acceptable Stress:**
-    The maximum stress before delamination is derived from fracture mechanics:
-    $$ \sigma_{max} = A^* \times \sqrt{\frac{2 E' w}{t_{dielectric}}} $$
+- `0` or unset: choose a factor automatically from active pad count.
+- `1`: evaluate all active pads.
+- `>1`: evaluate an endpoint-preserving sampled grid and upsample the map.
 
-4.  **Gap Limit ($\zeta_1$):**
-    The stress constraint is converted into a geometric dishing limit, accounting for pattern density $D_{cu}$ and a peeling coefficient $k_{peel}$:
-    $$ \zeta_1 = \left(DISH\_0 - \frac{\sigma_{max}}{k_{peel} \cdot D_{cu}}\right) \times 2 $$
-    The result is scaled to nanometers and doubled to account for the sum of top and bottom pads. The final value is clamped to be non-negative.
+## 7. D2W Monte Carlo Simulation Flow
 
-### Dishing Distribution Modeling
+`D2W/simulator_main.py` performs the stochastic assembly simulation:
 
-The actual gap between a pair of pads is modeled as a random variable derived from the dishing (recess) depth of the top and bottom wafers.
+1. Load and resolve per-interface configs.
+2. Build or reuse bitmap collections.
+3. Initialize die-stack samples through `die_stack_list_initialize()`.
+4. Draw overlay samples with `overlay_term_simulator()`.
+5. Draw particle/void samples with `defect_yield_simulator()`.
+6. Evaluate survival with `overall_yield_simulator()`.
+7. Aggregate stack yield and per-interface yield.
+8. Optionally write verbose failure vectors and failure maps.
 
-*   **Distributions:** Top and bottom dishing are modeled as independent Gaussian distributions:
-    *   $d_{top} \sim \mathcal{N}(\mu_{top}, \sigma_{top})$
-    *   $d_{bot} \sim \mathcal{N}(\mu_{bot}, \sigma_{bot})$
-*   **Total Gap:** The total gap $g = d_{top} + d_{bot}$ is therefore Gaussian:
-    $$ g \sim \mathcal{N}(\mu_{top} + \mu_{bot}, \sqrt{\sigma_{top}^2 + \sigma_{bot}^2}) $$
+The simulation is batched by:
 
-### Gap Closure Criteria and Yield
+- `NUM_DIE_STACKS`
+- `SIM_BATCH_SIZE`
 
-The `Cu_expansion_yield_calculator()` determines the probability that the total gap falls within the allowable process window.
+Verbose mode tracks the failure mechanism vectors for:
 
-1.  **Integration Limits:**
-    The source code defines the integration bounds for the validity of the bond as:
-    *   **Lower Limit:** $-\zeta_0$
-    *   **Upper Limit:** $-\zeta_1$
-    *   *Note on Coordinate System:* The integration of the gap PDF over $[-\zeta_0, -\zeta_1]$ implies a coordinate convention where positive physical expansion corresponds to negative gap values in the statistical frame, or that the input dishing means are expected to be negative (protrusion) for valid bonding.
+- `overlay`
+- `particle`
+- `mechanical`
+- `ESD`
+- `overall`
 
-2.  **Single Pad Probability ($P_{pad}$):**
-    $$ P_{pad} = \int_{-\zeta_0}^{-\zeta_1} \text{PDF}_g(x) \, dx $$
-    Calculated using `scipy.integrate.quad`.
+Failure heatmaps are only written when `--save-failure-maps` is also enabled.
 
-3.  **Die Yield Aggregation:**
-    The final copper yield depends on the survival of critical pads and the redundancy logic:
-    $$ Y_{Cu} = (P_{pad})^{N_{critical}} \times \left(1 - (1 - P_{pad})^{k_{copy}}\right)^{N_{redundant\_logical}} $$
-    Where $k_{copy}$ is the number of copies per logical redundant pad (`redundant_logical_pad_copy`).
+## 8. Failure Mechanisms
 
-```mermaid
-graph TD
-    subgraph Inputs
-    A[Process Temps T_anl, T_R]
-    B[Roughness Params sigma, R, E, w]
-    C[Dish Statistics mean, std]
-    end
+### Overlay
 
-    subgraph Physical Limits
-    A --> D[Calc Thermal Expansion zeta_0]
-    B --> E[Contact Mechanics Model]
-    E -->|Solve s_star| F[Effective Area A_star]
-    F --> G[Calc Max Stress]
-    G --> H[Calc Dishing Limit zeta_1]
-    end
+Overlay uses sampled translation, rotation, magnification, and random
+misalignment terms. The maximum allowed misalignment is computed from the tighter
+of:
 
-    subgraph Statistical Analysis
-    C --> I[Combined Gap Distribution]
-    I -->|mean_sum, std_comb| J[Gaussian PDF]
-    D & H --> K[Integration Bounds]
-    K -->|Lower: -zeta_0, Upper: -zeta_1| L[Integrate PDF]
-    L --> M[Single Pad Pass Prob]
-    end
+- contact area constraint
+- critical distance constraint
 
-    subgraph Yield
-    M --> N[Power Law: Critical Pads]
-    M --> O[Binomial: Redundant Pads]
-    N & O --> P[Total Cu Yield]
-    end
+The D2W simulator can check all pads or an approximation set controlled by
+`approximate_set`.
+
+### Particle and Void
+
+D2W particle density uses `D0` and optional edge-enhanced density through:
+
+- `D1`
+- `EDGE_REGION_WIDTH_um`
+
+If `D1 <= D0`, the edge enhancement is effectively disabled. Current
+`design_6.yaml` keeps `D1` equal to `D0` unless a stronger edge particle model is
+desired.
+
+Particle thickness follows the configured power-law model using `t_0` and `z`.
+Generated particles are transformed into main voids and tails, then checked
+against critical/redundant pad geometry.
+
+### Mechanical / Cu Recess / Debond
+
+Mechanical yield is based on Cu dishing/recess distributions and debond limits:
+
+- `TOP_DISH_MEAN_nm`, `TOP_DISH_STD_nm`
+- `BOT_DISH_MEAN_nm`, `BOT_DISH_STD_nm`
+- effective layer parameters from `debond.py`
+- chiplet/interface thickness from `.3dbv` through `ITF_TOP_THICK_um` and
+  `ITF_BOT_THICK_um`
+
+`debond_dishing_intervals_from_coords()` computes valid dishing intervals for
+active pads and caches them under the runtime temp folder. For very large pad
+arrays, `CU_RECESS_DIE_LEVEL_THRESHOLD_PADS` allows a die-level approximation.
+
+D2W also samples initial chiplet warpage and fails the interface if it exceeds
+`WARPAGE_LIMIT_UM`.
+
+### ESD
+
+D2W ESD is no longer driven by `D2W/esd_hybrid.py`.
+
+Current D2W ESD modules are:
+
+- `D2W/esd_yield_simulator.py`
+  - Used by `D2W/overall_yield_simulator.py` in the Monte Carlo simulation path.
+  - Selects a first-touch pad with sampled tilt, dishing, charging voltage, and
+    arcing distance.
+  - Applies the Weibull failure model using YAML fields:
+    `V_MIN_V`, `V_MAX_V`, `WEIBULL_K`, `WEIBULL_LAMBDA`, and `CUTOFF_MIN_A`.
+
+- `D2W/esd_yield_calculator.py`
+  - Used by `D2W/assembly_yield_calculator.py` in the pad risk-map path.
+  - Computes analytical ESD yield maps using quadrature, candidate-pad pruning,
+    and optional pad-map subsampling.
+
+`D2W/esd_hybrid.py` is a legacy/demo implementation and is not imported by the
+current D2W flow. If it exists locally, treat it as removable legacy code. Do not
+remove `W2W/esd_hybrid.py` without updating W2W call sites.
+
+## 9. Output Files and Runtime Caches
+
+Main D2W output root:
+
+```text
+output/<design>/
 ```
 
-# 6. Yield Aggregation and Redundancy Logic
+Per-interface output root:
 
-The final stage of the simulation pipeline integrates the disparate failure modes (Overlay, Defects, and Copper Gap) to determine the binary survival status of each die. This logic resides primarily in `overall_yield_simulator.py` and is characterized by a hierarchical failure evaluation and a specific "Scoreboard" mechanism for handling signal redundancy.
-
-### The "Scoreboard" Mechanism for Logical Pads
-
-To accurately model redundancy, the system differentiates between **Physical Pads** (the actual copper structures on the wafer) and **Logical Pads** (the distinct electrical signals they carry). A logical pad may map to $N$ physical pads (copies).
-
-The aggregation logic uses a scorekeeping data structure to track signal integrity:
-1.  **Initialization:** A `redundant_logical_scoreboard` array is created, with length equal to the number of logical redundant signals. Each element is initialized to `redundant_logical_pad_copy` (the integer number of physical replicas per signal).
-2.  **Mapping:** The system uses `redundant_physical_to_logical_arr`, a lookup array where index $i$ corresponds to the physical pad ID and the value represents the logical signal ID (or -1 for non-redundant pads like power/ground).
-3.  **Decrement Logic:** When a physical redundant pad fails (due to overlay misalignment > limit or void overlap), the system looks up its logical ID and decrements the corresponding index in the scoreboard using `np.bincount()`.
-4.  **Failure Condition:** A logical signal is considered failed only if its score reaches 0 (all physical copies have failed).
-
-### Hierarchical Failure Evaluation
-
-The simulator evaluates constraints in a specific order to optimize performance (fail-fast logic). A die is marked as failed (`die.survival = False`) immediately upon violating a critical constraint.
-
-1.  **Overlay Evaluation:**
-    *   **Critical Pads:** Evaluated first. If any critical pad's misalignment exceeds `MAX_ALLOWED_MISALIGNMENT`, the die fails.
-    *   **Redundant Pads:** Evaluated second. Failures do not immediately kill the die but are recorded in the `redundant_pad_fail_map` and the scoreboard.
-
-2.  **Defect (Void) Evaluation:**
-    *   **Critical Pads:** The simulator checks for geometric overlap between voids and critical pads. Any overlap triggers immediate die failure.
-    *   **Redundant Pads:** Overlaps are recorded in the `redundant_pad_fail_map` and the scoreboard is updated.
-
-3.  **Aggregation Checks:**
-    After processing individual pads, the die survival is re-evaluated against two aggregate thresholds:
-    *   **Scoreboard Zero Check:** If `np.any(redundant_logical_scoreboard == 0)`, the die fails (integrity of at least one logical signal is lost).
-    *   **Survival Ratio Check:** If the total count of failed physical redundant pads exceeds a specific ratio (`1 - redundant_survival_ratio`), the die fails.
-
-4.  **Copper (Cu) Expansion:**
-    Cu expansion yield is calculated analytically using the probability integral (see [Section 5](#5-copper-expansion-and-surface-roughness)) via `Cu_expansion_yield_calculator()` and applied as a multiplicative factor to the geometric yield derived from steps 1-3. It is assumed to be statistically independent of the specific geometric placement of overlay/defect errors. In simulation, the Cu expansion yield is "calculated" rather than "simulated" for efficiency.
-
-### Approximation Sets and Performance Optimization
-
-To handle high-volume Monte Carlo simulations, the overlay logic employs an **Approximation Set** (controlled by `approximate_set` config parameter):
-
-*   **Logic:** Rigid body transformations (rotation/magnification) result in monotonically increasing displacement vectors from the center of rotation. Therefore, the maximum misalignment within a die or a critical block always occurs at the convex hull vertices.
-*   **Implementation:** When `approximate_set != 1`, instead of calculating misalignment for every pad in the `CRITICAL_PAD_BITMAP`, the simulator only computes coordinates for the `ovl_critical_pad_boundary_coords` (the 4 corners of the critical pad bounding box). When `approximate_set == 1`, all pads are evaluated.
-*   **Validity:** If the corner pads satisfy the alignment constraints, it is mathematically guaranteed that all interior pads also satisfy the constraints. This reduces computational complexity from $O(N_{pads})$ to $O(1)$ per die for the critical check.
-
-### Output Metrics and Visualization
-
-*   **Survival Die Count:** The primary metric is the count of dies where `die.survival == True`.
-*   **Yield List:** The `Assembly_Yield_Simulator` returns a list of yield percentages, one for each Monte Carlo batch iteration.
-*   **Wafer Visualization:** The `Wafer.draw_wafer_die()` method can visualize the wafer with dies colored by survival status (black for survived, red for failed, green for survived with void occurrence).
-*   **Pad Yield Maps:** The `Die` objects can retain internal state (`pad_yield_map` dictionaries) for spatial failure distributions when `pad_yield_flag` is enabled.
-
-```mermaid
-graph TD
-    subgraph Die Evaluation Loop
-    A[Start Die Check] --> B{Approximate Set?}
-    B -->|approximate_set != 1| C[Check 4 Corner Critical Pads]
-    B -->|approximate_set == 1| D[Check All Critical Pads]
-    
-    C & D --> E{Misalignment > Max?}
-    E -->|Yes| F[Mark Die Failed]
-    E -->|No| G[Check Redundant Overlay]
-    
-    G --> H[Update Scoreboard & Fail Map]
-    H --> I[Check Critical Defect Overlap]
-    
-    I -->|Overlap Found| F
-    I -->|No Overlap| J[Check Redundant Defect Overlap]
-    
-    J --> K[Update Scoreboard & Fail Map]
-    
-    K --> L{Check Aggregates}
-    L -->|Any Score == 0| F
-    L -->|Fail Count > Ratio| F
-    L -->|Pass| M[Mark Die Survived]
-    end
-
-    subgraph Final Calculation
-    M --> N[Count Survived Dies]
-    N --> O[Calculate Geometric Yield]
-    O --> P[Multiply by Cu Expansion Prob]
-    P --> Q[Final Assembly Yield]
-    end
+```text
+output/<design>/<interface>/
 ```
+
+Common output files:
+
+- `<interface>_risk__<config_stem>__<criticality_profile>.map`
+- `<interface>_<mechanism>_risk_map__<config_stem>__<criticality_profile>.png`
+- `assembly_yield_summary__<config_stem>__<criticality_profile>.txt`
+- `assembly_yield_per_interface__<config_stem>__<criticality_profile>.txt`
+- `assembly_fail_vec_per_interface_dict__<config_stem>__<criticality_profile>.npz`
+- `assembly_fail_map_per_interface_dict__<config_stem>__<criticality_profile>.npz`
+- `simulation_failure_map_<mechanism>__<config_stem>__<criticality_profile>.png`
+
+Runtime temp files are isolated under:
+
+```text
+output/<design>/temp/
+```
+
+The run tag includes design name, config stem, criticality profile, and a hash.
+This keeps sorted bump-map copies and dishing-bound caches from colliding across
+different runs. Entry points call `cleanup_runtime_temp_files()` for files
+associated with the current run.
+
+## 10. W2W Notes
+
+W2W has its own flow and should not be assumed to match D2W one-for-one.
+
+Current W2W notes:
+
+- `W2W/utils/util.py` now extracts `ITF_TOP_THICK_um` and `ITF_BOT_THICK_um`
+  from `.3dbv` when resolving `design_6`.
+- `W2W/configs/design_6/design_6.yaml` includes the matching thickness fields in
+  both simulation and modeling sections.
+- `W2W/overall_yield_simulator.py` still imports `W2W/esd_hybrid.py`.
+- `W2W/esd_hybrid.py` is still required unless W2W is migrated to the newer D2W
+  ESD split.
+
+## 11. Maintainer Notes
+
+When updating D2W:
+
+- Keep new model knobs explicit in `D2W/configs/design_6/design_6.yaml`.
+- Do not reintroduce hidden D2W runtime default functions.
+- Update both `d2w_simulation` and `d2w_modeling` sections when adding shared
+  model parameters.
+- Update README commands and this document when adding or replacing entry points.
+- Check imports before deleting legacy modules. `D2W/esd_hybrid.py` is not used;
+  `W2W/esd_hybrid.py` is still used.
+- Treat generated configs, runtime temp files, and output artifacts as
+  regenerable unless a specific experiment requires preserving them.
