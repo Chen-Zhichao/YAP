@@ -4,3 +4,4 @@ omegaconf==2.3.0
 opencv_python==4.11.0.86
 scipy==1.16.3
 sympy==1.12
+scikit-learn==1.8.0

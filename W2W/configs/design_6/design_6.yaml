@@ -26,7 +26,9 @@ w2w_simulation:
   pad_yield_map_sub_factor: 1          # Subsampling factor for pad yield map (1: no subsampling, 10: rows/10 and cols/10)
                                         # The pad yield map will be of size (ceil(PAD_ARR_ROW/sub_factor), ceil(PAD_ARR_COL/sub_factor))
   PAD_ARRANGE_PATTERN: "rectangular"        # Pad arrangement pattern: "checkerboard" (HBM)
-  
+  ITF_TOP_THICK_um: None                      # Top interface die thickness (um)
+  ITF_BOT_THICK_um: None                      # Bottom interface die thickness (um)
+
   # === Wafer Warpage Peeling Stress Mdodel ===
   # === Bottom Wafer Settings ===
   B_Chip_Cu_V: 0.40                     # Efficient chip layer Cu volume density
@@ -50,7 +52,6 @@ w2w_simulation:
   S_INIT_B_M: 0.0e-6                    # Pre-anneal warpages (m)
 
 
- 
 
   CONTACT_AREA_CONSTRAINT: 0.75         # Minimum allowed contact area ratio
   CRITICAL_DIST_CONSTRAINT: 0.75        # Minimum distance constraint for critical pads
@@ -91,7 +92,7 @@ w2w_simulation:
   T_R: 25                               # Room temperature (°C)
   T_anl: 300                            # Annealing temperature (°C)
   CU_E_GPA: 91.8                        # Cu Young’s modulus (GPa)
-  CU_NU: 0.34                           # Cu Poisson’s ratio 
+  CU_NU: 0.34                           # Cu Poisson’s ratio
   CU_ALPHA_PPM: 17.6                    # Cu coefficient of thermal expansion (CTE) (ppm/°C)
   OX_E_GPA: 73.0                        # Sio2 Young’s modulus (GPa)
   OX_NU: 0.17                           # Sio2 Poisson’s ratio
@@ -145,7 +146,6 @@ w2w_simulation:
 
   # === Miscellaneous Parameters ===
   plot_flag: True                      # Enable plotting of results
- 
 
 
 #### Modeling parameters for Wafer-to-Wafer (W2W) hybrid bonding simulation.
@@ -173,6 +173,8 @@ w2w_modeling:
   pad_yield_flag: False
   pad_yield_map_sub_factor: 1          # Subsampling factor for pad yield map (1: no subsampling, 10: rows/10 and cols/10)
   PAD_ARRANGE_PATTERN: "rectangular"        # Pad arrangement pattern: "checkerboard" (HBM)
+  ITF_TOP_THICK_um: None                      # Top interface die thickness (um)
+  ITF_BOT_THICK_um: None                      # Bottom interface die thickness (um)
 
   # === Wafer Warpage Peeling Stress Mdodel ===
   # === Bottom Wafer Settings ===
@@ -243,7 +245,7 @@ w2w_modeling:
   T_R: 25                               # Room temperature (°C)
   T_anl: 300                            # Annealing temperature (°C)
   CU_E_GPA: 91.8                        # Cu Young’s modulus (GPa)
-  CU_NU: 0.34                           # Cu Poisson’s ratio 
+  CU_NU: 0.34                           # Cu Poisson’s ratio
   CU_ALPHA_PPM: 17.6                    # Cu coefficient of thermal expansion (CTE) (ppm/°C)
   OX_E_GPA: 73.0                        # Sio2 Young’s modulus (GPa)
   OX_NU: 0.17                           # Sio2 Poisson’s ratio
@@ -264,7 +266,7 @@ w2w_modeling:
   EXP_INVPHI: 0.1                       # Eq.(36)
   EXP_AREA: 0.0465                         # Eq.(36)
   KN_DEN_M: 17.310513e-6                         # Eq.(31) denominator length in meters
-  
+
   # === Roughness Parameters ===
   Asperity_R_m: 2e-6                      # Asperity curvature radius (m)
   Roughness_sigma_m: 0.5e-9               # Roughness standard deviation (m)
@@ -293,4 +295,4 @@ w2w_modeling:
 
   # === Miscellaneous Parameters ===
   plot_flag: True                      # Enable plotting of results
- 
+

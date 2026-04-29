@@ -6,7 +6,7 @@
 
 '''
 Cu expansion yield calculator for D2W hybrid bonding:
-This module contains functions to calculate die-level and pad-level Cu expansion-induced yield 
+This module contains functions to calculate die-level and pad-level Cu expansion-induced yield
 based on Cu dish distribution and pad layout.
 '''
 
@@ -16,14 +16,14 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.stats import norm
 import matplotlib.pyplot as plt
-from debond import debond_dishing_bounds_calculator
+from debond import debond_dishing_intervals_from_coords
 
 
 
 
 def pad_Cu_expansion_yield_map_generator(*,
                                   cfg,
-                                  die,
+                                  interface,
                                   TOP_DISH_MEAN_nm: float,
                                   TOP_DISH_STD_nm: float,
                                   BOT_DISH_MEAN_nm: float,
@@ -33,103 +33,51 @@ def pad_Cu_expansion_yield_map_generator(*,
     glb_cu_expansion_pad_yield_min = 1.0  # Initialize to a high value
     glb_cu_expansion_pad_yield_max = 0.0  # Initialize to a low value
     valid_pad_mask = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
-    valid_die_pad_coords = die.pad_coords[valid_pad_mask.flatten() == 1]
-    
-    # if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/' + cfg.DESIGN + "_dishing_bound_array.npy") or cfg.DEBUG:
+    valid_die_pad_coords = interface.pad_coords[valid_pad_mask.flatten() == 1]
+
+    # if not os.path.exists(cfg.OUTPUT_DIR + cfg.INTERFACE + '/' + cfg.INTERFACE + "_dishing_bound_array.npy") or cfg.DEBUG:
     #     start_time = time.time()
     #     valid_pad_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
     #     print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
-    #     np.save(cfg.OUTPUT_DIR + cfg.DESIGN + '/' + cfg.DESIGN + "_dishing_bound_array.npy", valid_pad_dishing_bound_array)
+    #     np.save(cfg.OUTPUT_DIR + cfg.INTERFACE + '/' + cfg.INTERFACE + "_dishing_bound_array.npy", valid_pad_dishing_bound_array)
     # else:
-    #     print("Loading dishing bound array from file {}".format(cfg.OUTPUT_DIR + cfg.DESIGN + '/' + cfg.DESIGN + "_dishing_bound_array.npy"))
-    #     valid_pad_dishing_bound_array = np.load(cfg.OUTPUT_DIR + cfg.DESIGN + '/' + cfg.DESIGN + "_dishing_bound_array.npy")
+    #     print("Loading dishing bound array from file {}".format(cfg.OUTPUT_DIR + cfg.INTERFACE + '/' + cfg.INTERFACE + "_dishing_bound_array.npy"))
+    #     valid_pad_dishing_bound_array = np.load(cfg.OUTPUT_DIR + cfg.INTERFACE + '/' + cfg.INTERFACE + "_dishing_bound_array.npy")
 
-    start_time = time.time()
-    valid_pad_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
-    print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
+    # start_time = time.perf_counter()
+    valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
+    # print(
+    #     "Dishing bound calculation time for {} pads: {:.2f} seconds".format(
+    #         valid_die_pad_coords.shape[0],
+    #         time.perf_counter() - start_time,
+    #     )
+    # )
 
-    upper_limits_valid_pads = - valid_pad_dishing_bound_array[:, 0] * 2 # - upper Cu height limits
-    lower_limits_valid_pads = - valid_pad_dishing_bound_array[:, 1] * 2 # - lower Cu height limits
-    print("Max upper limit (nm): {:.2f}, Min upper limit (nm): {:.2f}".format(np.max(upper_limits_valid_pads), np.min(upper_limits_valid_pads)))
-    print("Max lower limit (nm): {:.2f}, Min lower limit (nm): {:.2f}".format(np.max(lower_limits_valid_pads), np.min(lower_limits_valid_pads)))
-    pos_valid_pads = norm.cdf(upper_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
-                     norm.cdf(lower_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
+    upper_cu_height_limits_valid_pads = - valid_pad_dishing_bound_array[:, 0] * 2 # - upper Cu height limits
+    lower_cu_height_limits_valid_pads = - valid_pad_dishing_bound_array[:, 1] * 2 # - lower Cu height limits
+    upper_cu_height_limits_valid_pads = np.clip(upper_cu_height_limits_valid_pads, a_max=0, a_min=None)  # Clip to ensure upper Cu height limits are <= 0
+    # print("Max upper Cu height (nm): {:.2f}, Min upper Cu height (nm): {:.2f}".format(np.max(upper_cu_height_limits_valid_pads), np.min(upper_cu_height_limits_valid_pads)))
+    # print("Max lower Cu height (nm): {:.2f}, Min lower Cu height (nm): {:.2f}".format(np.max(lower_cu_height_limits_valid_pads), np.min(lower_cu_height_limits_valid_pads)))
+    pos_valid_pads = norm.cdf(upper_cu_height_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
+                     norm.cdf(lower_cu_height_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
     pad_yield_map = np.full((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), np.nan)
     pad_yield_map[valid_pad_mask == 1] = pos_valid_pads
 
-    # # Draw dishing lower bound as heatmap (use mask to hide non-pad areas)
-    # valid_dishing_bound_array_no_nan = valid_pad_dishing_bound_array.copy()
-    # lower_bound_min = np.nanmin(valid_dishing_bound_array_no_nan[:, 0])
-    # lower_bound_max = np.nanmax(valid_dishing_bound_array_no_nan[:, 0])
-    # upper_bound_min = np.nanmin(valid_dishing_bound_array_no_nan[:, 1])
-    # upper_bound_max = np.nanmax(valid_dishing_bound_array_no_nan[:, 1])
-    
-    # print("Dishing Lower Bound Min (nm):", lower_bound_min)
-    # print("Dishing Lower Bound Max (nm):", lower_bound_max)
-    # print("Dishing Upper Bound Min (nm):", upper_bound_min)
-    # print("Dishing Upper Bound Max (nm):", upper_bound_max)
-    # # Draw dishing lower bound as histogram (use mask to hide non-pad areas)
-    # plt.figure(figsize=(10, 6))
-    # plt.hist(
-    #     valid_dishing_bound_array_no_nan[:, 0].flatten(),
-    #     bins=50,
-    #     color='blue',
-    #     alpha=0.7
-    #     )
-    # plt.xlabel('Dishing Lower Bound (nm)')
-    # plt.ylabel('Frequency')
-    # plt.title('Histogram of Dishing Lower Bound')
-    # plt.show()
-    # # Draw dishing upper bound as histogram (use mask to hide non-pad areas)
-    # plt.figure(figsize=(10, 6))
-    # plt.hist(
-    #     valid_dishing_bound_array_no_nan[:, 1].flatten(),
-    #     bins=50,
-    #     color='green',
-    #     alpha=0.7
-    #     )
-    # plt.xlabel('Dishing Upper Bound (nm)')
-    # plt.ylabel('Frequency')
-    # plt.title('Histogram of Dishing Upper Bound')
-    # plt.show()
-
-
     glb_cu_expansion_pad_yield_min = min(glb_cu_expansion_pad_yield_min, np.nanmin(pad_yield_map))
     glb_cu_expansion_pad_yield_max = max(glb_cu_expansion_pad_yield_max, np.nanmax(pad_yield_map))
-    die.glb_pad_yield_min_max_dict['Y_ce'] = (glb_cu_expansion_pad_yield_min, glb_cu_expansion_pad_yield_max)
-    print("Cu Expansion Pad Yield Min: {:.6f}".format(glb_cu_expansion_pad_yield_min))
-    print("Cu Expansion Pad Yield Max: {:.6f}".format(glb_cu_expansion_pad_yield_max))
+    interface.glb_pad_yield_min_max_dict['Y_ce'] = (glb_cu_expansion_pad_yield_min, glb_cu_expansion_pad_yield_max)
+    # print("Cu Expansion Pad Yield Min: {:.6f}".format(glb_cu_expansion_pad_yield_min))
+    # print("Cu Expansion Pad Yield Max: {:.6f}".format(glb_cu_expansion_pad_yield_max))
 
 
     if cfg.plot_flag:
-        # # Draw pad yield v.s. pad distance to the die center
-        # pad_distances_um = np.linalg.norm(die.pad_coords, axis=1)  # (num_pads,)
-        # plt.figure(figsize=(10, 6))
-        # plt.scatter(
-        #     pad_distances_um[valid_pad_mask.flatten() == 1],
-        #     pad_yield_map[valid_pad_mask == 1],
-        #     c='blue',
-        #     s=8,
-        #     alpha=0.6,
-        #     )
-        # np.savez(cfg.OUTPUT_DIR + cfg.DESIGN + '/' + cfg.DESIGN + "_cu_expansion_yield_vs_distance_300warp_0d5dish.npz",
-        #          pad_distances_um=pad_distances_um[valid_pad_mask.flatten() == 1],
-        #             pad_yields=pad_yield_map[valid_pad_mask == 1],
-        #             )
-        # plt.xlabel('Pad Distance to Die Center (um)')
-        # plt.ylabel('Pad Cu Expansion Yield')
-        # plt.title('Pad Cu Expansion Yield vs. Pad Distance to Die Center')
-        # plt.grid(True)
-        # plt.show()
-    
-
         # Draw the pad yield map
-        plt.figure(figsize=(13.5, 6), dpi=300)
+        plt.figure(figsize=(8, 6))
         plt.imshow(
             pad_yield_map,
-            cmap='viridis', 
-            vmin=die.glb_pad_yield_min_max_dict['Y_ce'][0],
-            vmax=die.glb_pad_yield_min_max_dict['Y_ce'][1],
+            cmap='viridis',
+            vmin=interface.glb_pad_yield_min_max_dict['Y_ce'][0],
+            vmax=interface.glb_pad_yield_min_max_dict['Y_ce'][1],
             interpolation='nearest',
             )
         cb = plt.colorbar(label='Pad Cu Expansion Yield')
@@ -143,42 +91,3 @@ def pad_Cu_expansion_yield_map_generator(*,
 
 
     return pad_yield_map
-
-
-
-def stack_stress_yield_calculator(
-        cfg_dict: dict,
-        die_stack,
-        pad_bitmap_collection_dict: dict,
-        valid_pad_mask_dict: dict,
-):
-    for interface_name, cfg in cfg_dict.items():
-        interface = die_stack.interfaces.interface_dict[interface_name]
-        pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
-        valid_pad_mask = valid_pad_mask_dict[interface_name]
-
-        # Extract the necessary parameters for Cu expansion yield calculation
-        TOP_DISH_MEAN_nm, TOP_DISH_STD_nm = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_nm
-        BOT_DISH_MEAN_nm, BOT_DISH_STD_nm = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_nm
-        CRITICAL_PAD_MASK = pad_bitmap_collection['CRITICAL_PAD_BITMAP'].flatten()
-        redundant_net_to_1d_physical_mask = pad_bitmap_collection['redundant_net_to_1d_physical_mask']
-
-        die_pad_coords = interface.pad_coords
-        valid_die_pad_coords = die_pad_coords[valid_pad_mask.flatten() == 1]
-        start_time = time.time()
-        valid_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
-        print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
-        upper_limits_valid_pads = - valid_dishing_bound_array[:, 0] * 2 # - upper limits of the sum of top and bottom Cu heights
-        lower_limits_valid_pads = - valid_dishing_bound_array[:, 1] * 2 # - lower limits of the sum of top and bottom Cu heights
-        pos_valid_pads = norm.cdf(upper_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
-                norm.cdf(lower_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
-        # Critical yield is the pos of the critical pads multiplied together
-        stress_yield_critical_pads = np.prod(pos_valid_pads[CRITICAL_PAD_MASK == 1])
-        stress_yield_redundant_nets = 1.0
-        for redundant_net, physical_pad_indices in redundant_net_to_1d_physical_mask.items():
-            num_replicas = len(physical_pad_indices)
-            stress_yield_redundant_nets *= 1 - (1 - np.prod(pos_valid_pads[physical_pad_indices])) ** num_replicas
-        stress_yield = stress_yield_critical_pads * stress_yield_redundant_nets
-            
-        # Update the die yield list for this interface in the wafer stack
-        die_stack.die_yield_list_per_interface_dict[interface_name] = stress_yield

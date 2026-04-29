@@ -202,6 +202,10 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
                             values=[float(top_3dbf.Chiplet_Grid.pitch), 
                                     float(top_3dbf.Chiplet_Grid.pitch)])
         
+        # Read die thickness
+        add_config_items(cfg, keys=['ITF_TOP_THICK_um', 'ITF_BOT_THICK_um'],
+                            values=[float(_3dbv.ChipletDef[cfg.INTERFACE_TOP].thickness),
+                                    float(_3dbv.ChipletDef[cfg.INTERFACE_BOT].thickness)])
 
         ## Extract design parameters from .bmap file
         update_config_from_bmap(cfg, _bmap_path, 

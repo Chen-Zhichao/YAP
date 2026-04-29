@@ -1,150 +1,283 @@
 # YAP-stack
-- YAP-stack is a Python-based yield modeling and simulation tool for advanced packaging that supports yield analysis of arbitrary I/O pad layouts. Currently, the model is specifically designed for wafer-to-wafer (W2W) and die-to-wafer (D2W) hybrid bonding.
-- A [GUI of YAP](http://nanocad.ee.ucla.edu:8081/yap_gui/) and the [user guide video](https://youtu.be/8hiKIQ6C7ng) is available.
+
+YAP-stack is a Python-based yield modeling and simulation tool for advanced packaging. It supports arbitrary I/O pad layouts and currently focuses on wafer-to-wafer (W2W) and die-to-wafer (D2W) hybrid bonding.
+
+A [GUI of YAP](http://nanocad.ee.ucla.edu:8081/yap_gui/) and the [user guide video](https://youtu.be/8hiKIQ6C7ng) are available.
+
+The active D2W example in this branch is `design_6`. The D2W code has been updated with the newer YAP+ simulation/modeling flow, but the HBM and paper-specific configs/inputs are not included in this repo.
+
 # File Structure
+
 ```
 .
-├── D2W/      # Code for D2W hybrid bonding
-├── W2W/      # Code for W2W hybrid bonding
+├── D2W/                         # Code and examples for D2W hybrid bonding
+│   ├── configs/design_6/         # Current D2W design_6 configuration
+│   ├── input/design_6/           # Current D2W design_6 3dblox/bmap/criticality inputs
+│   ├── pad_risk_map_calculator.py
+│   ├── simulator_main.py
+│   ├── spatial_correlation_coefficients_main.py
+│   └── utils/                    # Bump-map, criticality, plotting, and packaging helpers
+├── W2W/                         # Code and examples for W2W hybrid bonding
 ├── LICENSE
 ├── README.md
-└── requirements.txt    # Requirements of Python packages
+└── requirements.txt
 ```
 
 # Installation
-1. Clone the repository
+
+1. Clone the repository.
+
 ```
 git clone -b yap-stack https://github.com/Chen-Zhichao/YAP.git
 cd ./YAP
 ```
 
-2. (Optional) Create and activate a virtual environment:
+2. Optional: create and activate a virtual environment.
+
 ```
 conda create -n yap_env python=3.12
 conda activate yap_env
 ```
 
-3. Install dependencies:
+3. Install dependencies.
+
 ```
 pip install -r requirements.txt
 ```
 
 # Usage
-- Generate criticality file from bump map
-  ```
-  python utils/generate_criticality.py input/design_0/bmap_files/CPU_From_interposer.bmap
-  ```
 
+Run commands from the repository root unless noted otherwise.
 
-- Run the simulator and model for W2W hybrid bonding.
-  ```
-  cd W2W
-  ```
+## Generate Criticality Files
 
-  Example command to run the pad risk map calculator for W2W hybrid bonding
+Generate criticality files from an explicit bump map:
 
-  ```
-  python calculator_main.py --config configs/design_6/design_6.yaml --mode w2w_modeling --ds_name design_6 --ds_dir input/design_6 --verbose
-  ```
+```
+python D2W/utils/generate_criticality.py \
+  --file D2W/input/design_6/Memory_DRAM_3_From_Memory_DRAM_2.bmap \
+  --profiles both \
+  --force
+```
 
-  Example command to run the simulator main for W2W hybrid bonding
+Supported D2W criticality profiles:
 
-  ```
-  python simulator_main.py --config configs/design_6/design_6.yaml --mode w2w_simulation --ds_name design_6 --ds_dir input/design_6 --verbose
-  ```
+- `default`: replicated redundant nets tolerate `R-1` ESD failures and `R-1` mechanical failures.
+- `esd_strict`: replicated redundant nets tolerate `0` ESD failures and `R-1` mechanical failures.
+- `both`: generate both profile files.
 
-- Run the simulator and model for D2W hybrid bonding.
-  ```
-  cd D2W
-  ```
+## D2W Pad Risk Maps
 
-  Example command to run the pad risk map calculator for D2W hybrid bonding
+`pad_risk_map_calculator.py` is the current D2W modeling entrypoint. `calculator_main.py` remains as a compatibility wrapper for older commands.
 
-  ```
-  python calculator_main.py --config configs/design_6/design_6.yaml --mode d2w_modeling --ds_name design_6 --ds_dir input/design_6 --verbose
-  ```
+Generate pad-level risk maps for `design_6`:
 
-  Example command to run the simulator main for D2W hybrid bonding
+```
+python D2W/pad_risk_map_calculator.py \
+  --config D2W/configs/design_6/design_6.yaml \
+  --mode d2w_modeling \
+  --ds_name design_6 \
+  --ds_dir D2W/input/design_6 \
+  --criticality-profile default \
+  --verbose
+```
 
-  ```
-  python simulator_main.py --config configs/design_6/design_6.yaml --mode d2w_simulation --ds_name design_6 --ds_dir input/design_6 --verbose
-  ```
+Equivalent legacy-compatible command:
+
+```
+python D2W/calculator_main.py \
+  --config D2W/configs/design_6/design_6.yaml \
+  --mode d2w_modeling \
+  --ds_name design_6 \
+  --ds_dir D2W/input/design_6 \
+  --criticality-profile default \
+  --verbose
+```
+
+Notes for analytical ESD maps:
+
+- Large pad arrays are automatically subsampled for ESD map generation and interpolated back to the full pad map.
+- Candidate-pad pruning evaluates only pads near the deterministic first-touch edge when safe.
+- Override the ESD grid factor with `ESD_PAD_MAP_SUB_FACTOR` in the YAML.
+- If `ESD_PAD_MAP_SUB_FACTOR` is unset or `0`, the code chooses a factor from the active pad count.
+- `--plot` enables extra interactive mechanism plots; PNG risk maps are written by default.
+
+## D2W Yield Simulation
+
+Run the D2W simulator for `design_6`:
+
+```
+python D2W/simulator_main.py \
+  --config D2W/configs/design_6/design_6.yaml \
+  --mode d2w_simulation \
+  --ds_name design_6 \
+  --ds_dir D2W/input/design_6 \
+  --criticality-profile default \
+  --verbose
+```
+
+Save verbose simulation failure-map artifacts:
+
+```
+python D2W/simulator_main.py \
+  --config D2W/configs/design_6/design_6.yaml \
+  --mode d2w_simulation \
+  --ds_name design_6 \
+  --ds_dir D2W/input/design_6 \
+  --criticality-profile default \
+  --verbose \
+  --save-failure-maps
+```
+
+The simulator now writes an assembly summary and per-interface yield file. Runtime temp files are isolated by design name, config, and criticality profile.
+
+## D2W Spatial Correlation
+
+Precalculate spatial correlation coefficients for a smaller number of stack samples:
+
+```
+python D2W/spatial_correlation_coefficients_main.py \
+  --config D2W/configs/design_6/design_6.yaml \
+  --mode d2w_simulation \
+  --ds_name design_6 \
+  --ds_dir D2W/input/design_6 \
+  --num-stack-samples 100 \
+  --sim-batch-size 10 \
+  --criticality-profile default
+```
+
+## W2W Flow
+
+Example W2W pad risk map calculation:
+
+```
+python W2W/calculator_main.py \
+  --config W2W/configs/design_6/design_6.yaml \
+  --mode w2w_modeling \
+  --ds_name design_6 \
+  --ds_dir W2W/input/design_6 \
+  --verbose
+```
+
+Example W2W simulation:
+
+```
+python W2W/simulator_main.py \
+  --config W2W/configs/design_6/design_6.yaml \
+  --mode w2w_simulation \
+  --ds_name design_6 \
+  --ds_dir W2W/input/design_6 \
+  --verbose
+```
 
 # File Formats
-**1. Bump Map (.bmap):**
 
-   Format: `<instance> <bump_type> <x> <y> <port> <net>`
+**1. Bump Map (`.bmap`)**
 
-   Example: `Bump_0 uBUMP 115 1610 txdatasb txdatasb`
+Format:
 
-**2. Risk Map (.map):**
+```
+<instance> <bump_type> <x> <y> <port> <net>
+```
 
-   Format: `<x> <y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>`
+Example:
 
-   Example: `115 1610 0.15 0.05 0.03 0.20`
+```
+Bump_0 uBUMP 115 1610 txdatasb txdatasb
+```
 
-   Note: Probabilities are float values between 0 and 1
+**2. Risk Map (`.map`)**
 
-   NOTE: ESD criticality is multiplied by esd_failure_probability.
-         Mechanical criticality is multiplied by overlay_failure_probability, 
-         particle_failure_probability, and mechanical_failure_probability.
-         All four failure modes are considered in the optimization objective.
+Format:
 
-**3. Criticality (.txt):**
+```
+<x> <y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>
+```
 
-   Current Format: `<net1> [net2] [net3] ... <group_size> <tolerated_esd_failures> <tolerated_mechanical_failures>`
-   
-   Where:
-   - `group_size`: Total number of pads/bumps in the redundancy group
-   - `tolerated_esd_failures`: Number of ESD failures the group can tolerate before failing
-   - `tolerated_mechanical_failures`: Number of mechanical failures the group can tolerate before failing
+Example:
 
-   Criticality values are calculated when reading the file:
-   - esd_criticality = (group_size - tolerated_esd_failures) / group_size
-   - mechanical_criticality = (group_size - tolerated_mechanical_failures) / group_size
-   
-   Examples:
+```
+115 1610 0.15 0.05 0.03 0.20
+```
 
-   Single net with 5 pads, tolerates 4 ESD failures and 4 mechanical failures:
-     `vccfwdio 5 4 4`
-     (Results in esd_criticality = 0.2, mechanical_criticality = 0.2)
-   
-   Redundancy group with 4 pads, tolerates 1 ESD failure and 1 mechanical failure:
-     `rxckRD rxckn rxckp rxtrk 4 1 1`
-     (Results in esd_criticality = 0.75, mechanical_criticality = 0.75)
-   
-   Redundancy group with 34 pads, tolerates 2 ESD failures and 2 mechanical failures:
-     `rxdata0 rxdata1 rxdata2 ... rxdata31 34 2 2`
-     (Results in esd_criticality = 0.941, mechanical_criticality = 0.941)
-   
-   Legacy format (deprecated but still supported):
-     `<net> <esd_criticality> <mechanical_criticality>`
-     Example: `txdatasb 0.8 0.7`
-   
-   Note: 
-   - Criticality values range from 0 (non-critical) to 1 (critical)
-   - Values between 0 and 1 indicate redundancy where multiple failures can be tolerated
-   - Multiple nets listed on the same line form a redundancy group sharing the same failure tolerance
-   - Each net name should appear only once in the entire file
-   - See UCIe_advanced_criticality.txt for a complete example of the current format
+Probabilities are float values between `0` and `1`. ESD criticality is multiplied by `esd_failure_probability`; mechanical criticality is multiplied by overlay, particle, and mechanical failure probabilities. All four failure modes are considered in the optimization objective.
+
+**3. Criticality (`.txt`)**
+
+Current format:
+
+```
+<net1> [net2] [net3] ... <group_size> <tolerated_esd_failures> <tolerated_mechanical_failures>
+```
+
+Where:
+
+- `group_size`: total number of pads/bumps in the redundancy group.
+- `tolerated_esd_failures`: number of ESD failures the group can tolerate before failing.
+- `tolerated_mechanical_failures`: number of mechanical failures the group can tolerate before failing.
+
+Supported filename variants:
+
+- `*_criticality.txt`: default profile.
+- `*_criticality_esd_strict.txt`: strict ESD profile.
+
+Criticality values are calculated when reading the file:
+
+- `esd_criticality = (group_size - tolerated_esd_failures) / group_size`
+- `mechanical_criticality = (group_size - tolerated_mechanical_failures) / group_size`
+
+Legacy format is deprecated but still supported:
+
+```
+<net> <esd_criticality> <mechanical_criticality>
+```
+
+**4. 3dblox Files**
+
+- `.3dbv`: stack-level 3dblox file containing chiplet definitions and design areas.
+- `.3dbx`: stack configuration file containing chiplet/interface connections.
+- `.3dbf`: chiplet file containing bump pitch and bump-size metadata.
 
 # Output
-**1.assembly_fail_map_dict.npz**
 
-  The average failure count (across all simulation samples) of each pad in a pad map format for all failure mechanisms. The visualization will be generated by the simulation.
+**1. `<interface>_risk__<config_stem>__<criticality_profile>.map`**
 
-**2.assembly_fail_vec_dict.npz**
+Text risk map for an interface. Each line contains pad coordinates and the ESD, overlay, particle, and mechanical failure probabilities.
 
-  The failure vector of the survival scenario of each die samples for all failure mechanisms. 
-  
-  Example: die A, B, C, D, and E are simulated. A, B and D pass, and C and E fail. The failure vector of this failure mechanism is : `0, 0, 1, 0, 1`.
+**2. `<interface>_<mechanism>_risk_map__<config_stem>__<criticality_profile>.png`**
+
+Per-mechanism pad risk maps written by `pad_risk_map_calculator.py`.
+
+**3. `assembly_yield_summary__<config_stem>__<criticality_profile>.txt`**
+
+Simulation summary containing settings, runtime information, stack assembly yield, and per-interface yield.
+
+**4. `assembly_yield_per_interface__<config_stem>__<criticality_profile>.txt`**
+
+Per-interface simulated assembly yield.
+
+**5. `assembly_fail_vec_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
+
+Failure vectors for each die sample and failure mechanism. This is written in verbose simulation mode.
+
+**6. `assembly_fail_map_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
+
+Average per-pad failure counts across simulation samples. This is written only when both `--verbose` and `--save-failure-maps` are enabled.
+
+**7. `simulation_failure_map_<mechanism>__<config_stem>__<criticality_profile>.png`**
+
+Per-interface simulation failure heatmaps for `overlay`, `particle`, `mechanical`, `ESD`, and `overall`. These are written only when `--save-failure-maps` is enabled.
 
 # Generator Utilities
-Four helper scripts are provided to quickly generate starter files for testing:
-  - `generate_random_bump_map.py`: Generate random bump maps with power, ground, signal, and dummy bumps
-  - `generate_criticality.py`: Generate criticality files from bump maps
+
+Useful D2W helpers include:
+
+- `D2W/utils/generate_criticality.py`: generate default and strict-ESD criticality files from bump maps.
+- `D2W/utils/assign_bump_names.py`: assign net and port names to raw bump maps.
+- `D2W/utils/bmap_grid_sync.py`: synchronize bump maps with inferred grid geometry.
+- `D2W/utils/plot_bump_kinds.py`: visualize bump categories from a bump map.
+- `D2W/utils/plot_design_topology.py`: plot chiplet/interface topology from 3dblox inputs.
 
 # Paper Link
+
 To be continued...
-
-

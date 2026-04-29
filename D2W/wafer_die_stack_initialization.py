@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-# Dies intialization for the yield model for hybrid bonding
+# Wafers and Dies intialization for the yield model for hybrid bonding
 #### Author: Zhichao Chen
-#### Date: Feb 3, 2026
+#### Date: Sep 26, 2024
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,8 +12,8 @@ from matplotlib.patches import Polygon
 
 class Die:
     def __init__(
-        self, DIE_W_um, DIE_L_um, die_center, 
-        DIE_VERTEX_COORDS, num_pads, 
+        self, DIE_W_um, DIE_L_um, die_center,
+        DIE_VERTEX_COORDS, num_pads,
         PAD_TOP_R_um, PAD_BOT_R_um,
         PAD_ARR_BOX,
         pad_yield_flag: bool,
@@ -30,6 +30,7 @@ class Die:
         self.pad_coords = BASE_PAD_COORDS + die_center if pad_yield_flag == True else None
 
         self.survival = True
+        self.safe_voids_mask = []
         self.voids = []
         self.voids_occur = False
 
@@ -40,7 +41,7 @@ class Die:
     def get_vertices_coords(self, die_center, DIE_VERTEX_COORDS):
         vertices_coords = DIE_VERTEX_COORDS + die_center
         return vertices_coords
-    
+
     def draw_die(self, fig_size=(30, 30)):
         fig, ax = plt.subplots(figsize=fig_size)
         # Draw the pad array box
@@ -92,6 +93,7 @@ class Wafer:
         self.die_list = []
         self.dice_proportion = dice_proportion
         self.voids = []
+        self.safe_voids_mask = []
         self.roughness_voids = []
         self.survival_die = 0
         self.base_pad_coords = base_pad_coords
@@ -171,7 +173,7 @@ class Wafer:
         ax.set_aspect("equal")
         plt.show()
         # # Save the wafer figure
-        # fig.savefig("wafer_die.png")    
+        # fig.savefig("wafer_die.png")
 
 
 def die_interface_initialize(
@@ -180,7 +182,7 @@ def die_interface_initialize(
     DIE_L_um: float,
     PAD_ARR_W_um: float,
     PAD_ARR_L_um: float,
-    PAD_ARR_ROW: int,   
+    PAD_ARR_ROW: int,
     PAD_ARR_COL: int,
     PITCH_r_um: float,
     PITCH_c_um: float,
@@ -201,9 +203,9 @@ def die_interface_initialize(
     )  # die vertex coordinates: [top-left, top-right, bottom-left, bottom-right]
     PAD_ARR_BOX = np.array(
         [
-            [-PAD_ARR_W_um / 2, PAD_ARR_L_um / 2], 
-            [PAD_ARR_W_um / 2, PAD_ARR_L_um / 2], 
-            [-PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2], 
+            [-PAD_ARR_W_um / 2, PAD_ARR_L_um / 2],
+            [PAD_ARR_W_um / 2, PAD_ARR_L_um / 2],
+            [-PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2],
             [PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2]])
 
     num_pads = pad_bitmap_collection['num_critical_pads'] + pad_bitmap_collection['num_redundant_pads'] + pad_bitmap_collection['num_dummy_pads']
@@ -229,7 +231,7 @@ def die_interface_initialize(
         else:
             print("Too many Cu pads... Will not generate the pad coordinates.")
             PAD_COORDS = None
-    
+
     for i in range(NUM_DIE_SAMPLES):
         die = Die(
             DIE_W_um=DIE_W_um,
@@ -245,7 +247,6 @@ def die_interface_initialize(
         )
         die_interface_list.append(die)
     return die_interface_list, PAD_COORDS
-
 
 
 class Bonding_Interfaces:
@@ -311,10 +312,10 @@ class DieStack:
         Die Stack object for hybrid bonding yield model.
         """
         failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
-        
+
         self.cfg_dict = cfg_dict
         self.num_bonding_interfaces = len(cfg_dict) - 1  # Number of bonding interfaces is number of layers - 1
-        
+
         self.interfaces = Bonding_Interfaces(
             cfg_dict=cfg_dict,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
@@ -343,21 +344,22 @@ class DieStack:
                 self.die_yield_list_per_interface_dict[interface_name]['ESD']
             # Calculate the overall die stack yield by multiplying the die yield of all interfaces
             self.die_stack_yield *= self.die_yield_per_interface_dict[interface_name]['overall']
-        
-        return self.die_stack_yield     
-        
+
+        return self.die_stack_yield
+
 
 def die_stack_list_initialize(
     cfg_dict: dict,
     pad_bitmap_collection_dict: dict,
     num_stack_samples: int,
     base_pad_coords_flag: bool = False,
+    mode: str = 'simulation',
 ):
     """
     Inputs:
     - cfg_dict: Configuration object containing parameters
     - num_stack_samples: Number of die stack samples to generate
-    
+
     Outputs:
     - die_stack: DieStack object containing the initialized die stack samples
     """
@@ -366,6 +368,7 @@ def die_stack_list_initialize(
         die_stack = DieStack(
             cfg_dict=cfg_dict,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
+            mode=mode,
             base_pad_coords_flag=base_pad_coords_flag,
         )
         die_stack_list.append(die_stack)
