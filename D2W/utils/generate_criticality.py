@@ -245,7 +245,21 @@ def resolve_criticality_path(
     interface_name: str,
     profile: str = DEFAULT_PROFILE,
 ) -> Path:
-    return get_output_filename(Path(input_dir) / f"{interface_name}.bmap", profile)
+    input_path = Path(input_dir)
+    bmap_name = f"{interface_name}.bmap"
+    direct_bmap = input_path / bmap_name
+    if direct_bmap.exists():
+        return get_output_filename(direct_bmap, profile)
+
+    matches = sorted(input_path.glob(f"*/{bmap_name}"))
+    if len(matches) == 1:
+        return get_output_filename(matches[0], profile)
+    if len(matches) > 1:
+        raise FileExistsError(
+            f"Multiple bump maps found for {interface_name} under {input_path}: "
+            + ", ".join(str(path) for path in matches)
+        )
+    return get_output_filename(direct_bmap, profile)
 
 
 def summarize_net_counts(net_counts: dict[str, int]) -> list[str]:

@@ -10,7 +10,7 @@ d2w_simulation:
   DESIGN: None
   INTERFACE: None                      # Interface name
  # === Die Settings ===
-  NUM_DIE_STACKS: 10000                            # Number of die stacks used in simulation
+  NUM_DIE_STACKS: 1000                            # Number of die stacks used in simulation
   SIM_BATCH_SIZE: 10                            # Number of Dies samples simulated in one batch (a way to
   PITCH_r_um: None                            # Row pad pitch (µm) (In checkerboard layout, this is sqrt(2)/2 times of the real pitch)
   PITCH_c_um: None                            # Column pad pitch (µm)  (In checkerboard layout, this is sqrt(2)/2 times of the real pitch)
@@ -38,7 +38,7 @@ d2w_simulation:
   B_Sub_Sio2_V: 0.00                    # Efficient substrate layer Sio2 volume density
   B_Sub_Si_V: 0.90                      # Efficient substrate layer si volume density
   B_Sub_T: None                       # Efficient substrate layer thickness (m)
-  S_INIT_A_M: 300e-9                     # Pre-anneal warpages (m)
+  S_INIT_A_M: 0e-9                     # Pre-anneal warpages (m)
   # === Top Wafer Settings ===
   T_Chip_Cu_V: 0.30                     # Efficient bonding layer Cu volume density
   T_Chip_Sio2_V: 0.70                   # Efficient bonding layer Sio2 volume density
@@ -193,7 +193,7 @@ d2w_modeling:
   B_Sub_Sio2_V: 0.00                    # Efficient substrate layer Sio2 volume density
   B_Sub_Si_V: 0.90                      # Efficient substrate layer si volume density
   B_Sub_T: None                       # Efficient substrate layer thickness (m)
-  S_INIT_A_M: 100e-9                   # Pre-anneal warpages (m)
+  S_INIT_A_M: 0e-9                   # Pre-anneal warpages (m)
   # === Top Wafer Settings ===
   T_Chip_Cu_V: 0.30                     # Efficient bonding layer Cu volume density
   T_Chip_Sio2_V: 0.70                   # Efficient bonding layer Sio2 volume density
@@ -229,7 +229,7 @@ d2w_modeling:
   # === Defect Parameters ===
   first_contact: 'center'            # First contact location: 'center' or 'vertical-edge' or 'horizontal-edge' or 'corner' (left-bottom)
   D0: 1e-9                              # Particle density (1/µm²)
-  D1: 1e-9                              # Edge peak particle density (1/µm²)
+  D1: 1e-8                              # Edge peak particle density (1/µm²)
   EDGE_REGION_WIDTH_um: 300.0           # Width of the edge region for elevated particle density (µm)
   z: 3                                  # Thickness distribution exponent factor
   t_0: 0.1                              # Minimum particle thickness (µm)

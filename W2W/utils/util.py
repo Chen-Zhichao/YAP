@@ -9,6 +9,29 @@ from matplotlib.colors import ListedColormap, BoundaryNorm
 import scipy.io as sio
 import os
 
+
+def print_run_separator(label: str = "Run finished"):
+    duck = [
+        "        YAP~",
+        "          \\",
+        "        __",
+        "       /  \\",
+        "     ∠)_• / ^_^",
+        "      /  /_(•ω•)__",
+        "     (      UU    )",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~",
+    ]
+    art_width = max(len(line) for line in duck)
+    width = max(80, len(label), art_width)
+    art_indent = " " * ((width - art_width) // 2)
+    banner = "*" * width
+    print("\n" + banner)
+    print(label.center(width))
+    for line in duck:
+        print(art_indent + line)
+    print(banner + "\n")
+
+
 def add_config_items(cfg, keys, values):
     """
     Add items to the configuration dictionary.

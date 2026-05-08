@@ -80,6 +80,7 @@ def main():
     )
     print(f"Modeled yield: {stack_assembly_yield:.6f}")
     print(f"Yield modeling finished in {time.time() - start_time:.2f} s")
+    print_run_separator(f"W2W risk map generation finished for {args.ds_name}")
 
 if __name__ == "__main__":
     main()

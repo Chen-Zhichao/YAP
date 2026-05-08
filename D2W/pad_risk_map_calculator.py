@@ -125,7 +125,7 @@ def main():
         pad_bitmap_collection_dict = {}
         # Precompute the file paths once so we can collapse identical interfaces
         for interface, cfg in cfg_dict.items():
-            bmap_path_dict[interface] = os.path.join(input_ds_dir, f"{cfg.INTERFACE}.bmap")
+            bmap_path_dict[interface] = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
             criticality_path_dict[interface] = str(
                 resolve_criticality_path(
                     input_dir=input_ds_dir,
@@ -237,6 +237,6 @@ def main():
                 print(f"Cleaned {len(removed_temp_paths)} runtime temp files.")
         # Generated interface configs are saved under the design's config folder.
 
-    print("\n\n\n")
+    print_run_separator(f"D2W risk map generation finished for {args.ds_name}")
 if __name__ == "__main__":
     main()

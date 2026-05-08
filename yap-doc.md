@@ -53,10 +53,7 @@ Run commands from the repository root.
   - Current D2W Monte Carlo assembly simulation entry point.
   - Produces stack assembly yield, per-interface yield, optional failure vectors,
     and optional failure heatmaps.
-
-- `D2W/spatial_correlation_coefficients_main.py`
-  - Precomputes spatial correlation coefficients for D2W simulation workflows.
-
+    
 ### W2W
 
 - `W2W/calculator_main.py`

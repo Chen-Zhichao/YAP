@@ -14,7 +14,6 @@ from wafer_die_stack_initialization import die_stack_list_initialize
 from overlay_yield_simulator import overlay_term_simulator
 from defect_yield_simulator import defect_yield_simulator
 from overall_yield_simulator import overall_yield_simulator
-from spatial_correlation_coefficients import get_spatial_correlation_coefficients
 from utils.util import result_wrapper
 
 
@@ -30,6 +29,7 @@ def Assembly_Yield_Simulator(
     cfg_skeleton: object,
     cfg_dict: dict,
     pad_bitmap_collection_dict: dict,
+    stack_cfg_dict: dict = None,
 ):
     NUM_DIE_STACKS = cfg_skeleton.NUM_DIE_STACKS
     SIM_BATCH_SIZE = cfg_skeleton.SIM_BATCH_SIZE
@@ -40,6 +40,7 @@ def Assembly_Yield_Simulator(
     skip_verbose_root_artifacts = bool(input_args.get('skip_verbose_root_artifacts', False))
     save_failure_maps = bool(input_args.get('save_failure_maps', False))
     file_suffix = input_args.get('output_file_tag', '')
+    stack_cfg_dict = cfg_dict if stack_cfg_dict is None else stack_cfg_dict
 
     # Initialize a temporary die stack once to extract the reference pad coordinates.
     temp_die_stack_list, base_pad_coords_dict = die_stack_list_initialize(
@@ -74,8 +75,11 @@ def Assembly_Yield_Simulator(
 
         # Generate overlay misalignment component samples for each bonding interface in each stack
         overlay_term_simulator(
-            cfg_dict         =       cfg_dict,
-            die_stack_list   =       die_stack_list,
+            cfg_dict              =       cfg_dict,
+            die_stack_list        =       die_stack_list,
+            input_args            =       input_args,
+            stack_cfg_dict        =       stack_cfg_dict,
+            simulation_epoch      =       epoch,
         )
 
         # Generate void defects
@@ -89,6 +93,7 @@ def Assembly_Yield_Simulator(
         # Calculate the overall yield
         epoch_input_args = dict(input_args)
         epoch_input_args['global_stack_offset'] = epoch * SIM_BATCH_SIZE
+        epoch_input_args['simulation_epoch'] = epoch
 
         yield_list, epoch_interface_yield_dict, epoch_fail_map_per_interface_dict, epoch_fail_vec_per_interface_dict = overall_yield_simulator(
             input_args=epoch_input_args,
@@ -96,6 +101,7 @@ def Assembly_Yield_Simulator(
             die_stack_list=die_stack_list,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
             base_pad_coords_dict=base_pad_coords_dict,
+            stack_cfg_dict=stack_cfg_dict,
         )
         epoch_yield_list.append(yield_list)
         for interface_name, interface_yield in epoch_interface_yield_dict.items():

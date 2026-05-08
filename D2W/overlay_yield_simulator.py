@@ -5,6 +5,7 @@
 #### Author: Zhichao Chen
 #### Date: Oct 4, 2024
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -12,6 +13,11 @@ from scipy.optimize import fsolve
 import sympy as sp
 from scipy.integrate import quad
 from scipy.stats import norm
+
+try:
+    from warpage_yield_simulator import sample_interface_bow_difference
+except ModuleNotFoundError:
+    from D2W.warpage_yield_simulator import sample_interface_bow_difference
 
 
 
@@ -74,10 +80,62 @@ def max_allowed_misalignment_calculator(
     return MAX_ALLOWED_MISALIGNMENT_um
 
 
+def _substack_bow_difference_samples_for_overlay(
+    cfg_dict,
+    die_stack_list,
+    input_args=None,
+    stack_cfg_dict=None,
+    simulation_epoch=0,
+):
+    input_args = input_args or {}
+    ds_dir = input_args.get('ds_dir', '')
+    _3dbx_path = os.path.join(ds_dir, 'generated_stack_config.3dbx')
+    if not os.path.exists(_3dbx_path):
+        return None
+
+    num_samples = len(die_stack_list)
+    stack_cfg_dict = cfg_dict if stack_cfg_dict is None else stack_cfg_dict
+
+    try:
+        all_samples = sample_interface_bow_difference(
+            stack_cfg_dict,
+            _3dbx_path,
+            num_samples=num_samples,
+        )
+    except (KeyError, ValueError, FileNotFoundError) as exc:
+        warning_key = '_substack_bow_difference_fallback_warned'
+        if not input_args.get(warning_key, False):
+            print(
+                "Substack bow-difference sampling unavailable; "
+                f"falling back to BOW_DIFFERENCE_* Gaussian samples. Reason: {exc}"
+            )
+            input_args[warning_key] = True
+        return None
+
+    return {
+        interface: all_samples[interface]
+        for interface in cfg_dict
+        if interface in all_samples
+    }
+
+
 def overlay_term_simulator(
     cfg_dict: dict,
     die_stack_list: list,
+    interface_bow_difference_samples: dict = None,
+    input_args: dict = None,
+    stack_cfg_dict: dict = None,
+    simulation_epoch: int = 0,
 ):
+    if interface_bow_difference_samples is None:
+        interface_bow_difference_samples = _substack_bow_difference_samples_for_overlay(
+            cfg_dict=cfg_dict,
+            die_stack_list=die_stack_list,
+            input_args=input_args,
+            stack_cfg_dict=stack_cfg_dict,
+            simulation_epoch=simulation_epoch,
+        )
+
     for interface, cfg in cfg_dict.items():
         # Extract input parameters from the current cfg
         PAD_BOT_R_um, PAD_TOP_R_um = cfg.PAD_BOT_R_um, cfg.PAD_TOP_R_um
@@ -90,8 +148,6 @@ def overlay_term_simulator(
         SYSTEM_TRANSLATION_X_STD_um = cfg.SYSTEM_TRANSLATION_X_STD_um
         SYSTEM_TRANSLATION_Y_MEAN_um = cfg.SYSTEM_TRANSLATION_Y_MEAN_um
         SYSTEM_TRANSLATION_Y_STD_um = cfg.SYSTEM_TRANSLATION_Y_STD_um
-        BOW_DIFFERENCE_MEAN_um = cfg.BOW_DIFFERENCE_MEAN_um
-        BOW_DIFFERENCE_STD_um = cfg.BOW_DIFFERENCE_STD_um
         k_mag = cfg.k_mag
         M_0 = cfg.M_0
 
@@ -112,9 +168,25 @@ def overlay_term_simulator(
         system_rotation_rad_list = (
             np.random.normal(SYSTEM_ROTATION_MEAN_rad, SYSTEM_ROTATION_STD_rad, (NUM_STACKS))
         )
-        bow_difference_list = (
-            np.random.normal(BOW_DIFFERENCE_MEAN_um, BOW_DIFFERENCE_STD_um, (NUM_STACKS))
-        )
+        if (
+            interface_bow_difference_samples is not None
+            and interface in interface_bow_difference_samples
+        ):
+            bow_difference_list = np.asarray(
+                interface_bow_difference_samples[interface],
+                dtype=float,
+            )
+            if len(bow_difference_list) != NUM_STACKS:
+                raise ValueError(
+                    f"Interface '{interface}' has {len(bow_difference_list)} bow-difference "
+                    f"samples, but overlay simulation needs {NUM_STACKS} samples."
+                )
+        else:
+            bow_difference_list = np.random.normal(
+                cfg.BOW_DIFFERENCE_MEAN_um,
+                cfg.BOW_DIFFERENCE_STD_um,
+                (NUM_STACKS),
+            )
         system_magnification_ppm_list = (
             (k_mag * bow_difference_list + M_0) / 1e6
         )  # systematic magnification unit (ppm)
@@ -126,3 +198,4 @@ def overlay_term_simulator(
             die_stack_list[stack_idx].interfaces.failure_params_dict[interface]['system_translation_y_um'] = system_translation_y_um_list[stack_idx]
             die_stack_list[stack_idx].interfaces.failure_params_dict[interface]['system_rotation_rad'] = system_rotation_rad_list[stack_idx]
             die_stack_list[stack_idx].interfaces.failure_params_dict[interface]['system_magnification_ppm'] = system_magnification_ppm_list[stack_idx]
+            die_stack_list[stack_idx].interfaces.failure_params_dict[interface]['bow_difference_um'] = bow_difference_list[stack_idx]

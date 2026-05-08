@@ -12,6 +12,29 @@ import hashlib
 import json
 from collections import defaultdict
 
+
+def print_run_separator(label: str = "Run finished"):
+    duck = [
+        "        YAP~",
+        "          \\",
+        "            __",
+        "           /  \\",
+        "         ∠)_• / ^_^",
+        "          /  /_(•ω•)__",
+        "         (      U U    )",
+        "   ~~~~~~~~~~~~~~~~~~~~~~~~~~",
+    ]
+    art_width = max(len(line) for line in duck)
+    width = max(80, len(label), art_width)
+    art_indent = " " * ((width - art_width) // 2)
+    banner = "*" * width
+    print("\n" + banner)
+    print(label.center(width))
+    for line in duck:
+        print(art_indent + line)
+    print(banner + "\n")
+
+
 def add_config_items(cfg, keys, values):
     """
     Add items to the configuration dictionary.
@@ -26,6 +49,44 @@ def add_config_items(cfg, keys, values):
 
     for key, value in zip(keys, values):
         cfg[key] = value
+
+
+def _is_missing_config_value(value):
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() in {"", "none", "null", "nan"}
+    return False
+
+
+def resolve_design_file(input_ds_dir: str, filename: str) -> str:
+    """
+    Resolve a design-specific file that may live either directly under the
+    design directory or under a single ratio subdirectory such as
+    c30_r0_pg50_dm20.
+    """
+    direct_path = os.path.join(input_ds_dir, filename)
+    if os.path.exists(direct_path):
+        return direct_path
+
+    matches = []
+    if os.path.isdir(input_ds_dir):
+        for entry in sorted(os.listdir(input_ds_dir)):
+            subdir = os.path.join(input_ds_dir, entry)
+            if not os.path.isdir(subdir):
+                continue
+            candidate = os.path.join(subdir, filename)
+            if os.path.exists(candidate):
+                matches.append(candidate)
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise FileExistsError(
+            f"Multiple candidates found for {filename} under {input_ds_dir}: "
+            + ", ".join(matches)
+        )
+    raise FileNotFoundError(f"Could not find {filename} under {input_ds_dir}")
 
 
 def finalize_cfg_for_mode(cfg, ds_name: str, mode: str):
@@ -337,9 +398,7 @@ def get_single_interface_config_dict(cfg_folder: str,
             "Single-interface mode requires INTERFACE to be set in the config."
         )
 
-    bmap_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE}.bmap")
-    if not os.path.exists(bmap_path):
-        raise FileNotFoundError(f"Bump map not found at {bmap_path}")
+    bmap_path = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
 
     if getattr(cfg, "PAD_ARR_ROW", None) in (None, "None") or getattr(cfg, "PAD_ARR_COL", None) in (None, "None"):
         update_config_from_bmap(
@@ -572,7 +631,7 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
         ### Read .3dbv, .3dbx, and .bmap files
         ## Extract design parameters from .3dbv and .3dbf file
         _3dbv = OmegaConf.load(_3dbv_path)
-        _bmap_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE}.bmap")
+        _bmap_path = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
         top_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_TOP}.3dbf")
         bot_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_BOT}.3dbf")
         top_3dbf = OmegaConf.load(top_3dbf_path)
@@ -625,6 +684,10 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
         add_config_items(cfg, keys=['ITF_TOP_THICK_um', 'ITF_BOT_THICK_um'],
                             values=[float(_3dbv.ChipletDef[cfg.INTERFACE_TOP].thickness),
                                     float(_3dbv.ChipletDef[cfg.INTERFACE_BOT].thickness)])
+        if _is_missing_config_value(getattr(cfg, 'T_Sub_T', None)):
+            cfg.T_Sub_T = float(cfg.ITF_TOP_THICK_um) * 1e-6
+        if _is_missing_config_value(getattr(cfg, 'B_Sub_T', None)):
+            cfg.B_Sub_T = float(cfg.ITF_BOT_THICK_um) * 1e-6
 
         ## Extract design parameters from .bmap file
         update_config_from_bmap(cfg, _bmap_path,

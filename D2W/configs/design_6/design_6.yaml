@@ -38,7 +38,7 @@ d2w_simulation:
   B_Sub_Sio2_V: 0.00                    # Efficient substrate layer Sio2 volume density
   B_Sub_Si_V: 0.90                      # Efficient substrate layer si volume density
   B_Sub_T: None                       # Efficient substrate layer thickness (m)
-  S_INIT_A_M: 300e-9                     # Pre-anneal warpages (m)
+  S_INIT_A_M: 0e-9                     # Pre-anneal warpages (m)
   # === Top Wafer Settings ===
   T_Chip_Cu_V: 0.30                     # Efficient bonding layer Cu volume density
   T_Chip_Sio2_V: 0.70                   # Efficient bonding layer Sio2 volume density
@@ -68,9 +68,14 @@ d2w_simulation:
   # === Bowing and Magnification ===
   BOW_DIFFERENCE_MEAN_um: 0.5               # Bow difference mean (µm)
   BOW_DIFFERENCE_STD_um: 0.1                 # Bow difference std (µm)
+  TOP_INI_BOW_MEAN_um: 10.0                 # Initial top die bow mean (µm)
+  TOP_INI_BOW_STD_um: 5.0                   # Initial top die bow std (µm)
+  BOT_INI_BOW_MEAN_um: 10.0                 # Initial bottom stack/die bow mean (µm)
+  BOT_INI_BOW_STD_um: 5.0                   # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
   WARPAGE_LIMIT_UM: 20                  # Warpage limit (um)
+  STACK_WARPAGE_TH: 20.0                # Total stack warpage threshold (um)
 
   # === Defect Parameters ===
   first_contact: 'center'            # First contact location: 'center' or 'edge' or 'corner (left-top)'
@@ -193,7 +198,7 @@ d2w_modeling:
   B_Sub_Sio2_V: 0.00                    # Efficient substrate layer Sio2 volume density
   B_Sub_Si_V: 0.90                      # Efficient substrate layer si volume density
   B_Sub_T: None                       # Efficient substrate layer thickness (m)
-  S_INIT_A_M: 100e-9                   # Pre-anneal warpages (m)
+  S_INIT_A_M: 0e-9                   # Pre-anneal warpages (m)
   # === Top Wafer Settings ===
   T_Chip_Cu_V: 0.30                     # Efficient bonding layer Cu volume density
   T_Chip_Sio2_V: 0.70                   # Efficient bonding layer Sio2 volume density
@@ -222,9 +227,14 @@ d2w_modeling:
   SYSTEM_ROTATION_STD_rad: 1e-4             # Systematic rotation std (rad)
   BOW_DIFFERENCE_MEAN_um: 0.5               # Bow difference mean (µm)
   BOW_DIFFERENCE_STD_um: 0.1                 # Bow difference std (µm)
+  TOP_INI_BOW_MEAN_um: 10.0                 # Initial top die bow mean (µm)
+  TOP_INI_BOW_STD_um: 5.0                   # Initial top die bow std (µm)
+  BOT_INI_BOW_MEAN_um: 10.0                 # Initial bottom stack/die bow mean (µm)
+  BOT_INI_BOW_STD_um: 5.0                   # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
   WARPAGE_LIMIT_UM: 20                  # Warpage limit (um)
+  STACK_WARPAGE_TH: 20.0                # Total stack warpage threshold (um)
 
   # === Defect Parameters ===
   first_contact: 'center'            # First contact location: 'center' or 'vertical-edge' or 'horizontal-edge' or 'corner' (left-bottom)
@@ -308,4 +318,3 @@ d2w_modeling:
   # === Miscellaneous Parameters ===
   plot_flag: True                      # Enable plotting of results
   verbose: False
-

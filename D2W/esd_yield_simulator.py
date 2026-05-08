@@ -418,7 +418,6 @@ def esd_failure_simulator(
     tilt_x_std_deg: float,
     tilt_y_mean_deg: float,
     tilt_y_std_deg: float,
-    base_seed: int,
 ) -> Tuple[int | None, bool]:
     """Run a single stochastic experiment and return (first_touch_pad, survive_bool)."""
     pad_size_um = float(pad_size_um)
@@ -428,7 +427,6 @@ def esd_failure_simulator(
     tilt_x_std_deg = float(tilt_x_std_deg)
     tilt_y_mean_deg = float(tilt_y_mean_deg)
     tilt_y_std_deg = float(tilt_y_std_deg)
-    base_seed = int(base_seed)
 
     z_top_um = Z_TOP_UM
     v_min_v = float(cfg.V_MIN_V)
@@ -447,8 +445,8 @@ def esd_failure_simulator(
     ):
         raise ValueError("pad_coords_um, top_dish_nm_ext, and bot_dish_nm_ext must have the same length.")
 
-    rng = np.random.default_rng(base_seed ^ 0xA5A5A5A5)
-    rng_pick = np.random.default_rng((base_seed ^ 0xA5A5A5A5) ^ 0xDEADBEEF)
+    rng = np.random.default_rng()
+    rng_pick = np.random.default_rng()
 
     tilt_x = float(rng.normal(tilt_x_mean_deg, tilt_x_std_deg))
     tilt_y = float(rng.normal(tilt_y_mean_deg, tilt_y_std_deg))

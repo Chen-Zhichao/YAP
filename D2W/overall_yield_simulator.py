@@ -15,6 +15,11 @@ from debond import debond_dishing_intervals_from_coords #, post_bond_warpage_cal
 from esd_yield_simulator import esd_failure_simulator
 from utils.util import atomic_save_npy, get_dishing_bound_cache_path
 
+try:
+    from warpage_yield_simulator import stack_warpage_fail_vector_for_epoch
+except ModuleNotFoundError:
+    from D2W.warpage_yield_simulator import stack_warpage_fail_vector_for_epoch
+
 
 def _increment_redundant_group_counts(
     new_fail_mask: np.ndarray,
@@ -204,6 +209,7 @@ def overall_yield_simulator(
     die_stack_list: list,
     pad_bitmap_collection_dict: dict,
     base_pad_coords_dict: dict,
+    stack_cfg_dict: dict = None,
 ):
     die_stack_yield_list = []
     NUM_STACKS = len(die_stack_list)
@@ -212,7 +218,6 @@ def overall_yield_simulator(
         interface_name: 0 for interface_name in cfg_dict
     }
     global_stack_offset = int(input_args.get('global_stack_offset', 0))
-    seed_run_base = int(input_args.get('seed_run_base', 0))
     save_failure_maps = bool(input_args.get('save_failure_maps', False))
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
@@ -231,6 +236,12 @@ def overall_yield_simulator(
         pad_bitmap_collection_dict=pad_bitmap_collection_dict,
         base_pad_coords_dict=base_pad_coords_dict,
         input_args=input_args,
+    )
+    stack_warpage_fail_vector = stack_warpage_fail_vector_for_epoch(
+        input_args=input_args,
+        cfg_dict=cfg_dict,
+        stack_cfg_dict=stack_cfg_dict,
+        num_samples=NUM_STACKS,
     )
 
 
@@ -615,20 +626,6 @@ def overall_yield_simulator(
                             if not cfg.verbose:
                                 break
 
-            # We set 10x10 mm chiplet warpage as a reference TODO: Make it more formal once you have time
-            initial_chiplet_warpage_mean = cfg.BOW_DIFFERENCE_MEAN_um / 14.14 * np.sqrt((cfg.DIE_W_um/1000)**2 + (cfg.DIE_L_um/1000)**2)
-            initial_chiplet_warpage_std = cfg.BOW_DIFFERENCE_STD_um / 14.14 * np.sqrt((cfg.DIE_W_um/1000)**2 + (cfg.DIE_L_um/1000)**2)
-            # sample a initial chiplet warpage for this die stack based on a normal distribution with the mean calculated above and a std that is 20% of the mean
-            initial_chiplet_warpage = np.abs(np.random.normal(loc=initial_chiplet_warpage_mean, scale=initial_chiplet_warpage_std))
-            if (initial_chiplet_warpage > cfg.WARPAGE_LIMIT_UM):
-                die_interface.survival = False
-                die_stack.survival = False
-                if cfg.verbose:
-                    epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind] = 1
-                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
-                if not cfg.verbose:
-                    continue
-
             # # Get the fail bump indices
             # fail_bump_id = mapping_physical_to_bumpid[redundant_pad_fail_map == 1]
             # # Switch to set for easier checking
@@ -656,7 +653,6 @@ def overall_yield_simulator(
                                                     tilt_x_std_deg=TILT_X_STD_DEG,
                                                     tilt_y_mean_deg=TILT_Y_MEAN_DEG,
                                                     tilt_y_std_deg=TILT_Y_STD_DEG,
-                                                    base_seed=seed_run_base + (global_stack_offset + stack_ind) * max(len(cfg_dict), 1) + interface_ind,
                                                     dummy_pad_bitmap=pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat],
                                                     )
             if esd_pad_idx is not None and survive_bool == False:    # One pad will form the first contact and fail
@@ -715,6 +711,12 @@ def overall_yield_simulator(
 
             if cfg.verbose and save_failure_maps:
                 epoch_fail_map_per_interface_dict[interface_name]['overall'] += temp_overall_fail_map
+
+        '''
+        Check the warpage failure in the stack-level
+        '''
+        if stack_warpage_fail_vector[stack_ind]:
+            die_stack.survival = False
 
         for interface_name, die_interface in die_stack.interfaces.interface_dict.items():
             if die_interface.survival:

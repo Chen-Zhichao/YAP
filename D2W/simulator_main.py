@@ -7,7 +7,6 @@ import numpy as np
 from utils.util import *
 import time
 import argparse
-import secrets
 from assembly_yield_simulator import Assembly_Yield_Simulator
 from utils.generate_criticality import DEFAULT_PROFILE, resolve_criticality_path
 from utils.interface_reuse import (
@@ -116,7 +115,7 @@ def write_simulation_summary(
         f.write(f"verbose: {input_args['verbose']}\n")
         f.write(f"plot: {input_args['plot']}\n")
         f.write(f"save_failure_maps: {input_args['save_failure_maps']}\n")
-        f.write(f"seed_run_base: {input_args['seed_run_base']}\n")
+        f.write("random_source: system_entropy\n")
         f.write(f"NUM_DIE_STACKS: {cfg_skeleton.NUM_DIE_STACKS}\n")
         f.write(f"SIM_BATCH_SIZE: {cfg_skeleton.SIM_BATCH_SIZE}\n")
         f.write(f"num_interfaces: {len(cfg_dict)}\n")
@@ -164,7 +163,6 @@ def write_simulation_summary(
 
 def main():
     args = parse_args()
-    args.seed_run_base = secrets.randbits(63)
     args.output_file_tag = _build_output_file_tag(args.config, args.criticality_profile)
     cfg_dict = None
     config_stem = os.path.splitext(os.path.basename(args.config))[0]
@@ -226,7 +224,7 @@ def main():
         criticality_path_dict = {}
         pad_bitmap_collection_dict = {}
         for interface, cfg in cfg_dict.items():
-            bmap_path_dict[interface] = os.path.join(input_ds_dir, f"{cfg.INTERFACE}.bmap")
+            bmap_path_dict[interface] = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
             criticality_path_dict[interface] = str(
                 resolve_criticality_path(
                     input_dir=input_ds_dir,
@@ -254,6 +252,11 @@ def main():
                 filename=f"collapsed_interface_groups{args.output_file_tag}.txt",
             )
             print(f"Collapsed interface groups saved to {metadata_path}.")
+            if os.path.exists(_3dbx_path):
+                print(
+                    "Stack graph is available; full-interface simulation will be used "
+                    "so substack bow difference and final stack warpage are evaluated once per stack."
+                )
 
         # Step 1: convert .bmap -> pad bitmap collection
         if has_reused_interfaces(grouped_interfaces):
@@ -289,7 +292,11 @@ def main():
         # Step 2: run assembly yield simulator
         print("Running assembly yield simulator over {} die stacks...".format(cfg_skeleton.NUM_DIE_STACKS))
         simulation_start_time = time.time()
-        if has_reused_interfaces(grouped_interfaces):
+        use_representative_simulation = (
+            has_reused_interfaces(grouped_interfaces)
+            and not os.path.exists(_3dbx_path)
+        )
+        if use_representative_simulation:
             per_interface_yield_dict = {}
             stack_assembly_yield = 1.0
             for representative, members in grouped_interfaces.items():
@@ -303,6 +310,7 @@ def main():
                     cfg_skeleton=cfg_skeleton,
                     cfg_dict={representative: cfg_dict[representative]},
                     pad_bitmap_collection_dict={representative: pad_bitmap_collection_dict[representative]},
+                    stack_cfg_dict=cfg_dict,
                 )
                 representative_yield = rep_yield_dict[representative]
                 stack_assembly_yield *= representative_yield ** len(members)
@@ -381,6 +389,6 @@ def main():
                 print(f"Cleaned {len(removed_temp_paths)} runtime temp files.")
         # Generated interface configs are saved under the design's config folder.
 
-    print("\n\n\n")
+    print_run_separator(f"D2W simulation finished for {args.ds_name}")
 if __name__ == "__main__":
     main()

@@ -81,6 +81,7 @@ def main():
     
     print(f"Yield simulation results for {args.ds_name}: {stack_assembly_yield}")
     print("Total time taken: {:.2f} seconds".format(time.time() - start_time))
+    print_run_separator(f"W2W simulation finished for {args.ds_name}")
 
 if __name__ == "__main__":
     main()
