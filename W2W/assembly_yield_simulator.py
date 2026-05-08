@@ -11,7 +11,6 @@ import os
 from wafer_die_stack_initialization import wafer_stack_list_initialize
 from overlay_yield_simulator import overlay_term_simulator
 from defect_yield_simulator import defect_yield_simulator
-from roughness_parameters import roughness_parameters
 from overall_yield_simulator import overall_yield_simulator
 from utils.util import result_wrapper
 

@@ -10,6 +10,7 @@ import scipy.io as sio
 import os
 import hashlib
 import json
+from collections import defaultdict
 
 def add_config_items(cfg, keys, values):
     """
@@ -433,6 +434,107 @@ def update_config_from_bmap(cfg, blox_bmap_path, y_tol=0.1, x_tol=0.1):
     add_config_items(cfg, keys=['PAD_ARR_L_um', 'PAD_ARR_W_um'],
                         values=[(num_rows - 1) * cfg.PITCH_r_um,
                                 (num_cols - 1) * cfg.PITCH_c_um])
+
+
+def _instance_from_3dbx_endpoint(endpoint) -> str:
+    return str(endpoint).split(".regions.")[0]
+
+
+def _interface_from_3dbx_connection(connection) -> str:
+    interface_top = str(((connection.bot).split(".")[-1]).split("To_")[-1])
+    interface_bot = str(((connection.top).split(".")[-1]).split("From_")[-1])
+    return f"{interface_top}_From_{interface_bot}"
+
+
+def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
+    """
+    Parse a 3Dblox stack config and return root-to-leaf substacks.
+
+    Returns a list because 2.5D designs can have several lateral substacks on
+    the same root/interposer, while a pure 3D stack usually has one path.
+    Each item has the form:
+        {
+            "substack_id": int,
+            "chiplets_bottom_to_top": [reference names],
+            "interfaces_bottom_to_top": [cfg_dict-compatible interface names],
+        }
+    """
+    stack_config_3dbx = OmegaConf.load(_3dbx_path)
+    if "Stack" not in stack_config_3dbx or "ChipletInst" not in stack_config_3dbx:
+        raise ValueError(f"{_3dbx_path} must contain Stack and ChipletInst sections.")
+
+    stack = stack_config_3dbx.Stack
+    chiplet_inst = stack_config_3dbx.ChipletInst
+    stack_order = {name: idx for idx, name in enumerate(stack.keys())}
+    children_by_parent = defaultdict(list)
+    parent_by_child = {}
+
+    if "Connection" in stack_config_3dbx:
+        for connection_order, (connection_name, connection) in enumerate(stack_config_3dbx.Connection.items()):
+            top_instance = _instance_from_3dbx_endpoint(connection.top)
+            bot_instance = _instance_from_3dbx_endpoint(connection.bot)
+            if top_instance not in stack:
+                raise ValueError(f"Connection {connection_name} top instance '{top_instance}' is not in Stack.")
+            if bot_instance not in stack:
+                raise ValueError(f"Connection {connection_name} bottom instance '{bot_instance}' is not in Stack.")
+            if top_instance in parent_by_child:
+                raise ValueError(
+                    f"Instance '{top_instance}' has multiple bottom parents; "
+                    "substack extraction expects a tree/DAG of vertical paths."
+                )
+
+            edge = {
+                "child": top_instance,
+                "connection": str(connection_name),
+                "interface": _interface_from_3dbx_connection(connection),
+                "order": connection_order,
+            }
+            children_by_parent[bot_instance].append(edge)
+            parent_by_child[top_instance] = bot_instance
+
+    roots = [name for name, node in stack.items() if bool(node.get("root", False))]
+    if not roots:
+        roots = [name for name in stack.keys() if name not in parent_by_child]
+    if not roots:
+        raise ValueError(f"No stack root could be inferred from {_3dbx_path}.")
+
+    for parent in children_by_parent:
+        children_by_parent[parent].sort(key=lambda edge: edge["order"])
+    roots.sort(key=lambda name: stack_order[name])
+
+    substacks = []
+
+    def dfs(instance_name: str, chiplet_path: list[str], interface_path: list[str], active_path: set[str]):
+        if instance_name in active_path:
+            cycle = " -> ".join(list(active_path) + [instance_name])
+            raise ValueError(f"Cycle detected in stack graph: {cycle}")
+        if instance_name not in chiplet_inst:
+            raise ValueError(f"Stack instance '{instance_name}' is not in ChipletInst.")
+
+        next_chiplet_path = chiplet_path + [str(chiplet_inst[instance_name].reference)]
+        child_edges = children_by_parent.get(instance_name, [])
+        if not child_edges:
+            substacks.append({
+                "substack_id": len(substacks),
+                "chiplets_bottom_to_top": next_chiplet_path,
+                "interfaces_bottom_to_top": interface_path,
+            })
+            return
+
+        next_active_path = set(active_path)
+        next_active_path.add(instance_name)
+        for edge in child_edges:
+            dfs(
+                edge["child"],
+                next_chiplet_path,
+                interface_path + [edge["interface"]],
+                next_active_path,
+            )
+
+    for root in roots:
+        dfs(root, [], [], set())
+
+    return substacks
 
 
 def update_config_with_3dblox_params(cfg_skeleton: object,
