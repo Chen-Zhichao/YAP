@@ -1,1 +1,0 @@
-Compute_Large_1_From_Substrate_Organic reuses the in-memory bitmap collection of representative interface Compute_Large_0_From_Substrate_Organic.
