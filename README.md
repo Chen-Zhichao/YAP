@@ -53,7 +53,12 @@ subdirectory. The current `design_2` uses the ratio-subdirectory style.
 
 # Installation
 
-Run commands from the repository root.
+Run installation commands from the repository root.
+
+For simulation and pad-risk-map generation, first `cd` into the corresponding
+flow directory (`D2W` or `W2W`) and run the entrypoint from there. This keeps
+relative output paths such as `output/` inside the active flow directory instead
+of depending on the shell's previous working directory.
 
 ```
 conda create -n yap_env python=3.12
@@ -73,7 +78,7 @@ order:
 
 If more than one ratio subdirectory contains the same interface bmap, the
 resolver raises an ambiguity error. Keep only the active ratio folder under the
-design root when running with `--ds_dir D2W/input/<design>`.
+design root when running with `--ds_dir input/<design>` from inside `D2W`.
 
 ## Current `design_2` Layout
 
@@ -106,20 +111,13 @@ Generate both default and strict-ESD criticality files for all bmaps under
 `design_2`:
 
 ```
-python D2W/utils/generate_criticality.py \
-  --input-root D2W/input \
-  --designs 2 \
-  --profiles both \
-  --force
+python D2W/utils/generate_criticality.py --input-root D2W/input --designs 2 --profiles both --force
 ```
 
 Generate criticality files from one explicit bump map:
 
 ```
-python D2W/utils/generate_criticality.py \
-  --file D2W/input/design_6/Memory_DRAM_3_From_Memory_DRAM_2.bmap \
-  --profiles both \
-  --force
+python D2W/utils/generate_criticality.py --file D2W/input/design_6/Memory_DRAM_3_From_Memory_DRAM_2.bmap --profiles both --force
 ```
 
 Supported profiles:
@@ -135,28 +133,12 @@ Supported profiles:
 `pad_risk_map_calculator.py` is the current D2W modeling entrypoint.
 `calculator_main.py` remains as a compatibility wrapper.
 
-Example for `design_6`:
+Benchmark example:
 
 ```
-python D2W/pad_risk_map_calculator.py \
-  --config D2W/configs/design_6/design_6.yaml \
-  --mode d2w_modeling \
-  --ds_name design_6 \
-  --ds_dir D2W/input/design_6 \
-  --criticality-profile default \
-  --verbose
-```
+cd D2W
 
-Example for `design_2`:
-
-```
-python D2W/pad_risk_map_calculator.py \
-  --config D2W/configs/design_2/design_2.yaml \
-  --mode d2w_modeling \
-  --ds_name design_2 \
-  --ds_dir D2W/input/design_2 \
-  --criticality-profile default \
-  --verbose
+python pad_risk_map_calculator.py --config configs/design_2/design_2.yaml --mode d2w_modeling --ds_name design_2 --ds_dir input/design_2 --criticality-profile default --verbose
 ```
 
 Analytical ESD map notes:
@@ -171,41 +153,12 @@ Analytical ESD map notes:
 
 # D2W Yield Simulation
 
-Example for `design_6`:
+Benchmark example:
 
 ```
-python D2W/simulator_main.py \
-  --config D2W/configs/design_6/design_6.yaml \
-  --mode d2w_simulation \
-  --ds_name design_6 \
-  --ds_dir D2W/input/design_6 \
-  --criticality-profile default \
-  --verbose
-```
+cd D2W
 
-Example for `design_2`:
-
-```
-python D2W/simulator_main.py \
-  --config D2W/configs/design_2/design_2.yaml \
-  --mode d2w_simulation \
-  --ds_name design_2 \
-  --ds_dir D2W/input/design_2 \
-  --criticality-profile default \
-  --verbose
-```
-
-Save verbose simulation failure-map artifacts:
-
-```
-python D2W/simulator_main.py \
-  --config D2W/configs/design_6/design_6.yaml \
-  --mode d2w_simulation \
-  --ds_name design_6 \
-  --ds_dir D2W/input/design_6 \
-  --criticality-profile default \
-  --verbose \
-  --save-failure-maps
+python simulator_main.py --config configs/design_2/design_2.yaml --mode d2w_simulation --ds_name design_2 --ds_dir input/design_2 --criticality-profile default --verbose
 ```
 
 The simulator writes an assembly summary and a per-interface yield file.
@@ -256,26 +209,10 @@ from the D2W simulation chain.
 
 # W2W Flow
 
-Example W2W pad risk map calculation:
+Benchmark W2W simulation example:
 
 ```
-python W2W/calculator_main.py \
-  --config W2W/configs/design_6/design_6.yaml \
-  --mode w2w_modeling \
-  --ds_name design_6 \
-  --ds_dir W2W/input/design_6 \
-  --verbose
-```
-
-Example W2W simulation:
-
-```
-python W2W/simulator_main.py \
-  --config W2W/configs/design_6/design_6.yaml \
-  --mode w2w_simulation \
-  --ds_name design_6 \
-  --ds_dir W2W/input/design_6 \
-  --verbose
+cd W2W && python simulator_main.py --config configs/design_6/design_6.yaml --mode w2w_simulation --ds_name design_6 --ds_dir input/design_6 --verbose
 ```
 
 W2W runs use the same terminal duck separator at completion.
@@ -346,7 +283,9 @@ Legacy format is deprecated but still supported:
 
 # Output
 
-Main D2W outputs are written under `output/<design_name>/`.
+When commands are run from inside `D2W`, main D2W outputs are written under
+`D2W/output/<design_name>/`. W2W commands follow the same convention under
+`W2W/output/<design_name>/`.
 
 - `<interface>_risk__<config_stem>__<criticality_profile>.map`: text risk map.
 - `<interface>_<mechanism>_risk_map__<config_stem>__<criticality_profile>.png`:
@@ -383,5 +322,6 @@ Useful D2W helpers include:
 
 # Notes
 
-Runtime files in `output/` and generated cache files are not required as source
-inputs. Re-run the modeling or simulation commands to regenerate them.
+Runtime files in `D2W/output/`, `W2W/output/`, and generated cache files are not
+required as source inputs. Re-run the modeling or simulation commands to
+regenerate them.

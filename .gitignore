@@ -8,6 +8,7 @@ design_*.yaml
 *.3dbv
 *.3dbx
 *.3dbf
+*.pdf
 *.joblib
 .codex
 *.tar.zst
