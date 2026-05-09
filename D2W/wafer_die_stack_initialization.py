@@ -311,7 +311,7 @@ class DieStack:
         """
         Die Stack object for hybrid bonding yield model.
         """
-        failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
+        failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'warpage', 'overall']
 
         self.cfg_dict = cfg_dict
         self.num_bonding_interfaces = len(cfg_dict) - 1  # Number of bonding interfaces is number of layers - 1
@@ -338,10 +338,10 @@ class DieStack:
         """
         # For yield modeling, calculate the die stack yield based on the die yield of each interface
         for interface_name in self.cfg_dict.keys():
-            self.die_yield_per_interface_dict[interface_name]['overall'] = self.die_yield_list_per_interface_dict[interface_name]['overlay'] * \
-                self.die_yield_list_per_interface_dict[interface_name]['particle'] * \
-                self.die_yield_list_per_interface_dict[interface_name]['mechanical'] * \
-                self.die_yield_list_per_interface_dict[interface_name]['ESD']
+            self.die_yield_per_interface_dict[interface_name]['overall'] = self.die_yield_per_interface_dict[interface_name]['overlay'] * \
+                self.die_yield_per_interface_dict[interface_name]['particle'] * \
+                self.die_yield_per_interface_dict[interface_name]['mechanical'] * \
+                self.die_yield_per_interface_dict[interface_name]['ESD']
             # Calculate the overall die stack yield by multiplying the die yield of all interfaces
             self.die_stack_yield *= self.die_yield_per_interface_dict[interface_name]['overall']
 

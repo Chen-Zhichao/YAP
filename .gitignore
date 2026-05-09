@@ -24,3 +24,4 @@ temp/
 show_profile.py
 W2W/*profile*.txt
 total_stack_warpage_16die.ipynb
+d2d_warpage_yield_monte_carlo_demo.ipynb

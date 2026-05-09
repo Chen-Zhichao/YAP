@@ -42,7 +42,7 @@ def parse_args():
     p.add_argument("--mode", "-m", required=True, help="Mode to load from config (default: w2w_modeling)")
     p.add_argument("--ds_name", "-d", required=True, help="Name of design (used for output directory naming)")
     p.add_argument("--ds_dir", required=True, help="Path to design directory")
-    p.add_argument("--plot", "-plot", default=False, action="store_true", help="Enable plotting of the pad risk map")
+    p.add_argument("--plot", "-plot", default=False, action="store_true", help="Enable optional debug plots")
     p.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output during simulation")
     p.add_argument(
         "--save-failure-maps",

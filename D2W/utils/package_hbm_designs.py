@@ -9,8 +9,7 @@ variant directories that each contain:
   - <INTERFACE>_criticality_esd_strict.txt
 
 The existing HBM_A.yaml / HBM_B.yaml configs are used directly with the
-legacy single-interface path in pad_risk_map_calculator.py and
-simulator_main.py.
+legacy single-interface path in simulator_main.py.
 
 Variants:
   - Original: preserve the original placement, but convert NC -> dummy

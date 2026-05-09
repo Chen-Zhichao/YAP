@@ -389,7 +389,7 @@ class WaferStack:
         num_dies_per_wafer: Number of dies per wafer (assumed same for all interfaces)
         die_stack_survival: Boolean array indicating whether each die stack survives
         """
-        failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
+        failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'warpage', 'overall']
         
         self.cfg_dict = cfg_dict
         self.num_bonding_interfaces = len(cfg_dict)

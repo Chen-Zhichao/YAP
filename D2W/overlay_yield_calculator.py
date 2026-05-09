@@ -11,9 +11,15 @@ Overlay yield calculator for D2W hybrid bonding:
 '''
 
 import numpy as np
+import os
 from scipy.optimize import fsolve
 import sympy as sp
 from scipy.stats import norm
+
+try:
+    from warpage_yield_calculator import get_interface_stack_warpage_map
+except ModuleNotFoundError:
+    from D2W.warpage_yield_calculator import get_interface_stack_warpage_map
 
 # Calculate the misalignment of the pad based on the systematic translation, rotation, and magnification
 def interface_pad_misalignment(
@@ -161,3 +167,126 @@ def overlay_yield_calculator(*,
 
 
     return overlay_die_yield
+
+
+def _cfg_float(cfg, key, default=0.0):
+    value = cfg.get(key, default) if hasattr(cfg, "get") else getattr(cfg, key, default)
+    if value in (None, "None"):
+        return float(default)
+    return float(value)
+
+
+def _interface_bow_difference_stats(cfg_dict, _3dbx_path=None):
+    """
+    Return Gaussian bow-difference stats for every interface.
+
+    bow_difference = incoming_top_die_initial_bow - existing_substack_warpage
+    """
+    fallback = {
+        interface_name: {
+            "bow_difference_mean_um": _cfg_float(cfg, "BOW_DIFFERENCE_MEAN_um", 0.0),
+            "bow_difference_std_um": _cfg_float(cfg, "BOW_DIFFERENCE_STD_um", 0.0),
+            "source": "config_fallback",
+        }
+        for interface_name, cfg in cfg_dict.items()
+    }
+    if not _3dbx_path or not os.path.exists(_3dbx_path):
+        return fallback
+
+    interface_stack_warpage = get_interface_stack_warpage_map(cfg_dict, _3dbx_path)
+    bow_difference_stats = {}
+    for interface_name, cfg in cfg_dict.items():
+        if interface_name not in interface_stack_warpage:
+            bow_difference_stats[interface_name] = fallback[interface_name]
+            continue
+
+        stats = interface_stack_warpage[interface_name]
+        top_mu_um = float(stats["top_die_mu_um"])
+        top_sigma_um = max(float(stats["top_die_sigma_um"]), 0.0)
+        stack_mu_um = float(stats["mu_um"])
+        stack_sigma_um = max(float(stats["sigma_um"]), 0.0)
+        bow_difference_stats[interface_name] = {
+            "bow_difference_mean_um": top_mu_um - stack_mu_um,
+            "bow_difference_std_um": float(
+                np.sqrt(top_sigma_um**2 + stack_sigma_um**2)
+            ),
+            "top_die_mean_um": top_mu_um,
+            "top_die_std_um": top_sigma_um,
+            "existing_stack_mean_um": stack_mu_um,
+            "existing_stack_std_um": stack_sigma_um,
+            "source": "substack_warpage_model",
+        }
+
+    return bow_difference_stats
+
+
+def stack_overlay_yield_calculator(
+    cfg_dict: dict,
+    die_stack,
+    _3dbx_path: str = None,
+):
+    """
+    Calculate D2W stack-level overlay yield from interface-level overlay yields.
+
+    The current D2W interface model represents one bonding interface in the
+    stack. We evaluate the overlay yield for each interface and multiply the
+    interface yields to obtain the stack overlay yield.
+    """
+    interface_overlay_yield_dict = {}
+    bow_difference_stats = _interface_bow_difference_stats(cfg_dict, _3dbx_path)
+
+    for interface_name, cfg in cfg_dict.items():
+        interface = die_stack.interfaces.interface_dict[interface_name]
+        max_allowed_misalignment_um = max_allowed_misalignment_calculator(
+            cfg=cfg,
+            PAD_TOP_R_um=cfg.PAD_TOP_R_um,
+            PAD_BOT_R_um=cfg.PAD_BOT_R_um,
+            PITCH_r_um=cfg.PITCH_r_um,
+            PITCH_c_um=cfg.PITCH_c_um,
+            CONTACT_AREA_CONSTRAINT=cfg.CONTACT_AREA_CONSTRAINT,
+            CRITICAL_DIST_CONSTRAINT=cfg.CRITICAL_DIST_CONSTRAINT,
+        )
+
+        boundary_coords = getattr(interface, "ovl_critical_pad_boundary_coords", None)
+        if boundary_coords is None:
+            boundary_coords = interface.pad_array_box
+        boundary_coords = np.asarray(boundary_coords, dtype=np.float64)
+
+        num_samples = int(cfg.num_samples)
+        system_translation_x_samples_um = np.random.normal(cfg.SYSTEM_TRANSLATION_X_MEAN_um, cfg.SYSTEM_TRANSLATION_X_STD_um, num_samples)
+        system_translation_y_samples_um = np.random.normal(cfg.SYSTEM_TRANSLATION_Y_MEAN_um, cfg.SYSTEM_TRANSLATION_Y_STD_um, num_samples)
+        system_rotation_samples_rad = np.random.normal(cfg.SYSTEM_ROTATION_MEAN_rad, cfg.SYSTEM_ROTATION_STD_rad, num_samples)
+        interface_bow_stats = bow_difference_stats[interface_name]
+        magnification_mean = (
+            _cfg_float(cfg, "k_mag", 0.0) * interface_bow_stats["bow_difference_mean_um"] + _cfg_float(cfg, "M_0", 0.0)
+        ) / 1e6
+        magnification_sigma = (abs(_cfg_float(cfg, "k_mag", 0.0)) * interface_bow_stats["bow_difference_std_um"]
+        ) / 1e6
+        system_magnification_samples_ppm = np.random.normal(magnification_mean, magnification_sigma, num_samples)
+
+        dx_samples = (
+            system_translation_x_samples_um[:, None]
+            - system_rotation_samples_rad[:, None] * boundary_coords[None, :, 1]
+            + system_magnification_samples_ppm[:, None] * boundary_coords[None, :, 0]
+        )
+        dy_samples = (
+            system_translation_y_samples_um[:, None]
+            + system_rotation_samples_rad[:, None] * boundary_coords[None, :, 0]
+            + system_magnification_samples_ppm[:, None] * boundary_coords[None, :, 1]
+        )
+        pad_misalignment_samples = np.sqrt(dx_samples**2 + dy_samples**2)
+
+        upper_limits = max_allowed_misalignment_um - pad_misalignment_samples
+        lower_limits = -max_allowed_misalignment_um - pad_misalignment_samples
+        corner_yields = np.mean(
+            norm.cdf(
+                upper_limits, loc=cfg.RANDOM_MISALIGNMENT_MEAN_um, scale=cfg.RANDOM_MISALIGNMENT_STD_um,
+            )
+            - norm.cdf(
+                lower_limits, loc=cfg.RANDOM_MISALIGNMENT_MEAN_um, scale=cfg.RANDOM_MISALIGNMENT_STD_um,
+            ),
+            axis=0,
+        )
+        interface_overlay_yield = float(np.min(corner_yields))
+        die_stack.die_yield_per_interface_dict[interface_name]['overlay'] = interface_overlay_yield
+

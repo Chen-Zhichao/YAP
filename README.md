@@ -22,8 +22,9 @@ when running the examples.
 +-- D2W/      # Code for D2W hybrid bonding
 |   +-- configs/    # Golden config plus local benchmark configs
 |   +-- input/      # Local 3dblox inputs, bump maps, and criticality files
-|   +-- pad_risk_map_calculator.py
+|   +-- calculator_main.py
 |   +-- simulator_main.py
+|   +-- overlay_yield_calculator.py
 |   +-- warpage_yield_calculator.py
 |   +-- warpage_yield_simulator.py
 |   +-- utils/
@@ -75,16 +76,10 @@ pip install -r requirements.txt
     mechanical failures.
   - `both`: generate both files.
 
-- Run D2W pad risk map generation.
-
-  Always enter `D2W` before running D2W modeling or simulation commands. This
-  keeps relative outputs under `D2W/output/`.
-
-  ```
-  cd D2W && python pad_risk_map_calculator.py --config configs/design_2/design_2.yaml --mode d2w_modeling --ds_name design_2 --ds_dir input/design_2 --criticality-profile default --verbose
-  ```
-
 - Run D2W yield simulation.
+
+  Always enter `D2W` before running D2W simulation commands. This keeps
+  relative outputs under `D2W/output/`.
 
   ```
   cd D2W && python simulator_main.py --config configs/design_2/design_2.yaml --mode d2w_simulation --ds_name design_2 --ds_dir input/design_2 --criticality-profile default --verbose
@@ -107,15 +102,7 @@ Format: `<instance> <bump_type> <x> <y> <port> <net>`
 
 Example: `Bump_0 uBUMP 115 1610 txdatasb txdatasb`
 
-**2. Risk Map (.map):**
-
-Format: `<x> <y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>`
-
-Probabilities are float values between `0` and `1`. ESD criticality is applied
-to ESD probability. Mechanical criticality is applied to overlay, particle, and
-mechanical probabilities.
-
-**3. Criticality (.txt):**
+**2. Criticality (.txt):**
 
 Current format: `<net> <group_size> <tolerated_esd_failures> <tolerated_mechanical_failures>`
 
@@ -140,7 +127,7 @@ Criticality values are calculated when reading the file:
 Legacy format is deprecated but still supported:
 `<net> <esd_criticality> <mechanical_criticality>`
 
-**4. 3dblox files:**
+**3. 3dblox files:**
 
 - `.3dbv`: chiplet definitions, design areas, regions, and thicknesses.
 - `.3dbx`: stack configuration containing chiplet instances and connections.
@@ -152,34 +139,26 @@ When commands are run from inside `D2W`, D2W outputs are written under
 `D2W/output/<design_name>/`. W2W commands follow the same convention under
 `W2W/output/<design_name>/`.
 
-**1. `<interface>_risk__<config_stem>__<criticality_profile>.map`**
-
-The text risk map for one interface.
-
-**2. `<interface>_<mechanism>_risk_map__<config_stem>__<criticality_profile>.png`**
-
-Per-mechanism pad risk maps written by `pad_risk_map_calculator.py`.
-
-**3. `assembly_yield_summary__<config_stem>__<criticality_profile>.txt`**
+**1. `assembly_yield_summary__<config_stem>__<criticality_profile>.txt`**
 
 Simulation settings, runtime information, stack assembly yield, and
 per-interface yield.
 
-**4. `assembly_yield_per_interface__<config_stem>__<criticality_profile>.txt`**
+**2. `assembly_yield_per_interface__<config_stem>__<criticality_profile>.txt`**
 
 The simulated assembly yield of each interface.
 
-**5. `assembly_fail_vec_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
+**3. `assembly_fail_vec_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
 
 Failure vectors for each die sample and failure mechanism. This file is written
 in verbose simulation mode.
 
-**6. `assembly_fail_map_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
+**4. `assembly_fail_map_per_interface_dict__<config_stem>__<criticality_profile>.npz`**
 
 Average per-pad failure counts. This file requires both `--verbose` and
 `--save-failure-maps`.
 
-**7. `simulation_failure_map_<mechanism>__<config_stem>__<criticality_profile>.png`**
+**5. `simulation_failure_map_<mechanism>__<config_stem>__<criticality_profile>.png`**
 
 Per-interface simulation failure heatmaps for `overlay`, `particle`,
 `mechanical`, `ESD`, and `overall`. These PNGs require `--save-failure-maps`.
