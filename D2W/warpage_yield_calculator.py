@@ -426,11 +426,11 @@ def compute_warpage_yield(cfg_dict, _3dbx_path):
                 "cannot infer final stack warpage cfg."
             )
 
-        final_interface = interfaces[-1]
-        if final_interface not in cfg_dict:
-            raise KeyError(f"Interface '{final_interface}' from {_3dbx_path} is missing in cfg_dict.")
+        interface_name = interfaces[-1]
+        if interface_name not in cfg_dict:
+            raise KeyError(f"Interface '{interface_name}' from {_3dbx_path} is missing in cfg_dict.")
 
-        final_cfg = cfg_dict[final_interface]
+        final_cfg = cfg_dict[interface_name]
         threshold_um = _stack_warpage_threshold_um(final_cfg)
         L_m = _top_die_half_length_m(final_cfg)
         DeltaT_K = _delta_t_from_cfg(final_cfg)
@@ -457,7 +457,7 @@ def compute_warpage_yield(cfg_dict, _3dbx_path):
             "substack_id": substack_id,
             "chiplets_bottom_to_top": list(chiplets),
             "interfaces_bottom_to_top": list(interfaces),
-            "final_interface": final_interface,
+            "final_interface": interface_name,
             "mu_um": float(mu_um),
             "sigma_um": float(sigma_um),
             "threshold_um": float(threshold_um),
@@ -473,3 +473,63 @@ def compute_warpage_yield(cfg_dict, _3dbx_path):
         "overall_warpage_yield": float(overall_warpage_yield),
         "substack_results": substack_results,
     }
+
+
+def stack_warpage_yield_calculator(
+    cfg_dict: dict,
+    die_stack,
+    _3dbx_path: str,
+):
+    """
+    Calculate final substack warpage yield and write it into ``die_stack``.
+
+    Warpage is a final-substack criterion, not a per-interface bonding
+    criterion. To avoid double counting, every interface is initialized to
+    warpage yield 1.0, and each substack writes its final-warpage yield only to
+    the final interface in that substack.
+    """
+    substacks = stack_graph_from_3dbx(_3dbx_path)
+    substack_warpage_yield_dict = {}
+
+    for interface_name in cfg_dict:
+        die_stack.die_yield_per_interface_dict[interface_name]["warpage"] = 1.0
+
+    for substack in substacks:
+        substack_id = int(substack["substack_id"])
+        chiplets = substack["chiplets_bottom_to_top"]
+        interfaces = substack["interfaces_bottom_to_top"]
+        if not interfaces:
+            raise ValueError(
+                f"Substack {substack_id} has no bonding interfaces; "
+                "cannot infer final stack warpage cfg."
+            )
+
+        interface_name = interfaces[-1]
+        if interface_name not in cfg_dict:
+            raise KeyError(f"Interface '{interface_name}' from {_3dbx_path} is missing in cfg_dict.")
+
+        final_cfg = cfg_dict[interface_name]
+        threshold_um = _stack_warpage_threshold_um(final_cfg)
+        L_m = _top_die_half_length_m(final_cfg)
+        DeltaT_K = _delta_t_from_cfg(final_cfg)
+        layer_df, layer_bow_sigma_um = _build_layer_df(
+            cfg_dict,
+            chiplets,
+            interfaces,
+        )
+
+        mu_um, sigma_um, sensitivities = _stack_warpage_gaussian(
+            layer_df,
+            layer_bow_sigma_um,
+            DeltaT_K=DeltaT_K,
+            L_m=L_m,
+        )
+        warpage_yield = _gaussian_abs_below_probability(
+            mu=mu_um,
+            sigma=sigma_um,
+            threshold=threshold_um,
+        )
+
+        die_stack.die_yield_per_interface_dict[interface_name]['warpage'] = float(warpage_yield)
+
+

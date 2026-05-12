@@ -337,11 +337,13 @@ class DieStack:
         Calculate the yield for each die stack based on the failure parameters of each interface.
         """
         # For yield modeling, calculate the die stack yield based on the die yield of each interface
+        self.die_stack_yield = 1.0
         for interface_name in self.cfg_dict.keys():
             self.die_yield_per_interface_dict[interface_name]['overall'] = self.die_yield_per_interface_dict[interface_name]['overlay'] * \
                 self.die_yield_per_interface_dict[interface_name]['particle'] * \
                 self.die_yield_per_interface_dict[interface_name]['mechanical'] * \
-                self.die_yield_per_interface_dict[interface_name]['ESD']
+                self.die_yield_per_interface_dict[interface_name]['ESD'] * \
+                self.die_yield_per_interface_dict[interface_name]['warpage']
             # Calculate the overall die stack yield by multiplying the die yield of all interfaces
             self.die_stack_yield *= self.die_yield_per_interface_dict[interface_name]['overall']
 
