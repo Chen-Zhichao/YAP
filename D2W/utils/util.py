@@ -505,6 +505,141 @@ def _interface_from_3dbx_connection(connection) -> str:
     return f"{interface_top}_From_{interface_bot}"
 
 
+def _rect_overlap_area_um2(rect_a: dict, rect_b: dict) -> float:
+    x_overlap = max(
+        0.0,
+        min(float(rect_a["x1_um"]), float(rect_b["x1_um"]))
+        - max(float(rect_a["x0_um"]), float(rect_b["x0_um"])),
+    )
+    y_overlap = max(
+        0.0,
+        min(float(rect_a["y1_um"]), float(rect_b["y1_um"]))
+        - max(float(rect_a["y0_um"]), float(rect_b["y0_um"])),
+    )
+    return float(x_overlap * y_overlap)
+
+
+def _rect_prism_surface_area_um2(width_um: float, length_um: float, thickness_um: float) -> float:
+    width_um = float(width_um)
+    length_um = float(length_um)
+    thickness_um = float(thickness_um)
+    if width_um <= 0.0 or length_um <= 0.0 or thickness_um <= 0.0:
+        raise ValueError(
+            "Chiplet width, length, and thickness must be positive when building ESD stack geometry."
+        )
+    return float(2.0 * (width_um * length_um + width_um * thickness_um + length_um * thickness_um))
+
+
+def _chiplet_rect_from_instance(stack, chiplet_inst, chiplet_def, instance_name: str) -> dict:
+    if instance_name not in stack:
+        raise ValueError(f"Stack instance '{instance_name}' is missing from Stack.")
+    if instance_name not in chiplet_inst:
+        raise ValueError(f"Stack instance '{instance_name}' is missing from ChipletInst.")
+
+    reference = str(chiplet_inst[instance_name].reference)
+    if reference not in chiplet_def:
+        raise ValueError(f"Chiplet reference '{reference}' is missing from ChipletDef.")
+
+    loc = stack[instance_name].get("loc", [0.0, 0.0])
+    if loc is None or len(loc) < 2:
+        loc = [0.0, 0.0]
+
+    width_um = float(chiplet_def[reference].design_area[0])
+    length_um = float(chiplet_def[reference].design_area[1])
+    thickness_um = float(chiplet_def[reference].thickness)
+    x0_um = float(loc[0])
+    y0_um = float(loc[1])
+
+    return {
+        "instance": str(instance_name),
+        "reference": reference,
+        "x0_um": x0_um,
+        "y0_um": y0_um,
+        "x1_um": x0_um + width_um,
+        "y1_um": y0_um + length_um,
+        "width_um": width_um,
+        "length_um": length_um,
+        "thickness_um": thickness_um,
+        "surface_area_um2": _rect_prism_surface_area_um2(width_um, length_um, thickness_um),
+    }
+
+
+def _stack_outer_surface_area_um2(layer_rects: list[dict]) -> float:
+    if not layer_rects:
+        raise ValueError("Cannot compute ESD stack surface area for an empty substack.")
+
+    surface_area_um2 = float(sum(float(layer["surface_area_um2"]) for layer in layer_rects))
+    for lower_layer, upper_layer in zip(layer_rects, layer_rects[1:]):
+        surface_area_um2 -= 2.0 * _rect_overlap_area_um2(lower_layer, upper_layer)
+
+    return float(max(surface_area_um2, 0.0))
+
+
+def esd_interface_geometry_from_3dblox(_3dbv_path: str, _3dbx_path: str) -> dict:
+    """
+    Return interface-level geometry needed by the floating-stack ESD model.
+
+    For interface j, the bottom body is the already-bonded substack below the
+    incoming top die. The bottom surface area is the exterior area of all
+    rectangular chiplet prisms in that substack, with internal bonded overlap
+    faces removed.
+    """
+    chiplet_defs_3dbv = OmegaConf.load(_3dbv_path)
+    stack_config_3dbx = OmegaConf.load(_3dbx_path)
+    chiplet_def = chiplet_defs_3dbv.ChipletDef
+    stack = stack_config_3dbx.Stack
+    chiplet_inst = stack_config_3dbx.ChipletInst
+
+    interface_geometry = {}
+    for substack in stack_graph_from_3dbx(_3dbx_path):
+        instances = list(substack.get("instances_bottom_to_top", []))
+        interfaces = list(substack["interfaces_bottom_to_top"])
+        if len(instances) != len(interfaces) + 1:
+            raise ValueError(
+                f"Substack {substack['substack_id']} has inconsistent instance/interface counts."
+            )
+
+        layer_rects = [
+            _chiplet_rect_from_instance(stack, chiplet_inst, chiplet_def, instance_name)
+            for instance_name in instances
+        ]
+
+        for interface_index, interface_name in enumerate(interfaces):
+            bottom_layers = layer_rects[:interface_index + 1]
+            incoming_top = layer_rects[interface_index + 1]
+            immediate_bottom = layer_rects[interface_index]
+
+            bottom_surface_area_um2 = _stack_outer_surface_area_um2(bottom_layers)
+            bottom_thickness_um = float(
+                sum(float(layer["thickness_um"]) for layer in bottom_layers)
+            )
+            top_thickness_um = float(incoming_top["thickness_um"])
+            bottom_has_root = any(
+                bool(stack[instance_name].get("root", False))
+                for instance_name in instances[:interface_index + 1]
+            )
+
+            interface_geometry[interface_name] = {
+                "ESD_TOP_INSTANCE": incoming_top["instance"],
+                "ESD_TOP_REFERENCE": incoming_top["reference"],
+                "ESD_BOTTOM_SUBSTACK_INSTANCES": ",".join(
+                    layer["instance"] for layer in bottom_layers
+                ),
+                "ESD_BOTTOM_SUBSTACK_REFERENCES": ",".join(
+                    layer["reference"] for layer in bottom_layers
+                ),
+                "ESD_TOP_SURFACE_AREA_um2": incoming_top["surface_area_um2"],
+                "ESD_BOTTOM_SUBSTACK_SURFACE_AREA_um2": bottom_surface_area_um2,
+                "ESD_OVERLAP_AREA_um2": _rect_overlap_area_um2(incoming_top, immediate_bottom),
+                "ESD_TOP_THICK_um": top_thickness_um,
+                "ESD_BOTTOM_SUBSTACK_THICK_um": bottom_thickness_um,
+                "ESD_POSTBOND_SUBSTACK_THICK_um": bottom_thickness_um + top_thickness_um,
+                "ESD_BOTTOM_BODY_KIND": "wafer" if bottom_has_root else "die",
+            }
+
+    return interface_geometry
+
+
 def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
     """
     Parse a 3Dblox stack config and return root-to-leaf substacks.
@@ -514,6 +649,7 @@ def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
     Each item has the form:
         {
             "substack_id": int,
+            "instances_bottom_to_top": [instance names],
             "chiplets_bottom_to_top": [reference names],
             "interfaces_bottom_to_top": [cfg_dict-compatible interface names],
         }
@@ -563,18 +699,26 @@ def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
 
     substacks = []
 
-    def dfs(instance_name: str, chiplet_path: list[str], interface_path: list[str], active_path: set[str]):
+    def dfs(
+        instance_name: str,
+        instance_path: list[str],
+        chiplet_path: list[str],
+        interface_path: list[str],
+        active_path: set[str],
+    ):
         if instance_name in active_path:
             cycle = " -> ".join(list(active_path) + [instance_name])
             raise ValueError(f"Cycle detected in stack graph: {cycle}")
         if instance_name not in chiplet_inst:
             raise ValueError(f"Stack instance '{instance_name}' is not in ChipletInst.")
 
+        next_instance_path = instance_path + [str(instance_name)]
         next_chiplet_path = chiplet_path + [str(chiplet_inst[instance_name].reference)]
         child_edges = children_by_parent.get(instance_name, [])
         if not child_edges:
             substacks.append({
                 "substack_id": len(substacks),
+                "instances_bottom_to_top": next_instance_path,
                 "chiplets_bottom_to_top": next_chiplet_path,
                 "interfaces_bottom_to_top": interface_path,
             })
@@ -585,13 +729,14 @@ def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
         for edge in child_edges:
             dfs(
                 edge["child"],
+                next_instance_path,
                 next_chiplet_path,
                 interface_path + [edge["interface"]],
                 next_active_path,
             )
 
     for root in roots:
-        dfs(root, [], [], set())
+        dfs(root, [], [], [], set())
 
     return substacks
 
@@ -619,6 +764,8 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
     ### Update cfg_list with design parameters from .3dbv and .bmap files
     cfg_dict = dict()
     stack_config_3dbx = OmegaConf.load(_3dbx_path)
+    _3dbv = OmegaConf.load(_3dbv_path)
+    esd_geometry_by_interface = esd_interface_geometry_from_3dblox(_3dbv_path, _3dbx_path)
 
     for _, connection in stack_config_3dbx.Connection.items():
         cfg = cfg_skeleton.copy()
@@ -630,7 +777,6 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
 
         ### Read .3dbv, .3dbx, and .bmap files
         ## Extract design parameters from .3dbv and .3dbf file
-        _3dbv = OmegaConf.load(_3dbv_path)
         _bmap_path = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
         top_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_TOP}.3dbf")
         bot_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_BOT}.3dbf")
@@ -692,6 +838,14 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
         ## Extract design parameters from .bmap file
         update_config_from_bmap(cfg, _bmap_path,
                                 y_tol=cfg.PITCH_r_um * 0.1, x_tol=cfg.PITCH_c_um * 0.1)
+
+        if cfg.INTERFACE in esd_geometry_by_interface:
+            esd_geometry = esd_geometry_by_interface[cfg.INTERFACE]
+            add_config_items(
+                cfg,
+                keys=list(esd_geometry.keys()),
+                values=list(esd_geometry.values()),
+            )
 
         # Store in config dictionary
         cfg_dict[cfg.INTERFACE] = cfg

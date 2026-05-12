@@ -150,10 +150,38 @@ d2w_simulation:
 
   V_MIN_V: 0.0
   V_MAX_V: 5.0
+  ESD_Z_TOP_UM: 0.1                     # Nominal top-die z gap used by ESD first-touch geometry (um)
+  ESD_ARC_SMALL_GAP_SLOPE_V_PER_UM: 97.0
+  ESD_ARC_PLATEAU_V: 337.0
+  ESD_ARC_PLATEAU_UPPER_GAP_UM: 7.0
+  ESD_ARC_LARGE_GAP_OFFSET_V: 170.0
+  ESD_ARC_LARGE_GAP_LINEAR_COEFF: 2.48
+  ESD_ARC_LARGE_GAP_SQRT_COEFF: 58.0
+  ESD_MIN_GEFF_um: 1.0e-3               # Numerical floor for capacitance gap (um)
+  ESD_ANALYTICAL_INNER_Q: 48
+  ESD_ANALYTICAL_OUTER_QX: 5
+  ESD_ANALYTICAL_OUTER_QY: 5
+  ESD_ANALYTICAL_VOLTAGE_Q: 5
+  ESD_ANALYTICAL_TAIL_SIGMA: 8.0
+  ESD_ANALYTICAL_CHUNK_SIZE: 100000
+  ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY: True
+  ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW: 8.0
+  ESD_ANALYTICAL_CANDIDATE_MIN_PADS: 4096
+  ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION: 0.8
 
   WEIBULL_K: 4.44985
   WEIBULL_LAMBDA: 0.0621816
   CUTOFF_MIN_A: 0.0
+  
+  # Modified floating-stack CDM LC model.
+  Cf_die: 0.904                           # Die self-capacitance geometry factor
+  Cf_wafer: 0.900                         # Wafer/root self-capacitance geometry factor
+  epsr: 1.0                             # Effective relative permittivity
+  Kc: 9.67230332132e-06                            # Close-proximity coupling participation factor
+  L0: 1.01907739978e-12                               # Baseline local discharge inductance (nH)
+  Kl: 1.0                               # Calibrated effective current-path coefficient
+  l0: 0.0197457261531                               # Reference length for sub-linear inductance scaling (mm)
+  m: 0.155397388889                                # Sub-linear size-scaling exponent, 0 <= m < 1
 
   # === Simulation Control ===
   simulation_times: 1                  # Number of simulation iterations
@@ -312,10 +340,38 @@ d2w_modeling:
 
   V_MIN_V: 0.0
   V_MAX_V: 5.0
+  ESD_Z_TOP_UM: 0.1                     # Nominal top-die z gap used by ESD first-touch geometry (um)
+  ESD_ARC_SMALL_GAP_SLOPE_V_PER_UM: 97.0
+  ESD_ARC_PLATEAU_V: 337.0
+  ESD_ARC_PLATEAU_UPPER_GAP_UM: 7.0
+  ESD_ARC_LARGE_GAP_OFFSET_V: 170.0
+  ESD_ARC_LARGE_GAP_LINEAR_COEFF: 2.48
+  ESD_ARC_LARGE_GAP_SQRT_COEFF: 58.0
+  ESD_MIN_GEFF_um: 1.0e-3               # Numerical floor for capacitance gap (um)
+  ESD_ANALYTICAL_INNER_Q: 48
+  ESD_ANALYTICAL_OUTER_QX: 5
+  ESD_ANALYTICAL_OUTER_QY: 5
+  ESD_ANALYTICAL_VOLTAGE_Q: 5
+  ESD_ANALYTICAL_TAIL_SIGMA: 8.0
+  ESD_ANALYTICAL_CHUNK_SIZE: 100000
+  ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY: True
+  ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW: 8.0
+  ESD_ANALYTICAL_CANDIDATE_MIN_PADS: 4096
+  ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION: 0.8
 
   WEIBULL_K: 4.44985
   WEIBULL_LAMBDA: 0.0621816
   CUTOFF_MIN_A: 0.0
+
+  # Modified floating-stack CDM LC model.
+  Cf_die: 0.904                           # Die self-capacitance geometry factor
+  Cf_wafer: 0.900                         # Wafer/root self-capacitance geometry factor
+  epsr: 1.0                             # Effective relative permittivity
+  Kc: 9.67230332132e-06                            # Close-proximity coupling participation factor
+  L0: 1.01907739978e-12                               # Baseline local discharge inductance (nH)
+  Kl: 1.0                               # Calibrated effective current-path coefficient
+  l0: 0.0197457261531                               # Reference length for sub-linear inductance scaling (mm)
+  m: 0.155397388889                                # Sub-linear size-scaling exponent, 0 <= m < 1
 
   # === Miscellaneous Parameters ===
   plot_flag: False                      # Enable plotting of results
