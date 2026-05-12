@@ -473,4 +473,5 @@ def stack_esd_yield_calculator(
     """
     Calculate D2W ESD yield for every interface and write into die_stack.
     """
-    
+    for interface_name, cfg in cfg_dict.items():
+        die_stack.die_yield_per_interface_dict[interface_name]['ESD'] = 1.0
