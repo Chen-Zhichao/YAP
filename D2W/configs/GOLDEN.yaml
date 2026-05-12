@@ -64,9 +64,14 @@ d2w_simulation:
   # === Bowing and Magnification ===
   BOW_DIFFERENCE_MEAN_um: 10.0               # Bow difference mean (µm)
   BOW_DIFFERENCE_STD_um: 1.0                 # Bow difference std (µm)
+  TOP_INI_BOW_MEAN_um: 10.0                  # Initial top die bow mean (µm)
+  TOP_INI_BOW_STD_um: 5.0                    # Initial top die bow std (µm)
+  BOT_INI_BOW_MEAN_um: 10.0                  # Initial bottom stack/die bow mean (µm)
+  BOT_INI_BOW_STD_um: 5.0                    # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
   WARPAGE_LIMIT_UM: 20                # Warpage limit (um)
+  ANNEAL_MODE: "batch"                # batch: all layers anneal once after stacking; sequential: anneal after each bond
 
   # === Defect Parameters ===
   first_contact: 'center'            # First contact location: 'center' or 'edge' or 'corner (left-top)'
@@ -221,9 +226,14 @@ d2w_modeling:
   SYSTEM_ROTATION_STD_rad: 1e-5             # Systematic rotation std (rad)
   BOW_DIFFERENCE_MEAN_um: 10.0               # Bow difference mean (µm)
   BOW_DIFFERENCE_STD_um: 1.0                 # Bow difference std (µm)
+  TOP_INI_BOW_MEAN_um: 10.0                  # Initial top die bow mean (µm)
+  TOP_INI_BOW_STD_um: 5.0                    # Initial top die bow std (µm)
+  BOT_INI_BOW_MEAN_um: 10.0                  # Initial bottom stack/die bow mean (µm)
+  BOT_INI_BOW_STD_um: 5.0                    # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
   WARPAGE_LIMIT_UM: 20                # Warpage limit (um)
+  ANNEAL_MODE: "batch"                # batch: all layers anneal once after stacking; sequential: anneal after each bond
 
   # === Defect Parameters ===
   first_contact: 'center'            # First contact location: 'center' or 'vertical-edge' or 'horizontal-edge' or 'corner' (left-bottom)

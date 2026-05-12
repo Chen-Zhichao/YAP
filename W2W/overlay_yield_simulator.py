@@ -13,6 +13,12 @@ import sympy as sp
 # from scipy.integrate import quad
 # from scipy.stats import norm
 import time
+import os
+
+try:
+    from warpage_yield_simulator import sample_interface_bow_difference
+except ModuleNotFoundError:
+    sample_interface_bow_difference = None
 
 
 
@@ -79,7 +85,24 @@ def MAX_ALLOWED_MISALIGNMENT_calculator(
 def overlay_term_simulator(
     cfg_dict,
     waf_stack_list: list,
+    _3dbx_path: str = None,
+    bow_difference_samples_by_interface: dict = None,
 ):
+    NUM_STACKS = len(waf_stack_list)
+    if bow_difference_samples_by_interface is None:
+        bow_difference_samples_by_interface = {}
+    if (
+        _3dbx_path is not None
+        and os.path.exists(_3dbx_path)
+        and sample_interface_bow_difference is not None
+        and not bow_difference_samples_by_interface
+    ):
+        bow_difference_samples_by_interface = sample_interface_bow_difference(
+            cfg_dict,
+            _3dbx_path,
+            num_samples=NUM_STACKS,
+        )
+
     for interface_name, cfg in cfg_dict.items():
         # Extract input parameters from the current cfg
         PAD_BOT_R_um, PAD_TOP_R_um = cfg.PAD_BOT_R_um, cfg.PAD_TOP_R_um
@@ -102,8 +125,6 @@ def overlay_term_simulator(
             cfg, PAD_TOP_R_um, PAD_BOT_R_um, PITCH_r_um, PITCH_c_um, CONTACT_AREA_CONSTRAINT, CRITICAL_DIST_CONSTRAINT
         )
 
-        NUM_STACKS = len(waf_stack_list)
-
         # Calculate the systematic translation, rotation, and magnification
         system_translation_x_um_list = (
             np.random.normal(SYSTEM_TRANSLATION_X_MEAN_um, SYSTEM_TRANSLATION_X_STD_um, (NUM_STACKS))
@@ -114,9 +135,12 @@ def overlay_term_simulator(
         system_rotation_rad_list = (
             np.random.normal(SYSTEM_ROTATION_MEAN_rad, SYSTEM_ROTATION_STD_rad, (NUM_STACKS))
         )
-        bow_difference_list = (
-            np.random.normal(BOW_DIFFERENCE_MEAN_um, BOW_DIFFERENCE_STD_um, (NUM_STACKS))
-        )
+        if interface_name in bow_difference_samples_by_interface:
+            bow_difference_list = bow_difference_samples_by_interface[interface_name]
+        else:
+            bow_difference_list = (
+                np.random.normal(BOW_DIFFERENCE_MEAN_um, BOW_DIFFERENCE_STD_um, (NUM_STACKS))
+            )
         system_magnification_ppm_list = (
             (k_mag * bow_difference_list + M_0) / 1e6
         )  # systematic magnification unit (ppm)

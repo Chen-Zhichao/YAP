@@ -420,7 +420,8 @@ class WaferStack:
             self.die_yield_list_per_interface_dict[interface_name]['overall'] = self.die_yield_list_per_interface_dict[interface_name]['overlay'] * \
                 self.die_yield_list_per_interface_dict[interface_name]['particle'] * \
                 self.die_yield_list_per_interface_dict[interface_name]['mechanical'] * \
-                self.die_yield_list_per_interface_dict[interface_name]['ESD']
+                self.die_yield_list_per_interface_dict[interface_name]['ESD'] * \
+                self.die_yield_list_per_interface_dict[interface_name]['warpage']
             
             # Update the die stack yield list by multiplying the overall yields from each interface
             self.die_stack_yield_list *= self.die_yield_list_per_interface_dict[interface_name]['overall']
@@ -648,7 +649,6 @@ def wafer_stack_list_initialize(
         
     
     return wafer_stack_list
-
 
 
 

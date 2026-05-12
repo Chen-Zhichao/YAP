@@ -19,6 +19,8 @@ try:
     from warpage_yield_calculator import (
         _build_layer_df,
         _delta_t_from_cfg,
+        _prebond_delta_t_from_cfg,
+        _anneal_mode_from_cfg,
         _stack_warpage_threshold_um,
         _top_die_half_length_m,
         compute_total_stack_warpage,
@@ -29,6 +31,8 @@ except ModuleNotFoundError:
     from D2W.warpage_yield_calculator import (
         _build_layer_df,
         _delta_t_from_cfg,
+        _prebond_delta_t_from_cfg,
+        _anneal_mode_from_cfg,
         _stack_warpage_threshold_um,
         _top_die_half_length_m,
         compute_total_stack_warpage,
@@ -167,7 +171,10 @@ def _interface_prebond_specs(cfg_dict, _3dbx_path):
                 DeltaT_K = 0.0
             else:
                 last_completed_interface = interfaces[interface_index - 1]
-                DeltaT_K = _delta_t_from_cfg(cfg_dict[last_completed_interface])
+                DeltaT_K = _prebond_delta_t_from_cfg(
+                    current_cfg,
+                    cfg_dict[last_completed_interface],
+                )
 
             specs.append({
                 "substack_id": substack_id,
@@ -180,6 +187,7 @@ def _interface_prebond_specs(cfg_dict, _3dbx_path):
                 "layer_df": layer_df,
                 "L_m": _top_die_half_length_m(current_cfg),
                 "DeltaT_K": DeltaT_K,
+                "anneal_mode": _anneal_mode_from_cfg(current_cfg),
             })
 
     return specs
@@ -245,6 +253,7 @@ def sample_interface_bow_difference(
             "last_completed_interface": spec["last_completed_interface"],
             "L_m": float(spec["L_m"]),
             "DeltaT_K": float(spec["DeltaT_K"]),
+            "anneal_mode": spec["anneal_mode"],
         }
 
     if return_details:

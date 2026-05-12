@@ -13,6 +13,7 @@ from overlay_yield_simulator import overlay_term_simulator
 from defect_yield_simulator import defect_yield_simulator
 from overall_yield_simulator import overall_yield_simulator
 from utils.util import result_wrapper
+from warpage_yield_simulator import sample_w2w_warpage_process
 
 
 def Assembly_Yield_Simulator(
@@ -59,10 +60,19 @@ def Assembly_Yield_Simulator(
         )
         num_dies_per_wafer = waf_stack_list[0].num_dies_per_wafer
 
+        _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
+        warpage_process_samples = sample_w2w_warpage_process(
+            cfg_dict            =       cfg_dict,
+            _3dbx_path          =       _3dbx_path,
+            num_samples         =       SIM_BATCH_SIZE,
+        )
+
         # Generate overlay misalignment component samples for each bonding interface in each stack
         overlay_term_simulator(
             cfg_dict                        =       cfg_dict,
             waf_stack_list                  =       waf_stack_list,
+            _3dbx_path                      =       _3dbx_path,
+            bow_difference_samples_by_interface =   warpage_process_samples["interface_bow_difference_samples"],
         )
     
         # Generate void defects for each bonding interface
@@ -70,6 +80,11 @@ def Assembly_Yield_Simulator(
             cfg_dict            =       cfg_dict,
             waf_stack_list      =       waf_stack_list,
         )
+
+        warpage_fail_vector = ~warpage_process_samples["stack_pass_vector"]
+        for stack_idx, warpage_failed in enumerate(warpage_fail_vector):
+            if warpage_failed:
+                waf_stack_list[stack_idx].die_stack_survival[:] = False
         
         # Calculate the overall yield
         yield_list, \

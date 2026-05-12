@@ -163,6 +163,35 @@ def _delta_t_from_cfg(cfg):
     return _cfg_float(cfg, "T_R") - _cfg_float(cfg, "T_anl")
 
 
+def _anneal_mode_from_cfg(cfg):
+    mode = str(_cfg_get(cfg, "ANNEAL_MODE", "batch")).strip().lower()
+    aliases = {
+        "batch": "batch",
+        "batch_anneal": "batch",
+        "sequential": "sequential",
+        "layer_by_layer": "sequential",
+        "per_layer": "sequential",
+    }
+    if mode not in aliases:
+        raise ValueError(
+            f"Unsupported ANNEAL_MODE='{mode}'. Use 'batch' or 'sequential'."
+        )
+    return aliases[mode]
+
+
+def _prebond_delta_t_from_cfg(current_cfg, last_completed_cfg):
+    """
+    Return the thermal excursion already seen by an existing lower substack
+    before bonding the current interface.
+
+    In D2W batch anneal, all layers are bonded first and annealed once at the
+    end, so prebond overlay should not include thermal stack warpage.
+    """
+    if _anneal_mode_from_cfg(current_cfg) == "batch" or last_completed_cfg is None:
+        return 0.0
+    return _delta_t_from_cfg(last_completed_cfg)
+
+
 def _top_die_half_length_m(cfg):
     die_w_um = _cfg_float(cfg, "DIE_W_um")
     die_l_um = _cfg_float(cfg, "DIE_L_um")
@@ -374,7 +403,10 @@ def get_interface_stack_warpage_map(cfg_dict, _3dbx_path):
                 last_completed_interface = None
             else:
                 last_completed_interface = interfaces[interface_index - 1]
-                DeltaT_K = _delta_t_from_cfg(cfg_dict[last_completed_interface])
+                DeltaT_K = _prebond_delta_t_from_cfg(
+                    current_cfg,
+                    cfg_dict[last_completed_interface],
+                )
 
             stack_mu_um, stack_sigma_um, sensitivities = _stack_warpage_gaussian(
                 layer_df,
@@ -395,6 +427,7 @@ def get_interface_stack_warpage_map(cfg_dict, _3dbx_path):
                 "top_die_sigma_um": float(top_die_sigma_um),
                 "L_m": float(L_m),                  # Die half-length
                 "DeltaT_K": float(DeltaT_K),
+                "anneal_mode": _anneal_mode_from_cfg(current_cfg),
                 "layers": layer_df.to_dict(orient="records"),
                 "initial_bow_sensitivity": sensitivities.tolist(),
             }
@@ -531,5 +564,4 @@ def stack_warpage_yield_calculator(
         )
 
         die_stack.die_yield_per_interface_dict[interface_name]['warpage'] = float(warpage_yield)
-
 
