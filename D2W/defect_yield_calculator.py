@@ -334,4 +334,4 @@ def stack_defect_yield_calculator(
             cfg,
             pad_bitmap_collection,
         )
-        die_stack.die_yield_per_interface_dict[interface_name]['particle'] = particle_yield
+        die_stack.die_yield_per_interface_dict[interface_name]['particle'] = particle_yield 
