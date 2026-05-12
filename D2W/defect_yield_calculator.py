@@ -327,7 +327,6 @@ def stack_defect_yield_calculator(
     """
     Calculate D2W particle yield for every interface and write into die_stack.
     """
-    particle_yield_info_dict = {}
     for interface_name, cfg in cfg_dict.items():
         pad_bitmap_collection = die_stack.interfaces.pad_bitmap_collection_dict[interface_name]
         particle_yield, info = interface_particle_yield_from_critical_bitmap(

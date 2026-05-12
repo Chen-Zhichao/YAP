@@ -462,3 +462,15 @@ def pad_esd_yield_map_generator(
     fig = None
 
     return valid_pad_yield_map_vec, fig, float(p_fail_avg)
+
+
+
+def stack_esd_yield_calculator(
+    *,
+    cfg_dict,
+    die_stack,
+):
+    """
+    Calculate D2W ESD yield for every interface and write into die_stack.
+    """
+    
