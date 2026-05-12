@@ -8,9 +8,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import time
 import os
-from scipy.stats import binom, norm
 from overlay_yield_simulator import die_pad_misalignment
-from Cu_gap_simulator import Cu_gap_simulator
+from Cu_gap_simulator import Cu_gap_correlated_simulator
 from debond import debond_dishing_intervals_from_coords #, post_bond_warpage_calculator
 from esd_yield_simulator import esd_failure_simulator
 from utils.util import atomic_save_npy, get_dishing_bound_cache_path
@@ -56,46 +55,6 @@ def _group_limit_exceeded(
     return bool(np.any(redundant_failed_counts > tolerated_failures))
 
 
-def _die_level_mechanical_yield_from_uniform_pad_yield(
-    pad_yield: float,
-    num_critical_pads: int,
-    redundant_group_sizes: np.ndarray,
-    tolerated_mechanical_failures: np.ndarray,
-) -> float:
-    """
-    Compute die-level mechanical yield assuming all mechanically relevant pads
-    have the same independent single-pad yield.
-    """
-    pad_yield = float(np.clip(pad_yield, 0.0, 1.0))
-    num_critical_pads = int(num_critical_pads)
-    redundant_group_sizes = np.asarray(redundant_group_sizes, dtype=np.int64).reshape(-1)
-    tolerated_mechanical_failures = np.asarray(
-        tolerated_mechanical_failures,
-        dtype=np.int64,
-    ).reshape(-1)
-
-    if pad_yield <= 0.0:
-        return 0.0
-    if pad_yield >= 1.0:
-        return 1.0
-
-    log_yield = num_critical_pads * np.log(pad_yield)
-    fail_prob = 1.0 - pad_yield
-    for group_size, tolerated_failures in zip(
-        redundant_group_sizes,
-        tolerated_mechanical_failures,
-    ):
-        if group_size <= 0:
-            continue
-        group_survival = float(
-            binom.cdf(int(tolerated_failures), int(group_size), fail_prob)
-        )
-        if group_survival <= 0.0:
-            return 0.0
-        log_yield += np.log(group_survival)
-    return float(np.exp(log_yield))
-
-
 def _build_interface_static_cache(
     *,
     cfg_dict: dict,
@@ -133,62 +92,11 @@ def _build_interface_static_cache(
 
         mechanical_active_pad_mask = critical_pad_bitmap | redundant_pad_bitmap
         mechanical_active_pad_mask_flat = mechanical_active_pad_mask.reshape(-1)
-        mechanical_active_valid_mask = mechanical_active_pad_mask_flat[valid_pad_mask_flat]
         num_mechanical_active_pads = int(np.count_nonzero(mechanical_active_pad_mask_flat))
 
-        mechanical_die_level_threshold = int(
-            getattr(cfg, "CU_RECESS_DIE_LEVEL_THRESHOLD_PADS", 100000)
-        )
-        use_mechanical_die_level_sampling = (
-            num_mechanical_active_pads > mechanical_die_level_threshold
-        )
+        use_mechanical_die_level_sampling = False
 
-        if use_mechanical_die_level_sampling:
-            upper_cu_height_limits_valid_pads = - valid_pad_dishing_bound_array[:, 0] * 2
-            lower_cu_height_limits_valid_pads = - valid_pad_dishing_bound_array[:, 1] * 2
-            upper_cu_height_limits_valid_pads = np.clip(
-                upper_cu_height_limits_valid_pads,
-                a_max=0,
-                a_min=None,
-            )
-            pad_pass_prob_valid = (
-                norm.cdf(
-                    upper_cu_height_limits_valid_pads,
-                    loc=cfg.TOP_DISH_MEAN_nm + cfg.BOT_DISH_MEAN_nm,
-                    scale=np.sqrt(cfg.TOP_DISH_STD_nm ** 2 + cfg.BOT_DISH_STD_nm ** 2),
-                )
-                - norm.cdf(
-                    lower_cu_height_limits_valid_pads,
-                    loc=cfg.TOP_DISH_MEAN_nm + cfg.BOT_DISH_MEAN_nm,
-                    scale=np.sqrt(cfg.TOP_DISH_STD_nm ** 2 + cfg.BOT_DISH_STD_nm ** 2),
-                )
-            )
-            pad_pass_prob = float(np.mean(pad_pass_prob_valid[mechanical_active_valid_mask]))
-            redundant_group_id_per_pad = np.asarray(
-                pad_bitmap_collection.get("redundant_group_id_per_pad"),
-                dtype=np.int32,
-            ).reshape(-1)
-            redundant_group_ids = redundant_group_id_per_pad[redundant_group_id_per_pad >= 0]
-            redundant_group_sizes = np.bincount(
-                redundant_group_ids,
-                minlength=len(
-                    np.asarray(
-                        pad_bitmap_collection.get("redundant_tolerated_mechanical_failures"),
-                        dtype=np.int32,
-                    )
-                ),
-            ).astype(np.int64, copy=False)
-            die_level_mechanical_yield = _die_level_mechanical_yield_from_uniform_pad_yield(
-                pad_yield=pad_pass_prob,
-                num_critical_pads=int(pad_bitmap_collection["num_critical_pads"]),
-                redundant_group_sizes=redundant_group_sizes,
-                tolerated_mechanical_failures=np.asarray(
-                    pad_bitmap_collection.get("redundant_tolerated_mechanical_failures"),
-                    dtype=np.int32,
-                ),
-            )
-        else:
-            die_level_mechanical_yield = None
+        die_level_mechanical_yield = None
 
         interface_static_cache[interface_name] = {
             "valid_pad_mask": valid_pad_mask,
@@ -271,8 +179,6 @@ def overall_yield_simulator(
             MAX_ALLOWED_MISALIGNMENT_um         = die_stack.interfaces.failure_params_dict[interface_name]['MAX_ALLOWED_MISALIGNMENT_um']
             RANDOM_MISALIGNMENT_MEAN_um         = cfg.RANDOM_MISALIGNMENT_MEAN_um
             RANDOM_MISALIGNMENT_STD_um          = cfg.RANDOM_MISALIGNMENT_STD_um
-            TOP_DISH_MEAN_nm, TOP_DISH_STD_nm   = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_nm
-            BOT_DISH_MEAN_nm, BOT_DISH_STD_nm   = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_nm
             TILT_X_MEAN_DEG, TILT_X_STD_DEG     = cfg.TILT_X_MEAN_DEG, cfg.TILT_X_STD_DEG
             TILT_Y_MEAN_DEG, TILT_Y_STD_DEG     = cfg.TILT_Y_MEAN_DEG, cfg.TILT_Y_STD_DEG
             approximate_set                     = cfg.approximate_set
@@ -536,12 +442,9 @@ def overall_yield_simulator(
             Check the Cu gap, a true Monte Carlo simulator
             '''
             # Check the Cu expansion
-            top_dish, bot_dish = Cu_gap_simulator(
-                TOP_DISH_MEAN_nm,
-                TOP_DISH_STD_nm,
-                BOT_DISH_MEAN_nm,
-                BOT_DISH_STD_nm,
-                int(die_interface.num_pads),
+            top_dish, bot_dish = Cu_gap_correlated_simulator(
+                cfg=cfg,
+                valid_pad_mask_flat=valid_pad_mask_flat,
             )
 
             if static_cache["use_mechanical_die_level_sampling"]:
@@ -587,15 +490,10 @@ def overall_yield_simulator(
 
                 # Check redundant pad Cu gap
                 redundant_pad_Cu_gap_fail_mask = (
-                    (
-                        (Cu_gap_map < zeta_0)
-                        | (Cu_gap_map > zeta_1)
-                    )
-                    & die_redundant_pad_bitmap.astype(bool)
+                    ((Cu_gap_map < zeta_0) | (Cu_gap_map > zeta_1)) & die_redundant_pad_bitmap.astype(bool)
                 )
                 new_redundant_pad_Cu_gap_fail_mask = (
-                    redundant_pad_Cu_gap_fail_mask
-                    & (~redundant_pad_fail_map)
+                    redundant_pad_Cu_gap_fail_mask & (~redundant_pad_fail_map)
                 )
                 redundant_pad_fail_map[redundant_pad_Cu_gap_fail_mask] = True
                 if redundant_group_id_grid is not None:
