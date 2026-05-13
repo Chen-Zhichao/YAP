@@ -18,7 +18,7 @@ import os
 try:
     from warpage_yield_simulator import sample_interface_bow_difference
 except ModuleNotFoundError:
-    sample_interface_bow_difference = None
+    from W2W.warpage_yield_simulator import sample_interface_bow_difference
 
 
 
@@ -91,12 +91,13 @@ def overlay_term_simulator(
     NUM_STACKS = len(waf_stack_list)
     if bow_difference_samples_by_interface is None:
         bow_difference_samples_by_interface = {}
-    if (
-        _3dbx_path is not None
-        and os.path.exists(_3dbx_path)
-        and sample_interface_bow_difference is not None
-        and not bow_difference_samples_by_interface
-    ):
+    if not bow_difference_samples_by_interface:
+        if _3dbx_path is None or not os.path.exists(_3dbx_path):
+            raise FileNotFoundError(
+                "W2W overlay simulation requires generated_stack_config.3dbx "
+                "or explicit bow_difference_samples_by_interface because "
+                "magnification is derived from warpage."
+            )
         bow_difference_samples_by_interface = sample_interface_bow_difference(
             cfg_dict,
             _3dbx_path,
@@ -115,8 +116,6 @@ def overlay_term_simulator(
         SYSTEM_TRANSLATION_X_STD_um = cfg.SYSTEM_TRANSLATION_X_STD_um
         SYSTEM_TRANSLATION_Y_MEAN_um = cfg.SYSTEM_TRANSLATION_Y_MEAN_um
         SYSTEM_TRANSLATION_Y_STD_um = cfg.SYSTEM_TRANSLATION_Y_STD_um
-        BOW_DIFFERENCE_MEAN_um = cfg.BOW_DIFFERENCE_MEAN_um
-        BOW_DIFFERENCE_STD_um = cfg.BOW_DIFFERENCE_STD_um
         k_mag = cfg.k_mag
         M_0 = cfg.M_0
 
@@ -135,11 +134,19 @@ def overlay_term_simulator(
         system_rotation_rad_list = (
             np.random.normal(SYSTEM_ROTATION_MEAN_rad, SYSTEM_ROTATION_STD_rad, (NUM_STACKS))
         )
-        if interface_name in bow_difference_samples_by_interface:
-            bow_difference_list = bow_difference_samples_by_interface[interface_name]
-        else:
-            bow_difference_list = (
-                np.random.normal(BOW_DIFFERENCE_MEAN_um, BOW_DIFFERENCE_STD_um, (NUM_STACKS))
+        if interface_name not in bow_difference_samples_by_interface:
+            raise KeyError(
+                f"Missing warpage-derived bow-difference samples for W2W interface "
+                f"'{interface_name}'."
+            )
+        bow_difference_list = np.asarray(
+            bow_difference_samples_by_interface[interface_name],
+            dtype=float,
+        )
+        if len(bow_difference_list) != NUM_STACKS:
+            raise ValueError(
+                f"Interface '{interface_name}' has {len(bow_difference_list)} "
+                f"bow-difference samples, but {NUM_STACKS} wafer stacks are simulated."
             )
         system_magnification_ppm_list = (
             (k_mag * bow_difference_list + M_0) / 1e6

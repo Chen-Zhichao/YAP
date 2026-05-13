@@ -6,12 +6,8 @@
 #### Date: Feb 20, 2026
 
 import numpy as np
-from scipy.integrate import quad
-from scipy.stats import norm
 from scipy.special import ndtr
-from debond import debond_dishing_bounds_calculator, debond_dishing_bounds_calculator_coords
-import matplotlib.pyplot as plt
-import time
+from debond import debond_dishing_bounds_calculator, debond_dishing_intervals_from_coords
 
 
 # =====================================================================
@@ -188,86 +184,261 @@ def assign_pads_to_blocks(
     return block_r * int(np.ceil(PAD_ARR_COL / block_size_c)) + block_c
 
 
-def pad_Cu_expansion_yield_map_generator(*,
-        cfg,
-        wafer,
-        TOP_DISH_MEAN_nm: float,
-        TOP_DISH_STD_nm: float,
-        BOT_DISH_MEAN_nm: float,
-        BOT_DISH_STD_nm: float,
-        pad_bitmap_collection: dict,
-    ):
-    glb_cu_expansion_pad_yield_min = 1.0  # Initialize to a high value
-    glb_cu_expansion_pad_yield_max = 0.0  # Initialize to a low value
-    valid_pad_mask = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
-    for i, die in enumerate(wafer.die_list):
-        die_pad_coords = wafer.base_pad_coords + die.die_center
-        valid_die_pad_coords = die_pad_coords[valid_pad_mask.flatten() == 1]
-        start_time = time.time()
-        valid_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
-        print("Dishing bound calculation time for die {}: {:.2f} seconds".format(i, time.time() - start_time))
-        
-        upper_limits_valid_pads = - valid_dishing_bound_array[:, 0] * 2 # - upper limits of the sum of top and bottom Cu heights
-        lower_limits_valid_pads = - valid_dishing_bound_array[:, 1] * 2 # - lower limits of the sum of top and bottom Cu heights
-        pos_valid_pads = norm.cdf(upper_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
-                   norm.cdf(lower_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
-        pad_yield_map = np.full((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), np.nan)
-        pad_yield_map[valid_pad_mask == 1] = pos_valid_pads
-        
-        glb_cu_expansion_pad_yield_min = min(glb_cu_expansion_pad_yield_min, np.nanmin(pad_yield_map))
-        glb_cu_expansion_pad_yield_max = max(glb_cu_expansion_pad_yield_max, np.nanmax(pad_yield_map))
-        die.pad_yield_map['Y_ce'] = pad_yield_map
-        print("Generated pad-level Cu expansion yield map for die {}.".format(i))
-        
-    wafer.glb_pad_yield_min_max_dict['Y_ce'] = (glb_cu_expansion_pad_yield_min, glb_cu_expansion_pad_yield_max)
-    print("Global min of the pad-level Cu expansion yield: {}".format(glb_cu_expansion_pad_yield_min))
-    print("Global max of the pad-level Cu expansion yield: {}".format(glb_cu_expansion_pad_yield_max))
+def block_indices_from_flat_indices(
+    flat_indices: np.ndarray,
+    pad_arr_col: int,
+    block_size_r: int,
+    block_size_c: int,
+) -> np.ndarray:
+    flat_indices = np.asarray(flat_indices, dtype=np.int64).reshape(-1)
+    pad_rows = flat_indices // int(pad_arr_col)
+    pad_cols = flat_indices % int(pad_arr_col)
+    block_rows = pad_rows // int(block_size_r)
+    block_cols = pad_cols // int(block_size_c)
+    num_block_cols = int(np.ceil(int(pad_arr_col) / int(block_size_c)))
+    return (block_rows * num_block_cols + block_cols).astype(np.int64)
 
 
+def _poisson_binomial_at_most_k_from_pass_probs(pass_probs, tolerated_failures):
+    pass_probs = np.asarray(pass_probs, dtype=np.float64).reshape(-1)
+    tolerated_failures = int(tolerated_failures)
 
-def stack_stress_yield_calculator_0(
-        cfg_dict: dict,
-        waf_stack,
-        pad_bitmap_collection_dict: dict,
-        valid_pad_mask_dict: dict,
+    if pass_probs.size == 0:
+        return 1.0
+    if tolerated_failures < 0:
+        return 0.0
+    if tolerated_failures >= pass_probs.size:
+        return 1.0
+
+    fail_probs = np.clip(1.0 - pass_probs, 0.0, 1.0)
+    pmf = np.zeros(tolerated_failures + 1, dtype=np.float64)
+    pmf[0] = 1.0
+
+    for fail_prob in fail_probs:
+        pass_prob = 1.0 - fail_prob
+        next_pmf = pmf * pass_prob
+        next_pmf[1:] += pmf[:-1] * fail_prob
+        pmf = next_pmf
+
+    return float(np.clip(np.sum(pmf), 0.0, 1.0))
+
+
+def _poisson_binomial_pmf_truncated_from_pass_probs(pass_probs, tolerated_failures):
+    pass_probs = np.asarray(pass_probs, dtype=np.float64).reshape(-1)
+    tolerated_failures = int(tolerated_failures)
+    pmf = np.zeros(tolerated_failures + 1, dtype=np.float64)
+    pmf[0] = 1.0
+
+    for pass_prob in np.clip(pass_probs, 0.0, 1.0):
+        fail_prob = 1.0 - pass_prob
+        next_pmf = pmf * pass_prob
+        next_pmf[1:] += pmf[:-1] * fail_prob
+        pmf = next_pmf
+
+    return pmf
+
+
+def cu_recess_redundant_group_yield_spatial(
+    mu: float,
+    a: np.ndarray,
+    b: np.ndarray,
+    sigma_L: float,
+    sigma_T: float,
+    sigma_eps: float,
+    block_indices: np.ndarray,
+    tolerated_failures: int,
+    n_gh_outer: int = 40,
+    n_gh_inner: int = 40,
+) -> float:
+    """
+    Probability that a redundant pad group has no more than
+    ``tolerated_failures`` failed pads under the same 3-level Cu-recess
+    correlation model used by critical pads.
+
+    This integrates the shared die-level and block-level components. It is
+    exact for one redundant group under this model.
+    """
+    a = np.asarray(a, dtype=np.float64).reshape(-1)
+    b = np.asarray(b, dtype=np.float64).reshape(-1)
+    block_indices = np.asarray(block_indices, dtype=np.int64).reshape(-1)
+    tolerated_failures = int(tolerated_failures)
+
+    if a.size == 0:
+        return 1.0
+    if tolerated_failures < 0:
+        return 0.0
+    if tolerated_failures >= a.size:
+        return 1.0
+    if tolerated_failures == 0:
+        return cu_recess_die_yield_spatial(
+            mu=mu,
+            a=a,
+            b=b,
+            sigma_L=sigma_L,
+            sigma_T=sigma_T,
+            sigma_eps=sigma_eps,
+            block_indices=block_indices,
+            n_gh_outer=n_gh_outer,
+            n_gh_inner=n_gh_inner,
+        )
+
+    order = np.argsort(block_indices, kind="mergesort")
+    a_s = a[order]
+    b_s = b[order]
+    block_s = block_indices[order]
+    _, block_starts = np.unique(block_s, return_index=True)
+    block_stops = np.r_[block_starts[1:], a_s.size]
+
+    zG, wG = _gh_nodes_weights(n_gh_outer)
+    zT, wT = _gh_nodes_weights(n_gh_inner)
+    outer_vals = np.zeros(n_gh_outer, dtype=np.float64)
+
+    for g_idx, g_val in enumerate(zG):
+        total_pmf = np.zeros(tolerated_failures + 1, dtype=np.float64)
+        total_pmf[0] = 1.0
+        mu_g = mu + sigma_L * g_val
+
+        for start, stop in zip(block_starts, block_stops):
+            a_block = a_s[start:stop]
+            b_block = b_s[start:stop]
+            block_pmf = np.zeros(tolerated_failures + 1, dtype=np.float64)
+
+            for t_val, t_weight in zip(zT, wT):
+                mean_j = mu_g + sigma_T * t_val
+                if sigma_eps > 0:
+                    pass_probs = ndtr((b_block - mean_j) / sigma_eps) - ndtr(
+                        (a_block - mean_j) / sigma_eps
+                    )
+                else:
+                    pass_probs = ((mean_j >= a_block) & (mean_j <= b_block)).astype(
+                        np.float64
+                    )
+                block_pmf += t_weight * _poisson_binomial_pmf_truncated_from_pass_probs(
+                    pass_probs,
+                    tolerated_failures,
+                )
+
+            total_pmf = np.convolve(total_pmf, block_pmf)[: tolerated_failures + 1]
+
+        outer_vals[g_idx] = np.sum(total_pmf)
+
+    return float(np.clip(np.sum(wG * outer_vals), 0.0, 1.0))
+
+
+def _redundant_group_yield_spatial(
+    *,
+    mu,
+    lower_limits_by_selected_idx,
+    upper_limits_by_selected_idx,
+    selected_flat_idx,
+    cfg,
+    sigma_L,
+    sigma_T,
+    sigma_eps,
+    pad_bitmap_collection,
+    block_size_r,
+    block_size_c,
 ):
-    for interface_name, cfg in cfg_dict.items():
-        interface = waf_stack.interfaces.interface_dict[interface_name]
-        pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
-        valid_pad_mask = valid_pad_mask_dict[interface_name]
+    redundant_net_to_1d_physical_mask = pad_bitmap_collection.get(
+        "redundant_net_to_1d_physical_mask",
+        {},
+    )
+    criticality_info = pad_bitmap_collection.get("criticality_info", {})
+    if not redundant_net_to_1d_physical_mask:
+        return 1.0
 
-        # Extract the necessary parameters for Cu expansion yield calculation
-        TOP_DISH_MEAN_nm, TOP_DISH_STD_nm = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_L_nm
-        BOT_DISH_MEAN_nm, BOT_DISH_STD_nm = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_L_nm
-        CRITICAL_PAD_MASK = pad_bitmap_collection['CRITICAL_PAD_BITMAP'].flatten()
-        redundant_net_to_1d_physical_mask = pad_bitmap_collection['redundant_net_to_1d_physical_mask']
+    redundant_yield = 1.0
+    for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+        physical_mask = np.asarray(physical_mask, dtype=np.int64).reshape(-1)
+        physical_mask = physical_mask[physical_mask >= 0]
+        if physical_mask.size == 0:
+            continue
+        if redundant_net not in criticality_info:
+            raise KeyError(
+                f"Missing criticality info for redundant net '{redundant_net}'."
+            )
+
+        selected_pos = np.searchsorted(selected_flat_idx, physical_mask)
+        in_range = selected_pos < selected_flat_idx.size
+        matches = np.zeros_like(in_range, dtype=bool)
+        matches[in_range] = selected_flat_idx[selected_pos[in_range]] == physical_mask[in_range]
+        if not np.all(matches):
+            missing = physical_mask[~matches][:5]
+            raise ValueError(
+                f"Redundant net '{redundant_net}' references pads not present in "
+                f"the selected Cu-yield pad set, e.g. {missing.tolist()}."
+            )
+
+        tolerated_failures = int(
+            criticality_info[redundant_net]["tolerated_mechanical_failures"]
+        )
+        group_yield = cu_recess_redundant_group_yield_spatial(
+            mu=mu,
+            a=lower_limits_by_selected_idx[selected_pos],
+            b=upper_limits_by_selected_idx[selected_pos],
+            sigma_L=sigma_L,
+            sigma_T=sigma_T,
+            sigma_eps=sigma_eps,
+            block_indices=block_indices_from_flat_indices(
+                physical_mask,
+                cfg.PAD_ARR_COL,
+                block_size_r,
+                block_size_c,
+            ),
+            tolerated_failures=tolerated_failures,
+        )
+        redundant_yield *= group_yield
+        if redundant_yield <= 0.0:
+            return 0.0
+
+    return float(np.clip(redundant_yield, 0.0, 1.0))
 
 
-        stress_yield_list = []
 
-        for die_ind, die in enumerate(interface.die_list):
-            die_pad_coords = interface.base_pad_coords + die.die_center
-            valid_die_pad_coords = die_pad_coords[valid_pad_mask.flatten() == 1]
-            start_time = time.time()
-            valid_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
-            # print("Dishing bound calculation time for die {}: {:.2f} seconds".format(die_ind, time.time() - start_time))
-            upper_limits_valid_pads = - valid_dishing_bound_array[:, 0] * 2 # - upper limits of the sum of top and bottom Cu heights
-            lower_limits_valid_pads = - valid_dishing_bound_array[:, 1] * 2 # - lower limits of the sum of top and bottom Cu heights
-            pos_valid_pads = norm.cdf(upper_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
-                    norm.cdf(lower_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
-            # Critical yield is the pos of the critical pads multiplied together
-            stress_yield_critical_pads = np.prod(pos_valid_pads[CRITICAL_PAD_MASK == 1])
-            stress_yield_redundant_nets = 1.0
-            for redundant_net, physical_pad_indices in redundant_net_to_1d_physical_mask.items():
-                num_replicas = len(physical_pad_indices)
-                stress_yield_redundant_nets *= 1 - (1 - np.prod(pos_valid_pads[physical_pad_indices])) ** num_replicas
-            stress_yield = stress_yield_critical_pads * stress_yield_redundant_nets
-            stress_yield_list.append(stress_yield)
 
-            # break
+# def stack_stress_yield_calculator_0(
+#         cfg_dict: dict,
+#         waf_stack,
+#         pad_bitmap_collection_dict: dict,
+#         valid_pad_mask_dict: dict,
+# ):
+#     for interface_name, cfg in cfg_dict.items():
+#         interface = waf_stack.interfaces.interface_dict[interface_name]
+#         pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
+#         valid_pad_mask = valid_pad_mask_dict[interface_name]
+
+#         # Extract the necessary parameters for Cu expansion yield calculation
+#         TOP_DISH_MEAN_nm, TOP_DISH_STD_nm = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_L_nm
+#         BOT_DISH_MEAN_nm, BOT_DISH_STD_nm = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_L_nm
+#         CRITICAL_PAD_MASK = pad_bitmap_collection['CRITICAL_PAD_BITMAP'].flatten()
+#         redundant_net_to_1d_physical_mask = pad_bitmap_collection['redundant_net_to_1d_physical_mask']
+
+
+#         stress_yield_list = []
+
+#         for die_ind, die in enumerate(interface.die_list):
+#             die_pad_coords = interface.base_pad_coords + die.die_center
+#             valid_die_pad_coords = die_pad_coords[valid_pad_mask.flatten() == 1]
+#             start_time = time.time()
+#             valid_dishing_bound_array = debond_dishing_bounds_calculator(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
+#             # print("Dishing bound calculation time for die {}: {:.2f} seconds".format(die_ind, time.time() - start_time))
+#             upper_limits_valid_pads = - valid_dishing_bound_array[:, 0] * 2 # - upper limits of the sum of top and bottom Cu heights
+#             lower_limits_valid_pads = - valid_dishing_bound_array[:, 1] * 2 # - lower limits of the sum of top and bottom Cu heights
+#             pos_valid_pads = norm.cdf(upper_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)) - \
+#                     norm.cdf(lower_limits_valid_pads, loc=TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm, scale=np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2))
+#             # Critical yield is the pos of the critical pads multiplied together
+#             stress_yield_critical_pads = np.prod(pos_valid_pads[CRITICAL_PAD_MASK == 1])
+#             stress_yield_redundant_nets = 1.0
+#             for redundant_net, physical_pad_indices in redundant_net_to_1d_physical_mask.items():
+#                 num_replicas = len(physical_pad_indices)
+#                 stress_yield_redundant_nets *= 1 - (1 - np.prod(pos_valid_pads[physical_pad_indices])) ** num_replicas
+#             stress_yield = stress_yield_critical_pads * stress_yield_redundant_nets
+#             stress_yield_list.append(stress_yield)
+
+#             # break
             
-        # Update the die yield list for this interface in the wafer stack
-        waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = np.array(stress_yield_list)
+#         # Update the die yield list for this interface in the wafer stack
+#         waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = np.array(stress_yield_list)
 
 
 
@@ -312,10 +483,11 @@ def stack_stress_yield_calculator(
       1) Radial-layer grouping  — ~1200 dies  →  ~20 representative groups
       2) Vertex-distance cache  — skip GH when dishing bounds are identical
       3) debond_dishing_bounds_calculator()        — one-shot radial LUT
-         debond_dishing_bounds_calculator_coords() — per-pad lookup on cache miss
+         debond_dishing_intervals_from_coords()    — per-pad lookup on cache miss
     """
     for interface_name, cfg in cfg_dict.items():
         interface = waf_stack.interfaces.interface_dict[interface_name]
+        pad_bitmap_collection = waf_stack.interfaces.pad_bitmap_collection_dict[interface_name]
 
         # --- Config ---
         PAD_ARR_ROW, PAD_ARR_COL = cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL
@@ -328,9 +500,8 @@ def stack_stress_yield_calculator(
         BOT_DISH_STD_T_nm = cfg.BOT_DISH_STD_T_nm
         BOT_DISH_STD_E_nm = cfg.BOT_DISH_STD_E_nm
 
-        block_size_r = cfg.TL_um // cfg.PITCH_r_um
-        block_size_c = cfg.TL_um // cfg.PITCH_c_um
-        block_idx = assign_pads_to_blocks(PAD_ARR_ROW, PAD_ARR_COL, block_size_r, block_size_c)
+        block_size_r = max(1, int(round(float(cfg.TL_um) / float(cfg.PITCH_r_um))))
+        block_size_c = max(1, int(round(float(cfg.TL_um) / float(cfg.PITCH_c_um))))
 
         mu        = TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm
         sigma_L   = np.sqrt(TOP_DISH_STD_L_nm**2 + BOT_DISH_STD_L_nm**2)
@@ -338,6 +509,40 @@ def stack_stress_yield_calculator(
         sigma_eps = np.sqrt(TOP_DISH_STD_E_nm**2 + BOT_DISH_STD_E_nm**2)
 
         stress_yield_array = np.full(interface.num_dies, np.nan, dtype=np.float64)
+        critical_pad_mask_flat = (
+            pad_bitmap_collection["CRITICAL_PAD_BITMAP"].reshape(-1).astype(bool)
+        )
+        redundant_pad_mask_flat = (
+            pad_bitmap_collection["REDUNDANT_PAD_BITMAP"].reshape(-1).astype(bool)
+        )
+        selected_pad_mask_flat = critical_pad_mask_flat | redundant_pad_mask_flat
+        selected_flat_idx = np.flatnonzero(selected_pad_mask_flat).astype(np.int64)
+        critical_flat_idx = np.flatnonzero(critical_pad_mask_flat).astype(np.int64)
+        if selected_flat_idx.size == 0:
+            stress_yield_array[:] = 1.0
+            waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array
+            continue
+        if interface.base_pad_coords is None:
+            raise ValueError(
+                f"Interface '{interface_name}' does not have pad coordinates. "
+                "Cu mechanical yield modeling needs coordinates for critical "
+                "and redundant pads."
+            )
+        base_pad_xy = np.asarray(interface.base_pad_coords, dtype=np.float64)
+        selected_base_pad_xy = base_pad_xy[selected_flat_idx]
+        if not np.all(np.isfinite(selected_base_pad_xy)):
+            bad = selected_flat_idx[~np.all(np.isfinite(selected_base_pad_xy), axis=1)][:5]
+            raise ValueError(
+                f"Interface '{interface_name}' has selected critical/redundant "
+                f"pads with invalid coordinates, e.g. flat indices {bad.tolist()}."
+            )
+        critical_pos = np.searchsorted(selected_flat_idx, critical_flat_idx)
+        critical_block_idx = block_indices_from_flat_indices(
+            critical_flat_idx,
+            PAD_ARR_COL,
+            block_size_r,
+            block_size_c,
+        )
 
         # ---- 1) Build radial dishing LUT once (no pad coords needed) ----
         radial_lut_array = debond_dishing_bounds_calculator(
@@ -359,7 +564,6 @@ def stack_stress_yield_calculator(
         #   value = computed die yield
         yield_cache = {}    # type: dict[tuple, float]
         cache_hits  = 0
-        base_pad_xy = interface.base_pad_coords     # (N_pads, 2) um
 
         for grp in die_groups:
             die_ind = int(grp['representative_index'])
@@ -373,9 +577,8 @@ def stack_stress_yield_calculator(
                 cache_hits += 1
             else:
                 # Cache miss: query per-pad dishing bounds via coords API
-                die_pad_coords = base_pad_xy + die.die_center   # (N_pads, 2) um
-                start_time = time.time()
-                pad_dishing_bound_array = debond_dishing_bounds_calculator_coords(
+                die_pad_coords = selected_base_pad_xy + die.die_center   # (N_selected, 2) um
+                pad_dishing_bound_array = debond_dishing_intervals_from_coords(
                     cfg, die_pad_coords,
                 )  # (N_pads, 2): each row sorted (D_low_nm, D_high_nm)
                 # print(
@@ -385,21 +588,47 @@ def stack_stress_yield_calculator(
                 #     )
                 # )
 
-                # Derive survival bounds (same convention as original code)
-                upper_limits = -pad_dishing_bound_array[:, 0] * 2
-                lower_limits = -pad_dishing_bound_array[:, 1] * 2
+                # Match simulator convention: lower/upper Cu-height bounds
+                # are clipped to <= 0 after converting from dishing intervals.
+                upper_limits = np.clip(
+                    -pad_dishing_bound_array[:, 0] * 2,
+                    a_min=None,
+                    a_max=0,
+                )
+                lower_limits = np.clip(
+                    -pad_dishing_bound_array[:, 1] * 2,
+                    a_min=None,
+                    a_max=0,
+                )
 
-                time_before = time.time()
-                stress_die_yield = cu_recess_die_yield_spatial(
+                if critical_flat_idx.size > 0:
+                    critical_yield = cu_recess_die_yield_spatial(
+                        mu=mu,
+                        a=lower_limits[critical_pos],
+                        b=upper_limits[critical_pos],
+                        sigma_L=sigma_L,
+                        sigma_T=sigma_T,
+                        sigma_eps=sigma_eps,
+                        block_indices=critical_block_idx,
+                        # g=0.0,
+                    )
+                else:
+                    critical_yield = 1.0
+
+                redundant_yield = _redundant_group_yield_spatial(
                     mu=mu,
-                    a=lower_limits,
-                    b=upper_limits,
+                    lower_limits_by_selected_idx=lower_limits,
+                    upper_limits_by_selected_idx=upper_limits,
+                    selected_flat_idx=selected_flat_idx,
+                    cfg=cfg,
                     sigma_L=sigma_L,
                     sigma_T=sigma_T,
                     sigma_eps=sigma_eps,
-                    block_indices=block_idx,
-                    # g=0.0,
+                    pad_bitmap_collection=pad_bitmap_collection,
+                    block_size_r=block_size_r,
+                    block_size_c=block_size_c,
                 )
+                stress_die_yield = float(critical_yield * redundant_yield)
                 # print(
                 #     "GH yield for die {} (layer {}, count {}): {:.6f}  [{:.2f}s]".format(
                 #         die_ind, grp['layer_id'], grp['count'],
@@ -417,3 +646,5 @@ def stack_stress_yield_calculator(
         #     )
         # )
         waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array
+
+

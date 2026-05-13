@@ -362,11 +362,21 @@ class DieStack:
             for j, failure_mechanism in enumerate(failure_mechanisms):
                 die_yield_array[i, j] = self.die_yield_per_interface_dict[interface_name][failure_mechanism]
         # Print the table
+        interface_col_width = max(
+            len("Interface Name"),
+            *(len(interface_name) for interface_name in interface_names),
+        )
+        value_col_width = 11
         print("Die Yield Table:")
-        print("Interface Name\t" + "\t".join(failure_mechanisms))
+        header = f"{'Interface Name':<{interface_col_width}}"
+        for failure_mechanism in failure_mechanisms:
+            header += f" {failure_mechanism:>{value_col_width}}"
+        print(header)
         for i, interface_name in enumerate(interface_names):
-            die_yield_values = "\t".join([f"{die_yield_array[i, j]:.4f}" for j in range(len(failure_mechanisms))])
-            print(f"{interface_name}\t{die_yield_values}")
+            row = f"{interface_name:<{interface_col_width}}"
+            for j in range(len(failure_mechanisms)):
+                row += f" {die_yield_array[i, j]:>{value_col_width}.4f}"
+            print(row)
 
 
 def die_stack_list_initialize(

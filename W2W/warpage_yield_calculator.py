@@ -309,18 +309,11 @@ def _initial_bow_stats_um(cfg, side):
         if legacy_s_init_m not in (None, "None"):
             mean = float(legacy_s_init_m) * 1e6
         else:
-            mean = _first_existing_float(
-                cfg,
-                [
-                    "BOW_DIFFERENCE_MEAN_um",
-                ],
-                default=0.0,
-            )
+            mean = 0.0
     std = _first_existing_float(
         cfg,
         [
             f"{side}_INI_BOW_STD_um",
-            "BOW_DIFFERENCE_STD_um",
         ],
         default=0.0,
     )

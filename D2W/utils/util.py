@@ -349,7 +349,8 @@ def get_config_dict(cfg_folder: str,
                     _3dbx_path: str,
                     mode: str,
                     debug=False,
-                    file_suffix: str = "") -> dict:
+                    file_suffix: str = "",
+                    bmap_input_ds_dir: str | None = None) -> dict:
     """
     Load base configuration from a YAML file and update with .3dbv and .bmap design parameters.
     args:
@@ -366,7 +367,8 @@ def get_config_dict(cfg_folder: str,
     cfg_dict = update_config_with_3dblox_params(cfg_skeleton=cfg_skeleton,
                                                 input_ds_dir=input_ds_dir,
                                                 _3dbv_path=_3dbv_path,
-                                                _3dbx_path=_3dbx_path,)
+                                                _3dbx_path=_3dbx_path,
+                                                bmap_input_ds_dir=bmap_input_ds_dir,)
     suffix = file_suffix or ""
     for interface_name, cfg in cfg_dict.items():
         cfg = finalize_cfg_for_mode(cfg, ds_name=ds_name, mode=mode)
@@ -746,7 +748,8 @@ def stack_graph_from_3dbx(_3dbx_path: str) -> list[dict]:
 def update_config_with_3dblox_params(cfg_skeleton: object,
                                     input_ds_dir: str,
                                     _3dbv_path: str,
-                                    _3dbx_path: str,):
+                                    _3dbx_path: str,
+                                    bmap_input_ds_dir: str | None = None):
     """
     Update configuration with design parameters from .3dbv and .bmap files.
     args:
@@ -765,6 +768,7 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
     """
     ### Update cfg_list with design parameters from .3dbv and .bmap files
     cfg_dict = dict()
+    bmap_input_ds_dir = bmap_input_ds_dir or input_ds_dir
     stack_config_3dbx = OmegaConf.load(_3dbx_path)
     _3dbv = OmegaConf.load(_3dbv_path)
     esd_geometry_by_interface = esd_interface_geometry_from_3dblox(_3dbv_path, _3dbx_path)
@@ -779,7 +783,9 @@ def update_config_with_3dblox_params(cfg_skeleton: object,
 
         ### Read .3dbv, .3dbx, and .bmap files
         ## Extract design parameters from .3dbv and .3dbf file
-        _bmap_path = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
+        _bmap_path = os.path.join(bmap_input_ds_dir, f"{cfg.INTERFACE}.bmap")
+        if not os.path.exists(_bmap_path):
+            raise FileNotFoundError(f"Could not find {_bmap_path}")
         top_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_TOP}.3dbf")
         bot_3dbf_path = os.path.join(input_ds_dir, f"{cfg.INTERFACE_BOT}.3dbf")
         top_3dbf = OmegaConf.load(top_3dbf_path)

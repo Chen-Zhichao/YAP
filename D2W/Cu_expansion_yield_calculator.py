@@ -319,7 +319,7 @@ def stack_cu_expansion_yield_calculator(*, cfg_dict, die_stack):
             die_stack.die_yield_per_interface_dict[interface_name]['mechanical'] = 1.0
             continue
 
-        pad_coords = interface.pad_coords
+        pad_coords = die_stack.interfaces.base_pad_coords_dict.get(interface_name)
         critical_pad_coords = pad_coords[critical_pad_mask_flat]
         critical_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, critical_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
 

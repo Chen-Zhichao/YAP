@@ -31,7 +31,7 @@ def Assembly_Yield_Calculator(
     init_time = time.time() - start_time
     print("Die stack initialization time: {:.2f} seconds.".format(init_time))
 
-    ds_dir = input_args.get("ds_dir", "")
+    ds_dir = input_args.get("design_root_dir", input_args.get("ds_dir", ""))
     _3dbx_path = os.path.join(ds_dir, "generated_stack_config.3dbx") if ds_dir else None
     stack_overlay_yield_calculator(
         cfg_dict=cfg_dict,

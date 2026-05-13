@@ -11,7 +11,7 @@ import numpy as np
 from wafer_die_stack_initialization import WaferStack
 from overlay_yield_calculator import stack_overlay_yield_calculator
 from defect_yield_calculator import stack_defect_yield_calculator
-from Cu_expansion_yield_calculator import stack_stress_yield_calculator_0, stack_stress_yield_calculator
+from Cu_expansion_yield_calculator import stack_stress_yield_calculator
 from esd_yield_calculator import stack_esd_yield_calculator
 from warpage_yield_calculator import stack_warpage_yield_calculator
 

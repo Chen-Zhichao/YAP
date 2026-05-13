@@ -24,15 +24,13 @@ when running the examples.
 |   +-- input/      # Local 3dblox inputs, bump maps, and criticality files
 |   +-- calculator_main.py
 |   +-- simulator_main.py
-|   +-- overlay_yield_calculator.py
-|   +-- warpage_yield_calculator.py
-|   +-- warpage_yield_simulator.py
 |   +-- utils/
 +-- W2W/      # Code for W2W hybrid bonding
 |   +-- configs/
 |   +-- input/
 |   +-- calculator_main.py
 |   +-- simulator_main.py
+|   +-- utils/
 +-- LICENSE
 +-- README.md
 +-- requirements.txt
@@ -83,6 +81,15 @@ pip install -r requirements.txt
 
   ```
   cd D2W && python simulator_main.py --config configs/design_2/design_2.yaml --mode d2w_simulation --ds_name design_2 --ds_dir input/design_2 --criticality-profile default --verbose
+  ```
+
+- Run D2W yield calculator.
+
+  Always enter `D2W` before running D2W calculator commands. The calculator
+  reads the default `*_criticality.txt` files from the design input folder.
+
+  ```
+  source /u1/ee/zhichao/anaconda3/etc/profile.d/conda.sh && conda activate general && cd D2W && python calculator_main.py --config configs/design_2/design_2.yaml --mode d2w_modeling --ds_name design_2 --ds_dir input/design_2/c30_r0_pg50_dm20
   ```
 
 - Run W2W yield simulation.
