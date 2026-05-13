@@ -661,11 +661,6 @@ def stack_esd_yield_calculator(
         active_mask = finite_coord_mask & ~dummy_mask
         if not np.any(critical_mask & active_mask):
             die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = 1.0
-            full_pad_yield = np.ones((pad_count,), dtype=np.float64)
-            interface.pad_yield_map["Y_esd"] = full_pad_yield.reshape(
-                int(cfg.PAD_ARR_ROW),
-                int(cfg.PAD_ARR_COL),
-            )
             continue
 
         active_pad_yield_vec, _, _ = pad_esd_yield_map_generator(
@@ -694,10 +689,4 @@ def stack_esd_yield_calculator(
         )
         die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = float(
             1.0 - die_failure_probability
-        )
-
-        full_pad_yield = 1.0 - full_pad_risk
-        interface.pad_yield_map["Y_esd"] = full_pad_yield.reshape(
-            int(cfg.PAD_ARR_ROW),
-            int(cfg.PAD_ARR_COL),
         )
