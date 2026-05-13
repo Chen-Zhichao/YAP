@@ -142,17 +142,13 @@ def _initial_bow_stats_um(cfg, side):
         cfg,
         [
             f"{side}_INI_BOW_MEAN_um",
-            "BOW_DIFFERENCE_MEAN_um",
         ],
-        default=0.0,
     )
     std = _first_existing_float(
         cfg,
         [
             f"{side}_INI_BOW_STD_um",
-            "BOW_DIFFERENCE_STD_um",
         ],
-        default=0.0,
     )
     return mean, std
 
@@ -564,4 +560,3 @@ def stack_warpage_yield_calculator(
         )
 
         die_stack.die_yield_per_interface_dict[interface_name]['warpage'] = float(warpage_yield)
-

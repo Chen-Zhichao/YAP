@@ -91,26 +91,19 @@ def _substack_bow_difference_samples_for_overlay(
     ds_dir = input_args.get('ds_dir', '')
     _3dbx_path = os.path.join(ds_dir, 'generated_stack_config.3dbx')
     if not os.path.exists(_3dbx_path):
-        return None
+        raise FileNotFoundError(
+            "D2W overlay bow-difference sampling requires generated_stack_config.3dbx. "
+            f"Could not find {_3dbx_path}."
+        )
 
     num_samples = len(die_stack_list)
     stack_cfg_dict = cfg_dict if stack_cfg_dict is None else stack_cfg_dict
 
-    try:
-        all_samples = sample_interface_bow_difference(
-            stack_cfg_dict,
-            _3dbx_path,
-            num_samples=num_samples,
-        )
-    except (KeyError, ValueError, FileNotFoundError) as exc:
-        warning_key = '_substack_bow_difference_fallback_warned'
-        if not input_args.get(warning_key, False):
-            print(
-                "Substack bow-difference sampling unavailable; "
-                f"falling back to BOW_DIFFERENCE_* Gaussian samples. Reason: {exc}"
-            )
-            input_args[warning_key] = True
-        return None
+    all_samples = sample_interface_bow_difference(
+        stack_cfg_dict,
+        _3dbx_path,
+        num_samples=num_samples,
+    )
 
     return {
         interface: all_samples[interface]
@@ -182,10 +175,10 @@ def overlay_term_simulator(
                     f"samples, but overlay simulation needs {NUM_STACKS} samples."
                 )
         else:
-            bow_difference_list = np.random.normal(
-                cfg.BOW_DIFFERENCE_MEAN_um,
-                cfg.BOW_DIFFERENCE_STD_um,
-                (NUM_STACKS),
+            raise KeyError(
+                f"Missing bow-difference samples for interface '{interface}'. "
+                "D2W overlay now derives bow difference from TOP/BOT initial bow "
+                "and substack warpage; legacy config fallback has been removed."
             )
         system_magnification_ppm_list = (
             (k_mag * bow_difference_list + M_0) / 1e6

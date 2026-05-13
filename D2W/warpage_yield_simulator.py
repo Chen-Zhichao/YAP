@@ -471,19 +471,3 @@ def Warpage_Yield_Simulator(
         summary_path = os.path.join(output_root, f"warpage_yield_summary{file_suffix}.txt")
         result["summary_path"] = write_warpage_yield_simulation_summary(summary_path, result)
     return result
-
-
-def warpage_yield_simulator(
-    cfg_dict,
-    _3dbx_path,
-    *,
-    num_samples,
-    return_samples=False,
-):
-    return simulate_warpage_yield(
-        cfg_dict,
-        _3dbx_path,
-        num_samples=num_samples,
-        include_calculator_reference=True,
-        return_samples=return_samples,
-    )
