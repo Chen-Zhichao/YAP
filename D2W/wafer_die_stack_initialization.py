@@ -346,8 +346,27 @@ class DieStack:
                 self.die_yield_per_interface_dict[interface_name]['warpage']
             # Calculate the overall die stack yield by multiplying the die yield of all interfaces
             self.die_stack_yield *= self.die_yield_per_interface_dict[interface_name]['overall']
-
         return self.die_stack_yield
+    
+    def print_die_stack_yield(self):
+        """
+        Print the yield for each interface and the overall die stack yield for every mechanism.
+        Print it as a table for better visualization.
+        Row: interface name; Column: failure mechanism; Cell value: die yield.
+        """
+        interface_names = list(self.cfg_dict.keys())
+        failure_mechanisms = ['overlay', 'particle', 'mechanical', 'ESD', 'warpage', 'overall']
+        # Create a 2D array to store the die yield values for each interface and failure mechanism
+        die_yield_array = np.zeros((len(interface_names), len(failure_mechanisms)))
+        for i, interface_name in enumerate(interface_names):
+            for j, failure_mechanism in enumerate(failure_mechanisms):
+                die_yield_array[i, j] = self.die_yield_per_interface_dict[interface_name][failure_mechanism]
+        # Print the table
+        print("Die Yield Table:")
+        print("Interface Name\t" + "\t".join(failure_mechanisms))
+        for i, interface_name in enumerate(interface_names):
+            die_yield_values = "\t".join([f"{die_yield_array[i, j]:.4f}" for j in range(len(failure_mechanisms))])
+            print(f"{interface_name}\t{die_yield_values}")
 
 
 def die_stack_list_initialize(

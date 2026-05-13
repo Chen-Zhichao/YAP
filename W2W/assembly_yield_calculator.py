@@ -39,9 +39,11 @@ def Assembly_Yield_Calculator(
 
     
     # Calculate the overlay yield
+    _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
     stack_overlay_yield_calculator(
         cfg_dict                    =   cfg_dict,
-        waf_stack                   =   waf_stack
+        waf_stack                   =   waf_stack,
+        _3dbx_path                  =   _3dbx_path,
     )
     overlay_yield_time = time.time() - start_time - waf_stack_init_time
     print("Overlay yield calculation time: {:.2f} seconds.".format(overlay_yield_time))
@@ -74,7 +76,6 @@ def Assembly_Yield_Calculator(
     print("ESD yield calculation time: {:.2f} seconds.".format(esd_yield_time))
 
     # Calculate final stack warpage yield
-    _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
     stack_warpage_yield_calculator(
         cfg_dict                    =   cfg_dict,
         waf_stack                   =   waf_stack,

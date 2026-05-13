@@ -60,6 +60,20 @@ def _cfg_str(cfg, keys, default):
     return str(value)
 
 
+def _dish_std_nm_from_cfg(cfg, side: str) -> float:
+    side = str(side).upper()
+    scalar = _cfg_first(cfg, [f"{side}_DISH_STD_nm"], None)
+    if not _cfg_missing(scalar):
+        return float(scalar)
+
+    components = [
+        _cfg_float(cfg, [f"{side}_DISH_STD_L_nm"], 0.0),
+        _cfg_float(cfg, [f"{side}_DISH_STD_T_nm"], 0.0),
+        _cfg_float(cfg, [f"{side}_DISH_STD_E_nm"], 0.0),
+    ]
+    return float(math.sqrt(sum(max(value, 0.0) ** 2 for value in components)))
+
+
 def _cfg_length_um(cfg, um_keys, m_keys, default_um):
     value = _cfg_first(cfg, um_keys, None)
     if not _cfg_missing(value):
@@ -638,13 +652,20 @@ def stack_esd_yield_calculator(
         interface = die_stack.interfaces.interface_dict[interface_name]
         pad_bitmap_collection = die_stack.interfaces.pad_bitmap_collection_dict[interface_name]
 
-        pad_coords = np.asarray(interface.pad_coords, dtype=np.float64)
+        pad_coords = getattr(interface, "pad_coords", None)
+        if pad_coords is None:
+            pad_coords = die_stack.interfaces.base_pad_coords_dict.get(interface_name)
+        pad_coords = np.asarray(pad_coords, dtype=np.float64)
         if pad_coords.ndim != 2 or pad_coords.shape[1] != 2:
             raise ValueError(f"{interface_name}: interface.pad_coords must have shape (n_pads, 2).")
 
         pad_count = pad_coords.shape[0]
-        critical_mask = np.asarray(
+        esd_critical_bitmap = pad_bitmap_collection.get(
+            "ESD_CRITICAL_PAD_BITMAP",
             pad_bitmap_collection["CRITICAL_PAD_BITMAP"],
+        )
+        critical_mask = np.asarray(
+            esd_critical_bitmap,
             dtype=bool,
         ).reshape(-1)
         dummy_mask = np.asarray(
@@ -674,10 +695,10 @@ def stack_esd_yield_calculator(
             tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
             tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
             tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
-            top_dish_mean_nm=float(cfg.TOP_DISH_MEAN_nm),
-            top_dish_std_nm=float(cfg.TOP_DISH_STD_nm),
-            bot_dish_mean_nm=float(cfg.BOT_DISH_MEAN_nm),
-            bot_dish_std_nm=float(cfg.BOT_DISH_STD_nm),
+            top_dish_mean_nm=_cfg_float(cfg, ["TOP_DISH_MEAN_nm"], 0.0),
+            top_dish_std_nm=_dish_std_nm_from_cfg(cfg, "TOP"),
+            bot_dish_mean_nm=_cfg_float(cfg, ["BOT_DISH_MEAN_nm"], 0.0),
+            bot_dish_std_nm=_dish_std_nm_from_cfg(cfg, "BOT"),
         )
 
         active_pad_risk_vec = np.clip(1.0 - active_pad_yield_vec, 0.0, 1.0)

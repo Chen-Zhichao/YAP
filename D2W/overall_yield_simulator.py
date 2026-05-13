@@ -538,7 +538,7 @@ def overall_yield_simulator(
             '''
             Check the ESD failure
             '''
-            # TODO: ESD failure simulation to be implemented
+            # cfg carries per-interface ESD stack geometry from the 3Dblox graph.
             esd_pad_idx, survive_bool = esd_failure_simulator(
                                                     cfg=cfg,
                                                     pad_coords_um=valid_die_pad_coords,

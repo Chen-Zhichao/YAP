@@ -8,11 +8,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import math
+import os
 from scipy.optimize import fsolve
 import sympy as sp
 from scipy.integrate import quad
 import time
 from scipy.stats import norm
+
+try:
+    from warpage_yield_calculator import get_interface_existing_stack_warpage_map
+except ModuleNotFoundError:
+    from W2W.warpage_yield_calculator import get_interface_existing_stack_warpage_map
 
 '''
 Overlay yield calculator for W2W hybrid bonding:
@@ -75,108 +81,58 @@ def max_allowed_misalignment_calculator(
 
         return MAX_ALLOWED_MISALIGNMENT_um
 
-def overlay_yield_calculator(
-    cfg,
-    PAD_ARR_ROW: int,
-    PAD_ARR_COL: int,
-    PAD_TOP_R_um: float,
-    PAD_BOT_R_um: float,
-    PITCH_r_um: float,
-    PITCH_c_um: float,
-    num_samples: int,
-    CONTACT_AREA_CONSTRAINT: float,
-    CRITICAL_DIST_CONSTRAINT: float,
-    SYSTEM_MAGNIFICATION_MEAN_ppm: float,
-    SYSTEM_MAGNIFICATION_STD_ppm: float,
-    SYSTEM_ROTATION_MEAN_rad: float,
-    SYSTEM_ROTATION_STD_rad: float,
-    SYSTEM_TRANSLATION_X_MEAN_um: float,    
-    SYSTEM_TRANSLATION_X_STD_um: float,
-    SYSTEM_TRANSLATION_Y_MEAN_um: float,
-    SYSTEM_TRANSLATION_Y_STD_um: float,
-    RANDOM_MISALIGNMENT_MEAN_um: float,
-    RANDOM_MISALIGNMENT_STD_um: float,
-    wafer,    
-    redundant_flag: bool,
-    pad_yield_flag: bool = False,
-    pad_yield_map_sub_factor: int = 1,
-):    
-    MAX_ALLOWED_MISALIGNMENT_um = max_allowed_misalignment_calculator(
-        cfg,
-        PAD_TOP_R_um,
-        PAD_BOT_R_um,
-        PITCH_r_um,
-        PITCH_c_um,
-        CONTACT_AREA_CONSTRAINT,
-        CRITICAL_DIST_CONSTRAINT,
+def _interface_bow_difference_stats(cfg_dict, _3dbx_path):
+    """
+    Return Gaussian bow-difference stats for every W2W interface.
+
+    bow_difference = incoming_top_wafer_initial_bow
+                     - existing_stack_post_anneal_bow
+    """
+    if not _3dbx_path or not os.path.exists(_3dbx_path):
+        raise FileNotFoundError(
+            "W2W overlay bow-difference modeling requires generated_stack_config.3dbx. "
+            f"Received: {_3dbx_path}"
+        )
+
+    interface_stack_warpage = get_interface_existing_stack_warpage_map(
+        cfg_dict,
+        _3dbx_path,
     )
-    num_samples = num_samples
-    system_translation_x_samples_um = np.random.normal(SYSTEM_TRANSLATION_X_MEAN_um, SYSTEM_TRANSLATION_X_STD_um, num_samples)
-    system_translation_y_samples_um = np.random.normal(SYSTEM_TRANSLATION_Y_MEAN_um, SYSTEM_TRANSLATION_Y_STD_um, num_samples)
-    system_rotation_samples_rad = np.random.normal(SYSTEM_ROTATION_MEAN_rad, SYSTEM_ROTATION_STD_rad, num_samples)
-    system_magnification_samples_ppm = np.random.normal(SYSTEM_MAGNIFICATION_MEAN_ppm, SYSTEM_MAGNIFICATION_STD_ppm, num_samples)
-    overlay_die_yield_list = []
+    bow_difference_stats = {}
+    for interface_name in cfg_dict:
+        if interface_name not in interface_stack_warpage:
+            raise KeyError(
+                f"Interface '{interface_name}' is missing from W2W stack warpage map. "
+                "Overlay magnification now derives from incoming wafer initial bow "
+                "and existing sequential post-anneal stack warpage."
+            )
 
-    # print(system_translation_x_samples_um.mean()*1e3, " nm")
-    # print(system_translation_y_samples_um.mean()*1e3, " nm")
-    # print(system_rotation_samples_rad.mean() * 150e+3 * 1e3, " nm")
-    # print(system_magnification_samples_ppm.mean() * 150e+3 * 1e3, " nm")
-    
-    # # Record the time
-    # start_time = time.time()
-    for die_id, die in enumerate(wafer.die_list):
-        if redundant_flag == True:
-            far_dx_samples_0 = (system_translation_x_samples_um - system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[0, 1] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[0, 0])
-            far_dy_samples_0 = (system_translation_y_samples_um + system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[0, 0] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[0, 1])
-            far_dx_samples_1 = (system_translation_x_samples_um - system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[1, 1] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[1, 0])
-            far_dy_samples_1 = (system_translation_y_samples_um + system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[1, 0] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[1, 1])
-            far_dx_samples_2 = (system_translation_x_samples_um - system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[2, 1] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[2, 0])
-            far_dy_samples_2 = (system_translation_y_samples_um + system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[2, 0] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[2, 1])
-            far_dx_samples_3 = (system_translation_x_samples_um - system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[3, 1] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[3, 0])
-            far_dy_samples_3 = (system_translation_y_samples_um + system_rotation_samples_rad * die.ovl_critical_pad_boundary_coords[3, 0] + system_magnification_samples_ppm * die.ovl_critical_pad_boundary_coords[3, 1])
-        else:
-            far_dx_samples_0 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[0, 1] + system_magnification_samples_ppm * die.pad_array_box[0, 0])
-            far_dy_samples_0 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[0, 0] + system_magnification_samples_ppm * die.pad_array_box[0, 1])
-            far_dx_samples_1 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[1, 1] + system_magnification_samples_ppm * die.pad_array_box[1, 0])
-            far_dy_samples_1 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[1, 0] + system_magnification_samples_ppm * die.pad_array_box[1, 1])
-            far_dx_samples_2 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[2, 1] + system_magnification_samples_ppm * die.pad_array_box[2, 0])
-            far_dy_samples_2 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[2, 0] + system_magnification_samples_ppm * die.pad_array_box[2, 1])
-            far_dx_samples_3 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[3, 1] + system_magnification_samples_ppm * die.pad_array_box[3, 0])
-            far_dy_samples_3 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[3, 0] + system_magnification_samples_ppm * die.pad_array_box[3, 1])
-        far_pad_misalignment_samples_0 = np.sqrt(far_dx_samples_0**2 + far_dy_samples_0**2)
-        far_pad_misalignment_samples_1 = np.sqrt(far_dx_samples_1**2 + far_dy_samples_1**2)
-        far_pad_misalignment_samples_2 = np.sqrt(far_dx_samples_2**2 + far_dy_samples_2**2)
-        far_pad_misalignment_samples_3 = np.sqrt(far_dx_samples_3**2 + far_dy_samples_3**2)
+        stats = interface_stack_warpage[interface_name]
+        top_mu_um = float(stats["top_wafer_mu_um"])
+        top_sigma_um = max(float(stats["top_wafer_sigma_um"]), 0.0)
+        stack_mu_um = float(stats["mu_um"])
+        stack_sigma_um = max(float(stats["sigma_um"]), 0.0)
+        bow_difference_stats[interface_name] = {
+            "bow_difference_mean_um": top_mu_um - stack_mu_um,
+            "bow_difference_std_um": float(
+                np.sqrt(top_sigma_um**2 + stack_sigma_um**2)
+            ),
+            "top_wafer_mean_um": top_mu_um,
+            "top_wafer_std_um": top_sigma_um,
+            "existing_stack_mean_um": stack_mu_um,
+            "existing_stack_std_um": stack_sigma_um,
+            "source": "sequential_stack_warpage_model",
+        }
 
-        upper_limit_0 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_0
-        lower_limit_0 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_0
-        upper_limit_1 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_1
-        lower_limit_1 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_1
-        upper_limit_2 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_2
-        lower_limit_2 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_2
-        upper_limit_3 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_3
-        lower_limit_3 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_3
-        
-        current_die_corner_yield_0 = np.mean(norm.cdf(upper_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-        current_die_corner_yield_1 = np.mean(norm.cdf(upper_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-        current_die_corner_yield_2 = np.mean(norm.cdf(upper_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-        current_die_corner_yield_3 = np.mean(norm.cdf(upper_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-
-        current_die_yield = min(current_die_corner_yield_0, current_die_corner_yield_1, current_die_corner_yield_2, current_die_corner_yield_3)
-        overlay_die_yield_list.append(current_die_yield)
-    overlay_die_yield = np.mean(overlay_die_yield_list)
-    return overlay_die_yield
-    
-
-
-
-
+    return bow_difference_stats
 
 
 def stack_overlay_yield_calculator(
     cfg_dict: dict,
     waf_stack,
-):    
+    _3dbx_path: str = None,
+):
+    bow_difference_stats = _interface_bow_difference_stats(cfg_dict, _3dbx_path)
 
     for interface_name, cfg in cfg_dict.items():
         PAD_BOT_R_um, PAD_TOP_R_um = cfg.PAD_BOT_R_um, cfg.PAD_TOP_R_um
@@ -190,8 +146,6 @@ def stack_overlay_yield_calculator(
         SYSTEM_TRANSLATION_X_STD_um = cfg.SYSTEM_TRANSLATION_X_STD_um
         SYSTEM_TRANSLATION_Y_MEAN_um = cfg.SYSTEM_TRANSLATION_Y_MEAN_um
         SYSTEM_TRANSLATION_Y_STD_um = cfg.SYSTEM_TRANSLATION_Y_STD_um
-        SYSTEM_MAGNIFICATION_MEAN_ppm = cfg.SYSTEM_MAGNIFICATION_MEAN_ppm
-        SYSTEM_MAGNIFICATION_STD_ppm = cfg.SYSTEM_MAGNIFICATION_STD_ppm
         RANDOM_MISALIGNMENT_MEAN_um = cfg.RANDOM_MISALIGNMENT_MEAN_um
         RANDOM_MISALIGNMENT_STD_um = cfg.RANDOM_MISALIGNMENT_STD_um
 
@@ -207,7 +161,18 @@ def stack_overlay_yield_calculator(
         system_translation_x_samples_um = np.random.normal(SYSTEM_TRANSLATION_X_MEAN_um, SYSTEM_TRANSLATION_X_STD_um, num_samples)
         system_translation_y_samples_um = np.random.normal(SYSTEM_TRANSLATION_Y_MEAN_um, SYSTEM_TRANSLATION_Y_STD_um, num_samples)
         system_rotation_samples_rad = np.random.normal(SYSTEM_ROTATION_MEAN_rad, SYSTEM_ROTATION_STD_rad, num_samples)
-        system_magnification_samples_ppm = np.random.normal(SYSTEM_MAGNIFICATION_MEAN_ppm, SYSTEM_MAGNIFICATION_STD_ppm, num_samples)
+        interface_bow_stats = bow_difference_stats[interface_name]
+        magnification_mean = (
+            cfg.k_mag * interface_bow_stats["bow_difference_mean_um"] + cfg.M_0
+        ) / 1e6
+        magnification_sigma = (
+            abs(cfg.k_mag) * interface_bow_stats["bow_difference_std_um"]
+        ) / 1e6
+        system_magnification_samples_ppm = np.random.normal(
+            magnification_mean,
+            magnification_sigma,
+            num_samples,
+        )
         overlay_die_yield_list = []
 
         # print(system_translation_x_samples_um.mean()*1e3, " nm")
@@ -247,8 +212,5 @@ def stack_overlay_yield_calculator(
 
             current_die_yield = min(current_die_corner_yield_0, current_die_corner_yield_1, current_die_corner_yield_2, current_die_corner_yield_3)
             overlay_die_yield_list.append(current_die_yield)
-            
+
         waf_stack.die_yield_list_per_interface_dict[interface_name]['overlay'] = np.array(overlay_die_yield_list)
-    
-    
-        
