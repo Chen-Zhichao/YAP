@@ -182,23 +182,21 @@ def _interface_bow_difference_stats(cfg_dict, _3dbx_path=None):
 
     bow_difference = incoming_top_die_initial_bow - existing_substack_warpage
     """
-    fallback = {
-        interface_name: {
-            "bow_difference_mean_um": _cfg_float(cfg, "BOW_DIFFERENCE_MEAN_um", 0.0),
-            "bow_difference_std_um": _cfg_float(cfg, "BOW_DIFFERENCE_STD_um", 0.0),
-            "source": "config_fallback",
-        }
-        for interface_name, cfg in cfg_dict.items()
-    }
     if not _3dbx_path or not os.path.exists(_3dbx_path):
-        return fallback
+        raise FileNotFoundError(
+            "D2W overlay bow-difference modeling requires generated_stack_config.3dbx. "
+            f"Received: {_3dbx_path}"
+        )
 
     interface_stack_warpage = get_interface_stack_warpage_map(cfg_dict, _3dbx_path)
     bow_difference_stats = {}
     for interface_name, cfg in cfg_dict.items():
         if interface_name not in interface_stack_warpage:
-            bow_difference_stats[interface_name] = fallback[interface_name]
-            continue
+            raise KeyError(
+                f"Interface '{interface_name}' is missing from stack warpage map. "
+                "D2W overlay now derives bow difference from TOP/BOT initial bow "
+                "and substack warpage; legacy config fallback has been removed."
+            )
 
         stats = interface_stack_warpage[interface_name]
         top_mu_um = float(stats["top_die_mu_um"])
@@ -289,4 +287,3 @@ def stack_overlay_yield_calculator(
         )
         interface_overlay_yield = float(np.min(corner_yields))
         die_stack.die_yield_per_interface_dict[interface_name]['overlay'] = interface_overlay_yield
-

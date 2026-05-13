@@ -62,8 +62,6 @@ d2w_simulation:
   SYSTEM_ROTATION_STD_rad: 1e-5             # Systematic rotation std (rad)
 
   # === Bowing and Magnification ===
-  BOW_DIFFERENCE_MEAN_um: 10.0               # Bow difference mean (µm)
-  BOW_DIFFERENCE_STD_um: 1.0                 # Bow difference std (µm)
   TOP_INI_BOW_MEAN_um: 10.0                  # Initial top die bow mean (µm)
   TOP_INI_BOW_STD_um: 5.0                    # Initial top die bow std (µm)
   BOT_INI_BOW_MEAN_um: 10.0                  # Initial bottom stack/die bow mean (µm)
@@ -252,8 +250,6 @@ d2w_modeling:
   SYSTEM_TRANSLATION_Y_STD_um: 2e-2        # Std of systematic Y translation (µm)
   SYSTEM_ROTATION_MEAN_rad: 6e-5            # Systematic rotation mean (rad)
   SYSTEM_ROTATION_STD_rad: 1e-5             # Systematic rotation std (rad)
-  BOW_DIFFERENCE_MEAN_um: 10.0               # Bow difference mean (µm)
-  BOW_DIFFERENCE_STD_um: 1.0                 # Bow difference std (µm)
   TOP_INI_BOW_MEAN_um: 10.0                  # Initial top die bow mean (µm)
   TOP_INI_BOW_STD_um: 5.0                    # Initial top die bow std (µm)
   BOT_INI_BOW_MEAN_um: 10.0                  # Initial bottom stack/die bow mean (µm)

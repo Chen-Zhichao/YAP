@@ -95,13 +95,15 @@ def finalize_cfg_for_mode(cfg, ds_name: str, mode: str):
     """
     cfg.DESIGN = ds_name
     if mode == "w2w_simulation" or mode == "w2w_modeling":
-        cfg.SYSTEM_MAGNIFICATION_MEAN_ppm = (cfg.k_mag * cfg.BOW_DIFFERENCE_MEAN_um + cfg.M_0) / 1e6
-        cfg.SYSTEM_MAGNIFICATION_STD_ppm = (cfg.k_mag * cfg.BOW_DIFFERENCE_STD_um) ** 2 / 1e6
+        initial_bow_difference_mean_um = cfg.TOP_INI_BOW_MEAN_um - cfg.BOT_INI_BOW_MEAN_um
+        initial_bow_difference_std_um = float(
+            np.sqrt(cfg.TOP_INI_BOW_STD_um**2 + cfg.BOT_INI_BOW_STD_um**2)
+        )
+        cfg.SYSTEM_MAGNIFICATION_MEAN_ppm = (cfg.k_mag * initial_bow_difference_mean_um + cfg.M_0) / 1e6
+        cfg.SYSTEM_MAGNIFICATION_STD_ppm = (abs(cfg.k_mag) * initial_bow_difference_std_um) / 1e6
         cfg.S_INIT_A_M = 10e-6 * (cfg.WAF_R_um / 150000) ** 2
         cfg.S_INIT_B_M = 0.0
     elif mode == "d2w_simulation" or mode == "d2w_modeling":
-        cfg.SYSTEM_MAGNIFICATION_MEAN_ppm = (cfg.k_mag * cfg.BOW_DIFFERENCE_MEAN_um + cfg.M_0) / 1e6
-        cfg.SYSTEM_MAGNIFICATION_STD_ppm = (cfg.k_mag * cfg.BOW_DIFFERENCE_STD_um) ** 2 / 1e6
         cfg.eff_DIE_R = float(np.sqrt((cfg.DIE_W_um / 2) ** 2 + (cfg.DIE_L_um / 2) ** 2))  # Effective die radius (um)
         cfg.S_INIT_A_M = 10e-6 * (cfg.eff_DIE_R / 150000) ** 2
         cfg.S_INIT_B_M = 0.0
