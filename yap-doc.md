@@ -325,8 +325,7 @@ Current D2W ESD modules are:
     and optional pad-map subsampling.
 
 `D2W/esd_hybrid.py` is a legacy/demo implementation and is not imported by the
-current D2W flow. If it exists locally, treat it as removable legacy code. Do not
-remove `W2W/esd_hybrid.py` without updating W2W call sites.
+current D2W flow. If it exists locally, treat it as removable legacy code.
 
 ## 9. Output Files and Runtime Caches
 
@@ -373,9 +372,9 @@ Current W2W notes:
   from `.3dbv` when resolving `design_6`.
 - `W2W/configs/design_6/design_6.yaml` includes the matching thickness fields in
   both simulation and modeling sections.
-- `W2W/overall_yield_simulator.py` still imports `W2W/esd_hybrid.py`.
-- `W2W/esd_hybrid.py` is still required unless W2W is migrated to the newer D2W
-  ESD split.
+- `W2W/esd_hybrid.py` has been removed. The W2W simulation flow imports
+  `W2W/esd_yield_simulator.py`, and the modeling flow imports
+  `W2W/esd_yield_calculator.py`.
 
 ## 11. Maintainer Notes
 
@@ -386,7 +385,7 @@ When updating D2W:
 - Update both `d2w_simulation` and `d2w_modeling` sections when adding shared
   model parameters.
 - Update README commands and this document when adding or replacing entry points.
-- Check imports before deleting legacy modules. `D2W/esd_hybrid.py` is not used;
-  `W2W/esd_hybrid.py` is still used.
+- Check imports before deleting legacy modules. ESD flow code should import the
+  explicit simulator/calculator modules rather than compatibility shims.
 - Treat generated configs, runtime temp files, and output artifacts as
   regenerable unless a specific experiment requires preserving them.

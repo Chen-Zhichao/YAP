@@ -633,8 +633,36 @@ def die_esd_yield_calculator(
     if voltage_norm <= 0.0:
         raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
 
+    warpage_cases = []
+    total_w_weight = 0.0
+    for warpage_um, warpage_weight in zip(warpage_nodes, warpage_weights):
+        contact_limit_um = _w2w_pad_contact_limit_um(
+            pad_coords_um=pad_coords_um,
+            pad_size_um=pad_size_um,
+            wafer_radius_um=wafer_radius_um,
+            warpage_um=abs(float(warpage_um)),
+            z_top_um=z_top_um,
+            exact_sphere=exact_sphere,
+        )
+        candidate_idx = _select_candidate_pad_indices(
+            contact_limit_um=contact_limit_um,
+            sigma_h_um=sigma_h_um,
+            candidate_sigma_window=candidate_sigma_window,
+            candidate_min_pads=candidate_min_pads,
+            candidate_disable_fraction=candidate_disable_fraction,
+        )
+        warpage_cases.append({
+            "warpage_um": abs(float(warpage_um)),
+            "weight": float(warpage_weight),
+            "contact_limit_um": contact_limit_um[candidate_idx],
+            "critical_mask": esd_critical_pad_mask[candidate_idx],
+        })
+        total_w_weight += float(warpage_weight)
+    if total_w_weight <= 0.0:
+        raise ValueError("W2W ESD warpage quadrature weights sum to zero.")
+
     die_failure_probability = 0.0
-    total_cases = int(len(v_nodes) * len(warpage_nodes))
+    total_cases = int(len(v_nodes) * len(warpage_cases))
     case_id = 0
 
     for v_chg, v_weight in zip(v_nodes, v_weights):
@@ -651,26 +679,10 @@ def die_esd_yield_calculator(
         )
 
         critical_first_arcing_prob_v = 0.0
-        total_w_weight = 0.0
-        for warpage_um, warpage_weight in zip(warpage_nodes, warpage_weights):
-            contact_limit_um = _w2w_pad_contact_limit_um(
-                pad_coords_um=pad_coords_um,
-                pad_size_um=pad_size_um,
-                wafer_radius_um=wafer_radius_um,
-                warpage_um=abs(float(warpage_um)),
-                z_top_um=z_top_um,
-                exact_sphere=exact_sphere,
-            )
-            candidate_idx = _select_candidate_pad_indices(
-                contact_limit_um=contact_limit_um,
-                sigma_h_um=sigma_h_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
-            )
+        for warpage_case in warpage_cases:
             critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
-                contact_limit_um=contact_limit_um[candidate_idx],
-                critical_mask=esd_critical_pad_mask[candidate_idx],
+                contact_limit_um=warpage_case["contact_limit_um"],
+                critical_mask=warpage_case["critical_mask"],
                 mu_h_um=mu_h_um,
                 sigma_h_um=sigma_h_um,
                 arc_distance_um=arc_distance_um,
@@ -679,20 +691,18 @@ def die_esd_yield_calculator(
                 chunk_size=chunk_size,
                 fill_residual_uniformly=fill_residual_uniformly,
             )
-            critical_first_arcing_prob_v += float(warpage_weight) * float(critical_first_arcing_prob)
-            total_w_weight += float(warpage_weight)
+            critical_first_arcing_prob_v += warpage_case["weight"] * float(critical_first_arcing_prob)
             case_id += 1
 
             if verbose:
                 print(
                     f"[W2W ESD analytical] {case_id}/{total_cases} | "
-                    f"V={float(v_chg):.4f} V | w={abs(float(warpage_um)):.4f} um",
+                    f"V={float(v_chg):.4f} V | w={warpage_case['warpage_um']:.4f} um",
                     end="\r",
                     flush=True,
                 )
 
-        if total_w_weight > 0.0:
-            critical_first_arcing_prob_v /= total_w_weight
+        critical_first_arcing_prob_v /= total_w_weight
 
         die_failure_probability += (
             float(v_weight) / voltage_norm
