@@ -726,7 +726,7 @@ def die_esd_yield_calculator(
     *,
     cfg,
     pad_coords_um: np.ndarray,
-    critical_pad_mask: np.ndarray,
+    esd_critical_pad_mask: np.ndarray,
     pad_size_um: float,
     top_die_w_um: float,
     top_die_h_um: float,
@@ -784,16 +784,16 @@ def die_esd_yield_calculator(
     verbose = bool(getattr(cfg, "verbose", False))
 
     pad_coords_um = np.asarray(pad_coords_um, dtype=np.float64)
-    critical_pad_mask = np.asarray(critical_pad_mask, dtype=bool).reshape(-1)
+    esd_critical_pad_mask = np.asarray(esd_critical_pad_mask, dtype=bool).reshape(-1)
     if pad_coords_um.ndim != 2 or pad_coords_um.shape[1] != 2:
         raise ValueError("pad_coords_um must have shape (n_pads, 2).")
     pad_count = pad_coords_um.shape[0]
-    if critical_pad_mask.size != pad_count:
-        raise ValueError("critical_pad_mask must have the same length as pad_coords_um.")
+    if esd_critical_pad_mask.size != pad_count:
+        raise ValueError("esd_critical_pad_mask must have the same length as pad_coords_um.")
     if pad_count <= 0:
         raise ValueError("pad_coords_um is empty; analytical ESD yield calculation needs at least one pad.")
 
-    critical_count = int(np.count_nonzero(critical_pad_mask))
+    critical_count = int(np.count_nonzero(esd_critical_pad_mask))
     if critical_count <= 0:
         return 1.0
 
@@ -852,7 +852,7 @@ def die_esd_yield_calculator(
                 )
                 critical_first_touch_prob = _fixed_tilt_critical_probability_with_arcing(
                     contact_limit_um=contact_limit_um[candidate_idx],
-                    critical_mask=critical_pad_mask[candidate_idx],
+                    critical_mask=esd_critical_pad_mask[candidate_idx],
                     mu_h_um=mu_h_um,
                     sigma_h_um=sigma_h_um,
                     arc_distance_um=arc_distance_um,
@@ -917,34 +917,31 @@ def stack_esd_yield_calculator(
             raise ValueError(f"{interface_name}: interface.pad_coords must have shape (n_pads, 2).")
 
         pad_count = pad_coords.shape[0]
-        esd_critical_bitmap = pad_bitmap_collection.get(
-            "ESD_CRITICAL_PAD_BITMAP",
-            pad_bitmap_collection["CRITICAL_PAD_BITMAP"],
-        )
-        critical_mask = np.asarray(
+        esd_critical_bitmap = pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"]
+        esd_critical_mask = np.asarray(
             esd_critical_bitmap,
             dtype=bool,
         ).reshape(-1)
         dummy_mask = np.asarray(
-            pad_bitmap_collection.get("DUMMY_PAD_BITMAP", np.zeros_like(critical_mask)),
+            pad_bitmap_collection.get("DUMMY_PAD_BITMAP", np.zeros_like(esd_critical_mask)),
             dtype=bool,
         ).reshape(-1)
 
-        if critical_mask.shape[0] != pad_count or dummy_mask.shape[0] != pad_count:
+        if esd_critical_mask.shape[0] != pad_count or dummy_mask.shape[0] != pad_count:
             raise ValueError(
                 f"{interface_name}: pad bitmap size does not match pad coordinate count."
             )
 
         finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
         active_mask = finite_coord_mask & ~dummy_mask
-        if not np.any(critical_mask & active_mask):
+        if not np.any(esd_critical_mask & active_mask):
             die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = 1.0
             continue
 
         die_esd_yield = die_esd_yield_calculator(
             cfg=cfg,
             pad_coords_um=pad_coords[active_mask],
-            critical_pad_mask=critical_mask[active_mask],
+            esd_critical_pad_mask=esd_critical_mask[active_mask],
             pad_size_um=float(cfg.PAD_TOP_R_um) * 2.0,
             top_die_w_um=float(interface.DIE_W_um),
             top_die_h_um=float(interface.DIE_L_um),
