@@ -81,7 +81,11 @@ def max_allowed_misalignment_calculator(
 
         return MAX_ALLOWED_MISALIGNMENT_um
 
-def _interface_bow_difference_stats(cfg_dict, _3dbx_path):
+def _interface_bow_difference_stats(
+    cfg_dict,
+    _3dbx_path,
+    num_dies_per_wafer=None,
+):
     """
     Return Gaussian bow-difference stats for every W2W interface.
 
@@ -97,6 +101,7 @@ def _interface_bow_difference_stats(cfg_dict, _3dbx_path):
     interface_stack_warpage = get_interface_existing_stack_warpage_map(
         cfg_dict,
         _3dbx_path,
+        num_dies_per_wafer=num_dies_per_wafer,
     )
     bow_difference_stats = {}
     for interface_name in cfg_dict:
@@ -132,7 +137,11 @@ def stack_overlay_yield_calculator(
     waf_stack,
     _3dbx_path: str = None,
 ):
-    bow_difference_stats = _interface_bow_difference_stats(cfg_dict, _3dbx_path)
+    bow_difference_stats = _interface_bow_difference_stats(
+        cfg_dict,
+        _3dbx_path,
+        num_dies_per_wafer=waf_stack.num_dies_per_wafer,
+    )
 
     for interface_name, cfg in cfg_dict.items():
         PAD_BOT_R_um, PAD_TOP_R_um = cfg.PAD_BOT_R_um, cfg.PAD_TOP_R_um

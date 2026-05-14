@@ -47,6 +47,122 @@ def add_config_items(cfg, keys, values):
     for key, value in zip(keys, values):
         cfg[key] = value
 
+
+def estimate_w2w_num_dies_per_wafer(cfg) -> int:
+    """
+    Estimate the number of full dies on a W2W wafer using the same placement
+    rule as Wafer_Interface.generate_die().
+    """
+    die_w_um = float(cfg.DIE_W_um)
+    die_l_um = float(cfg.DIE_L_um)
+    wafer_radius_um = float(cfg.WAF_R_um)
+    dice_width_um = float(getattr(cfg, "dice_width", 0.0))
+    dice_proportion = float(getattr(cfg, "dice_proportion", 1.0))
+
+    if die_w_um <= 0.0 or die_l_um <= 0.0 or wafer_radius_um <= 0.0:
+        raise ValueError(
+            "DIE_W_um, DIE_L_um, and WAF_R_um must be positive to estimate "
+            "the W2W die area fill factor."
+        )
+
+    pitch_x_um = die_w_um + dice_width_um
+    pitch_y_um = die_l_um + dice_width_um
+    if pitch_x_um <= 0.0 or pitch_y_um <= 0.0:
+        raise ValueError("Die pitch including dice_width must be positive.")
+
+    die_col = int(2 * wafer_radius_um // pitch_x_um + 1)
+    die_row = int(2 * wafer_radius_um // pitch_y_um + 1)
+    wafer_limit_um = wafer_radius_um * dice_proportion
+    half_w_um = die_w_um / 2.0
+    half_l_um = die_l_um / 2.0
+
+    num_dies = 0
+    for i in range(die_row):
+        center_y_um = (
+            die_row * pitch_y_um / 2.0
+            - pitch_y_um / 2.0
+            - i * pitch_y_um
+        )
+        for j in range(die_col):
+            center_x_um = (
+                -die_col * pitch_x_um / 2.0
+                + pitch_x_um / 2.0
+                + j * pitch_x_um
+            )
+            if np.hypot(center_x_um, center_y_um) >= wafer_limit_um:
+                continue
+
+            vertices_x = (center_x_um - half_w_um, center_x_um + half_w_um)
+            vertices_y = (center_y_um - half_l_um, center_y_um + half_l_um)
+            outside = False
+            for x_um in vertices_x:
+                for y_um in vertices_y:
+                    if np.hypot(x_um, y_um) >= wafer_limit_um:
+                        outside = True
+                        break
+                if outside:
+                    break
+            if not outside:
+                num_dies += 1
+
+    return int(num_dies)
+
+
+def w2w_die_area_fill_factor(cfg, num_dies_per_wafer=None) -> float:
+    """
+    Return total die area divided by wafer area for W2W effective materials.
+    """
+    if num_dies_per_wafer is None:
+        num_dies_per_wafer = getattr(cfg, "num_dies_per_wafer", None)
+    if num_dies_per_wafer is None:
+        num_dies_per_wafer = getattr(cfg, "NUM_DIES_PER_WAFER", None)
+    if num_dies_per_wafer is None:
+        num_dies_per_wafer = estimate_w2w_num_dies_per_wafer(cfg)
+
+    die_area_um2 = float(cfg.DIE_W_um) * float(cfg.DIE_L_um)
+    wafer_area_um2 = np.pi * float(cfg.WAF_R_um) ** 2
+    if die_area_um2 <= 0.0 or wafer_area_um2 <= 0.0:
+        raise ValueError("Die area and wafer area must be positive.")
+
+    fill_factor = float(num_dies_per_wafer) * die_area_um2 / wafer_area_um2
+    return float(np.clip(fill_factor, 0.0, 1.0))
+
+
+def w2w_area_scaled_layer_volumes(cfg, mix_prefix, num_dies_per_wafer=None):
+    """
+    Scale Cu volume by W2W die-area fill factor and assign the removed Cu
+    fraction back to SiO2/Si using their original non-Cu ratio.
+    """
+    cu = float(getattr(cfg, f"{mix_prefix}_Cu_V"))
+    sio2 = float(getattr(cfg, f"{mix_prefix}_Sio2_V"))
+    si = float(getattr(cfg, f"{mix_prefix}_Si_V"))
+    if cu < 0.0 or sio2 < 0.0 or si < 0.0:
+        raise ValueError(
+            f"{mix_prefix} volume fractions must be non-negative: "
+            f"Cu={cu}, Sio2={sio2}, Si={si}"
+        )
+
+    fill_factor = w2w_die_area_fill_factor(
+        cfg,
+        num_dies_per_wafer=num_dies_per_wafer,
+    )
+    cu_eff = cu * fill_factor
+    released_cu = cu - cu_eff
+    non_cu = sio2 + si
+    if released_cu > 0.0:
+        if non_cu > 0.0:
+            sio2 += released_cu * sio2 / non_cu
+            si += released_cu * si / non_cu
+        else:
+            si += released_cu
+
+    return {
+        "Cu": float(cu_eff),
+        "Sio2": float(sio2),
+        "Si": float(si),
+        "area_fill_factor": float(fill_factor),
+    }
+
 def get_config_dict(
                     cfg_folder: str,
                     cfg_skeleton: str,

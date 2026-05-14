@@ -16,7 +16,7 @@ import yaml
 
 from overlay_yield_simulator import die_pad_misalignment
 from Cu_gap_simulator import Cu_gap_simulator
-from debond import debond_dishing_bounds_calculator_coords
+from debond import debond_dishing_intervals_from_coords
 from esd_hybrid import esd_failure_simulator
 
 def total_memory_mb(obj):
@@ -62,6 +62,7 @@ def overall_yield_simulator(
             # Read the configuration and pad_bitmap_collection data for this interface
             pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
             cfg = cfg_dict[interface_name]
+            cfg.num_dies_per_wafer = num_dies_per_wafer
             print("Simulating stack {}/{} interface {}/{}: {} ...".format(epoch*NUM_STACKS+stack_ind+1, cfg.NUM_WAFER_STACKS, interface_ind+1, len(waf_stack.interfaces.interface_dict), interface_name))
             # Read the parameters needed for this interface
             WAF_R_um                        =       cfg.WAF_R_um
@@ -291,7 +292,7 @@ def overall_yield_simulator(
                     if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/'):
                         os.makedirs(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/')
                     # start_time = time.time()
-                    valid_pad_dishing_bound_array = debond_dishing_bounds_calculator_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
+                    valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
                     # print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
                     np.save(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind), valid_pad_dishing_bound_array)
                 else:

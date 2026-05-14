@@ -36,6 +36,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 from roughness_coefficients import get_eff_contact_area_ratio
 from matplotlib.ticker import MultipleLocator
+try:
+    from utils.util import w2w_area_scaled_layer_volumes
+except ModuleNotFoundError:
+    from W2W.utils.util import w2w_area_scaled_layer_volumes
 
 # =============================================================================
 # =============================== PARAMETERS ==================================
@@ -71,6 +75,33 @@ class WaferConfig:
     L_m: float
     T_C: float
     T0_C: float
+
+
+def _layer_mix3_from_scaled_volumes(
+    cfg,
+    prefix: str,
+    mat_cu: Material,
+    mat_sio2: Material,
+    mat_si: Material,
+    t_m: float,
+    order: str,
+) -> LayerMix3:
+    volumes = w2w_area_scaled_layer_volumes(cfg, prefix)
+    if order == "cu_sio2_si":
+        return LayerMix3(
+            mat_cu, volumes["Cu"],
+            mat_sio2, volumes["Sio2"],
+            mat_si, volumes["Si"],
+            t_m,
+        )
+    if order == "si_sio2_cu":
+        return LayerMix3(
+            mat_si, volumes["Si"],
+            mat_sio2, volumes["Sio2"],
+            mat_cu, volumes["Cu"],
+            t_m,
+        )
+    raise ValueError(f"Unknown LayerMix3 material order: {order}")
 
 
 @dataclass(frozen=True)
@@ -180,13 +211,21 @@ def __init_params(cfg):
 
     # ---------- (G) Wafer configs ----------
     WAFER_A = WaferConfig(
-        top=LayerMix3(MAT_CU,cfg.B_Chip_Cu_V,MAT_SiO2,cfg.B_Chip_Sio2_V,MAT_Si,cfg.B_Chip_Si_V,cfg.B_Chip_T),
-        bottom=LayerMix3(MAT_Si,cfg.B_Sub_Si_V,MAT_SiO2,cfg.B_Sub_Sio2_V,MAT_CU,cfg.B_Sub_Cu_V,cfg.B_Sub_T),
+        top=_layer_mix3_from_scaled_volumes(
+            cfg, "B_Chip", MAT_CU, MAT_SiO2, MAT_Si, cfg.B_Chip_T, "cu_sio2_si"
+        ),
+        bottom=_layer_mix3_from_scaled_volumes(
+            cfg, "B_Sub", MAT_CU, MAT_SiO2, MAT_Si, cfg.B_Sub_T, "si_sio2_cu"
+        ),
         L_m= cfg.WAF_R_um*1e-6, T_C= cfg.T_anl, T0_C= cfg.T_R
     )
     WAFER_B = WaferConfig(
-        top=LayerMix3(MAT_CU,cfg.T_Chip_Cu_V,MAT_SiO2,cfg.T_Chip_Sio2_V,MAT_Si,cfg.T_Chip_Si_V,cfg.T_Chip_T),
-        bottom=LayerMix3(MAT_Si,cfg.T_Sub_Si_V,MAT_SiO2,cfg.T_Sub_Sio2_V,MAT_CU,cfg.T_Sub_Cu_V,cfg.T_Sub_T),
+        top=_layer_mix3_from_scaled_volumes(
+            cfg, "T_Chip", MAT_CU, MAT_SiO2, MAT_Si, cfg.T_Chip_T, "cu_sio2_si"
+        ),
+        bottom=_layer_mix3_from_scaled_volumes(
+            cfg, "T_Sub", MAT_CU, MAT_SiO2, MAT_Si, cfg.T_Sub_T, "si_sio2_cu"
+        ),
         L_m= cfg.WAF_R_um*1e-6, T_C= cfg.T_anl, T0_C= cfg.T_R
     )
 
@@ -804,19 +843,27 @@ def _build_post_bond_stack_from_cfg(cfg) -> Tuple[BondedLayerInput, ...]:
 
     bottom_sub = _eq_layer_to_bonded_layer(
         "BOTTOM_SUBSTRATE",
-        equiv_from_three(LayerMix3(mat_si, cfg.B_Sub_Si_V, mat_sio2, cfg.B_Sub_Sio2_V, mat_cu, cfg.B_Sub_Cu_V, cfg.B_Sub_T)),
+        equiv_from_three(_layer_mix3_from_scaled_volumes(
+            cfg, "B_Sub", mat_cu, mat_sio2, mat_si, cfg.B_Sub_T, "si_sio2_cu"
+        )),
     )
     bottom_chip = _eq_layer_to_bonded_layer(
         "BOTTOM_CHIP",
-        equiv_from_three(LayerMix3(mat_cu, cfg.B_Chip_Cu_V, mat_sio2, cfg.B_Chip_Sio2_V, mat_si, cfg.B_Chip_Si_V, cfg.B_Chip_T)),
+        equiv_from_three(_layer_mix3_from_scaled_volumes(
+            cfg, "B_Chip", mat_cu, mat_sio2, mat_si, cfg.B_Chip_T, "cu_sio2_si"
+        )),
     )
     top_chip = _eq_layer_to_bonded_layer(
         "TOP_CHIP",
-        equiv_from_three(LayerMix3(mat_cu, cfg.T_Chip_Cu_V, mat_sio2, cfg.T_Chip_Sio2_V, mat_si, cfg.T_Chip_Si_V, cfg.T_Chip_T)),
+        equiv_from_three(_layer_mix3_from_scaled_volumes(
+            cfg, "T_Chip", mat_cu, mat_sio2, mat_si, cfg.T_Chip_T, "cu_sio2_si"
+        )),
     )
     top_sub = _eq_layer_to_bonded_layer(
         "TOP_SUBSTRATE",
-        equiv_from_three(LayerMix3(mat_si, cfg.T_Sub_Si_V, mat_sio2, cfg.T_Sub_Sio2_V, mat_cu, cfg.T_Sub_Cu_V, cfg.T_Sub_T)),
+        equiv_from_three(_layer_mix3_from_scaled_volumes(
+            cfg, "T_Sub", mat_cu, mat_sio2, mat_si, cfg.T_Sub_T, "si_sio2_cu"
+        )),
     )
     return (bottom_sub, bottom_chip, top_sub, top_chip)
 

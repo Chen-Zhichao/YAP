@@ -65,6 +65,7 @@ def Assembly_Yield_Simulator(
             cfg_dict            =       cfg_dict,
             _3dbx_path          =       _3dbx_path,
             num_samples         =       SIM_BATCH_SIZE,
+            num_dies_per_wafer  =       num_dies_per_wafer,
         )
 
         # Generate overlay misalignment component samples for each bonding interface in each stack

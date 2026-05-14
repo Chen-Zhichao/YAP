@@ -102,6 +102,7 @@ def overlay_term_simulator(
             cfg_dict,
             _3dbx_path,
             num_samples=NUM_STACKS,
+            num_dies_per_wafer=waf_stack_list[0].num_dies_per_wafer,
         )
 
     for interface_name, cfg in cfg_dict.items():

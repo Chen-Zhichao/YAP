@@ -486,6 +486,7 @@ def stack_stress_yield_calculator(
          debond_dishing_intervals_from_coords()    — per-pad lookup on cache miss
     """
     for interface_name, cfg in cfg_dict.items():
+        cfg.num_dies_per_wafer = waf_stack.num_dies_per_wafer
         interface = waf_stack.interfaces.interface_dict[interface_name]
         pad_bitmap_collection = waf_stack.interfaces.pad_bitmap_collection_dict[interface_name]
 
@@ -646,5 +647,4 @@ def stack_stress_yield_calculator(
         #     )
         # )
         waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array
-
 

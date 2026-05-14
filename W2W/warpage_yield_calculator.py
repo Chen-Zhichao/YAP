@@ -21,6 +21,11 @@ import numpy as np
 import pandas as pd
 from omegaconf import OmegaConf
 
+try:
+    from utils.util import w2w_area_scaled_layer_volumes
+except ModuleNotFoundError:
+    from W2W.utils.util import w2w_area_scaled_layer_volumes
+
 
 def _instance_from_3dbx_endpoint(endpoint) -> str:
     return str(endpoint).split(".regions.")[0]
@@ -338,7 +343,11 @@ def _layer_cfg_and_side(cfg_dict, interfaces_bottom_to_top, layer_index):
     return cfg_dict[interfaces_bottom_to_top[layer_index - 1]], "TOP"
 
 
-def _effective_material_properties_from_volume_fraction(cfg, mix_prefix):
+def _effective_material_properties_from_volume_fraction(
+    cfg,
+    mix_prefix,
+    num_dies_per_wafer=None,
+):
     material_defaults = {
         "Cu": {
             "E_GPa": _first_existing_float(cfg, ["CU_E_GPA"], default=91.8),
@@ -364,10 +373,11 @@ def _effective_material_properties_from_volume_fraction(cfg, mix_prefix):
     has_any_volume = any(_cfg_get(cfg, key, None) is not None for key in volume_keys.values())
 
     if has_any_volume:
-        volumes = {
-            material: _first_existing_float(cfg, [key], default=0.0)
-            for material, key in volume_keys.items()
-        }
+        volumes = w2w_area_scaled_layer_volumes(
+            cfg,
+            mix_prefix,
+            num_dies_per_wafer=num_dies_per_wafer,
+        )
         source = "config_volume_fraction"
     else:
         volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
@@ -401,6 +411,7 @@ def _effective_material_properties_from_volume_fraction(cfg, mix_prefix):
         "Sio2_V": float(volumes["Sio2"]),
         "Si_V": float(volumes["Si"]),
         "volume_sum": float(total_volume),
+        "w2w_die_area_fill_factor": float(volumes.get("area_fill_factor", 1.0)),
         "material_property_source": source,
     }
 
@@ -410,6 +421,7 @@ def _build_layer_df(
     chiplets_bottom_to_top,
     interfaces_bottom_to_top,
     chiplet_instances_bottom_to_top=None,
+    num_dies_per_wafer=None,
 ):
     rows = []
     sigmas = []
@@ -421,7 +433,11 @@ def _build_layer_df(
         h_key = "ITF_BOT_THICK_um" if side == "BOT" else "ITF_TOP_THICK_um"
         mix_prefix = "B_Sub" if side == "BOT" else "T_Sub"
         bow_mean_um, bow_std_um = _initial_bow_stats_um(cfg, side)
-        effective_material = _effective_material_properties_from_volume_fraction(cfg, mix_prefix)
+        effective_material = _effective_material_properties_from_volume_fraction(
+            cfg,
+            mix_prefix,
+            num_dies_per_wafer=num_dies_per_wafer,
+        )
 
         rows.append({
             "chiplet": chiplet,
@@ -437,6 +453,7 @@ def _build_layer_df(
             "Sio2_V": effective_material["Sio2_V"],
             "Si_V": effective_material["Si_V"],
             "volume_sum": effective_material["volume_sum"],
+            "w2w_die_area_fill_factor": effective_material["w2w_die_area_fill_factor"],
             "material_property_source": effective_material["material_property_source"],
         })
         sigmas.append(bow_std_um)
@@ -523,7 +540,11 @@ def _stack_warpage_threshold_um(cfg):
     )
 
 
-def get_interface_existing_stack_warpage_map(cfg_dict, _3dbx_path):
+def get_interface_existing_stack_warpage_map(
+    cfg_dict,
+    _3dbx_path,
+    num_dies_per_wafer=None,
+):
     """
     Return pre-bond existing-stack warpage distributions for W2W overlay.
 
@@ -547,6 +568,7 @@ def get_interface_existing_stack_warpage_map(cfg_dict, _3dbx_path):
             chiplets,
             interfaces,
             chiplet_instances,
+            num_dies_per_wafer=num_dies_per_wafer,
         )
         DeltaT_K_by_step = _sequential_delta_t_by_step(cfg_dict, interfaces)
         _, step_results, _, _, _ = _sequential_step_warpage_gaussians(
@@ -591,7 +613,7 @@ def get_interface_existing_stack_warpage_map(cfg_dict, _3dbx_path):
     return interface_stack_warpage
 
 
-def compute_warpage_yield(cfg_dict, _3dbx_path):
+def compute_warpage_yield(cfg_dict, _3dbx_path, num_dies_per_wafer=None):
     """
     Compute final W2W total-warpage yield for every substack.
     """
@@ -622,6 +644,7 @@ def compute_warpage_yield(cfg_dict, _3dbx_path):
             chiplets,
             interfaces,
             chiplet_instances,
+            num_dies_per_wafer=num_dies_per_wafer,
         )
 
         final_summary, step_results, mu_um, sigma_um, sensitivities = (
@@ -677,7 +700,11 @@ def stack_warpage_yield_calculator(
     for interface_name in cfg_dict:
         waf_stack.die_yield_list_per_interface_dict[interface_name]["warpage"] = ones.copy()
 
-    result = compute_warpage_yield(cfg_dict, _3dbx_path)
+    result = compute_warpage_yield(
+        cfg_dict,
+        _3dbx_path,
+        num_dies_per_wafer=waf_stack.num_dies_per_wafer,
+    )
     for info in result["substack_results"].values():
         final_interface = info["final_interface"]
         waf_stack.die_yield_list_per_interface_dict[final_interface]["warpage"] = np.full(

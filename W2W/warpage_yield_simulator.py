@@ -41,7 +41,7 @@ def _layer_sample_key(row):
     return str(row.get("chiplet_instance", row["chiplet"]))
 
 
-def _substack_specs(cfg_dict, _3dbx_path):
+def _substack_specs(cfg_dict, _3dbx_path, num_dies_per_wafer=None):
     specs = []
     for substack in stack_graph_from_3dbx(_3dbx_path):
         substack_id = int(substack["substack_id"])
@@ -64,6 +64,7 @@ def _substack_specs(cfg_dict, _3dbx_path):
             chiplets,
             interfaces,
             chiplet_instances,
+            num_dies_per_wafer=num_dies_per_wafer,
         )
 
         specs.append({
@@ -168,6 +169,7 @@ def sample_interface_bow_difference(
     _3dbx_path,
     *,
     num_samples,
+    num_dies_per_wafer=None,
     return_details=False,
 ):
     """
@@ -186,7 +188,11 @@ def sample_interface_bow_difference(
         raise ValueError("num_samples must be positive.")
 
     rng = np.random.default_rng()
-    specs = _substack_specs(cfg_dict, _3dbx_path)
+    specs = _substack_specs(
+        cfg_dict,
+        _3dbx_path,
+        num_dies_per_wafer=num_dies_per_wafer,
+    )
     sample_distributions = _collect_layer_sample_distributions(specs)
     initial_bow_samples = _sample_initial_bows(sample_distributions, num_samples, rng)
 
@@ -259,6 +265,7 @@ def sample_w2w_warpage_process(
     _3dbx_path,
     *,
     num_samples,
+    num_dies_per_wafer=None,
     return_samples=False,
 ):
     """
@@ -273,7 +280,11 @@ def sample_w2w_warpage_process(
         raise ValueError("num_samples must be positive.")
 
     rng = np.random.default_rng()
-    specs = _substack_specs(cfg_dict, _3dbx_path)
+    specs = _substack_specs(
+        cfg_dict,
+        _3dbx_path,
+        num_dies_per_wafer=num_dies_per_wafer,
+    )
     sample_distributions = _collect_layer_sample_distributions(specs)
     initial_bow_samples = _sample_initial_bows(sample_distributions, num_samples, rng)
 
@@ -351,6 +362,7 @@ def simulate_warpage_yield(
     _3dbx_path,
     *,
     num_samples,
+    num_dies_per_wafer=None,
     include_calculator_reference=True,
     return_samples=False,
 ):
@@ -362,7 +374,11 @@ def simulate_warpage_yield(
         raise ValueError("num_samples must be positive.")
 
     rng = np.random.default_rng()
-    specs = _substack_specs(cfg_dict, _3dbx_path)
+    specs = _substack_specs(
+        cfg_dict,
+        _3dbx_path,
+        num_dies_per_wafer=num_dies_per_wafer,
+    )
     sample_distributions = _collect_layer_sample_distributions(specs)
     initial_bow_samples = _sample_initial_bows(sample_distributions, num_samples, rng)
 
@@ -415,7 +431,11 @@ def simulate_warpage_yield(
         result["stack_pass_vector"] = stack_pass_vector.copy()
 
     if include_calculator_reference:
-        calculator_reference = compute_warpage_yield(cfg_dict, _3dbx_path)
+        calculator_reference = compute_warpage_yield(
+            cfg_dict,
+            _3dbx_path,
+            num_dies_per_wafer=num_dies_per_wafer,
+        )
         result["calculator_reference"] = calculator_reference
         result["overall_yield_delta_vs_calculator"] = (
             result["overall_warpage_yield"]
