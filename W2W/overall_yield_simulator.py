@@ -16,8 +16,9 @@ import yaml
 
 from overlay_yield_simulator import die_pad_misalignment
 from Cu_gap_simulator import Cu_gap_simulator
+from debond import debond_dishing_bounds_calculator_coords
+from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
-from esd_hybrid import esd_failure_simulator
 
 def total_memory_mb(obj):
     total = sys.getsizeof(obj)
@@ -95,16 +96,24 @@ def overall_yield_simulator(
             # Read the redundant net to bump ids mapping
             redundant_net_to_bumpids = pad_bitmap_collection["redundant_net_to_bumpids"]
             valid_pad_mask = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+            valid_pad_mask_flat = valid_pad_mask.flatten()
+            valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
+            valid_dummy_pad_bitmap = pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat]
             # Read the mapping from physical pad location to bump id
             mapping_physical_to_bumpid = pad_bitmap_collection["mapping_physical_to_bumpid"]
             # Read the criticality info
             criticality_info = pad_bitmap_collection["criticality_info"]
             # Read the redundant net to 1D physical mask mapping
             redundant_net_to_1d_physical_mask = pad_bitmap_collection["redundant_net_to_1d_physical_mask"]
+            esd_center_tol_um = getattr(cfg, "ESD_CENTER_TOL_UM", None)
+            selected_esd_die_ind = choose_center_die_index(
+                waf_interface.die_list,
+                tolerance_um=None if esd_center_tol_um is None else float(esd_center_tol_um),
+            )
 
             for die_ind, die in enumerate(waf_interface.die_list):
                 die_pad_coords = waf_interface.base_pad_coords + die.die_center
-                valid_die_pad_coords = die_pad_coords[valid_pad_mask.flatten() == 1]
+                valid_die_pad_coords = die_pad_coords[valid_pad_mask_flat]
                 die_count += 1
                 if die_count % 10 == 0 or die_count == len(waf_interface.die_list):
                     print("Processing die {}/{}...Time taken for every 10 dies: {:.2f} seconds".format(die_count, len(waf_interface.die_list), (time.time() - start_time) / die_count * 10), end='\r')
@@ -347,25 +356,21 @@ def overall_yield_simulator(
                 '''
                 Check the ESD failure
                 '''
-                # TODO: ESD failure simulation to be implemented
-                # Check if the die is in the wafer center
-                die_center_x, die_center_y = die.die_center[0], die.die_center[1]
-                if np.abs(die_center_x) < die.DIE_W_um / 2 and np.abs(die_center_y) < die.DIE_L_um / 2:
-                    # Assume dies in the center will be the first contact point and have higher ESD hazard
-                    # Check critical pads specifically for the ESD failure mechanisms (ESD-critical pads)
+                if selected_esd_die_ind is not None and die_ind == selected_esd_die_ind:
                     first_contact_pad_idx, survive_bool = esd_failure_simulator(
+                                                    cfg=cfg,
                                                     pad_coords_um=valid_die_pad_coords,
                                                     pad_size_um=PAD_TOP_R_um * 2,
-                                                    top_wafer_radius_um=WAF_R_um,
+                                                    top_die_w_um=die.DIE_W_um,
+                                                    top_die_h_um=die.DIE_L_um,
+                                                    wafer_radius_um=WAF_R_um,
                                                     top_dish_nm_ext=top_dish,
                                                     bot_dish_nm_ext=bot_dish,
-                                                    tilt_x_mean_deg=TILT_X_MEAN_DEG,
-                                                    tilt_x_std_deg=TILT_X_STD_DEG,
-                                                    tilt_y_mean_deg=TILT_Y_MEAN_DEG,
-                                                    tilt_y_std_deg=TILT_Y_STD_DEG,
+                                                    dummy_pad_bitmap=valid_dummy_pad_bitmap,
                                                     )
                     if first_contact_pad_idx is not None and survive_bool == False:
-                        r_idx, c_idx = first_contact_pad_idx // PAD_ARR_COL, first_contact_pad_idx % PAD_ARR_COL
+                        full_linear_idx = int(valid_linear_idx[int(first_contact_pad_idx)])
+                        r_idx, c_idx = full_linear_idx // PAD_ARR_COL, full_linear_idx % PAD_ARR_COL
                         if cfg.verbose:
                             epoch_fail_map_per_interface_dict[interface_name]['ESD'][r_idx, c_idx] += 1
                             temp_overall_fail_map[r_idx, c_idx] = 1
@@ -377,16 +382,6 @@ def overall_yield_simulator(
                                 epoch_fail_vec_per_interface_dict[interface_name]['ESD'][stack_ind, die_ind] = 1
                                 epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
                             continue
-                        for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
-                            tolerated_esd_failures = criticality_info[redundant_net]['tolerated_esd_failures']
-                            num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
-                            if num_fail_pad_in_net > tolerated_esd_failures:
-                                waf_stack.die_stack_survival[die_ind] = False
-                                waf_interface.die_list[die_ind].survival = False
-                                if cfg.verbose:
-                                    epoch_fail_vec_per_interface_dict[interface_name]['ESD'][stack_ind, die_ind] = 1
-                                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
-                                break     
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['overall'] += temp_overall_fail_map.astype(int)               
             print("")
