@@ -16,7 +16,6 @@ import yaml
 
 from overlay_yield_simulator import die_pad_misalignment
 from Cu_gap_simulator import Cu_gap_simulator
-from debond import debond_dishing_bounds_calculator_coords
 from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
 
