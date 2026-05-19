@@ -68,7 +68,16 @@ def _build_interface_static_cache(
         critical_pad_bitmap = pad_bitmap_collection["CRITICAL_PAD_BITMAP"].astype(bool)
         redundant_pad_bitmap = pad_bitmap_collection["REDUNDANT_PAD_BITMAP"].astype(bool)
         dummy_pad_bitmap = pad_bitmap_collection["DUMMY_PAD_BITMAP"].astype(bool)
-        valid_pad_mask = critical_pad_bitmap | redundant_pad_bitmap | dummy_pad_bitmap
+        power_ground_pad_bitmap = pad_bitmap_collection.get(
+            "POWER_GROUND_PAD_BITMAP",
+            np.zeros_like(critical_pad_bitmap, dtype=bool),
+        ).astype(bool)
+        valid_pad_mask = (
+            critical_pad_bitmap
+            | redundant_pad_bitmap
+            | dummy_pad_bitmap
+            | power_ground_pad_bitmap
+        )
         valid_pad_mask_flat = valid_pad_mask.reshape(-1)
         valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
         valid_die_pad_coords = np.asarray(
@@ -200,7 +209,15 @@ def overall_yield_simulator(
             # Read the redundant net to bump ids mapping
             redundant_net_to_bumpids = pad_bitmap_collection["redundant_net_to_bumpids"]
             # Get the valid pad mask
-            valid_pad_mask = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+            valid_pad_mask = (
+                (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection.get(
+                    'POWER_GROUND_PAD_BITMAP',
+                    np.zeros_like(pad_bitmap_collection['CRITICAL_PAD_BITMAP'], dtype=bool),
+                ) == 1)
+            )
             # Read the mapping from physical to bump id
             mapping_physical_to_bumpid = pad_bitmap_collection["mapping_physical_to_bumpid"]
             # Read the criticality info

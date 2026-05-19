@@ -36,6 +36,7 @@ def Assembly_Yield_Simulator(
             cfg_dict                    =       cfg_dict,
             pad_bitmap_collection_dict  =       pad_bitmap_collection_dict,
             num_stack_samples           =       1,
+            mode                        =       input_args['mode'],
         )
         fail_map_per_interface_dict = {}
         fail_vec_per_interface_dict = {}
@@ -57,6 +58,7 @@ def Assembly_Yield_Simulator(
             cfg_dict                    =       cfg_dict,
             pad_bitmap_collection_dict  =       pad_bitmap_collection_dict,
             num_stack_samples           =       SIM_BATCH_SIZE,
+            mode                        =       input_args['mode'],
         )
         num_dies_per_wafer = waf_stack_list[0].num_dies_per_wafer
 

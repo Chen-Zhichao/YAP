@@ -35,7 +35,15 @@ def Assembly_Yield_Calculator(
     
     valid_pad_mask_dict = {}
     for interface, pad_bitmap_collection in pad_bitmap_collection_dict.items():
-        valid_pad_mask_dict[interface] = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+        valid_pad_mask_dict[interface] = (
+            (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1)
+            | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1)
+            | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+            | (pad_bitmap_collection.get(
+                'POWER_GROUND_PAD_BITMAP',
+                np.zeros_like(pad_bitmap_collection['CRITICAL_PAD_BITMAP'], dtype=bool),
+            ) == 1)
+        )
 
     
     # Calculate the overlay yield
@@ -85,6 +93,7 @@ def Assembly_Yield_Calculator(
     print("Warpage yield calculation time: {:.2f} seconds.".format(warpage_yield_time))
 
     die_stack_yield, die_stack_yield_list = waf_stack.get_die_stack_yield()
+    waf_stack.print_interface_yield_table()
     print(f"Calculated die stack yield: {die_stack_yield:.6f}")
        
 

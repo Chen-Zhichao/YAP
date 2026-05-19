@@ -15,7 +15,7 @@ from joblib import dump, load
 import yaml
 
 from overlay_yield_simulator import die_pad_misalignment
-from Cu_gap_simulator import Cu_gap_simulator
+from Cu_gap_simulator import Cu_gap_correlated_simulator
 from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
 
@@ -75,8 +75,6 @@ def overall_yield_simulator(
             RANDOM_MISALIGNMENT_STD_um      =       cfg.RANDOM_MISALIGNMENT_STD_um
             PAD_ARR_W_um, PAD_ARR_L_um      =       cfg.PAD_ARR_W_um, cfg.PAD_ARR_L_um
             PAD_ARR_ROW, PAD_ARR_COL        =       cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL
-            TOP_DISH_MEAN_nm, TOP_DISH_STD_nm  =       cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_nm
-            BOT_DISH_MEAN_nm, BOT_DISH_STD_nm  =       cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_nm
             TILT_X_MEAN_DEG, TILT_X_STD_DEG    =       cfg.TILT_X_MEAN_DEG, cfg.TILT_X_STD_DEG
             TILT_Y_MEAN_DEG, TILT_Y_STD_DEG    =      cfg.TILT_Y_MEAN_DEG, cfg.TILT_Y_STD_DEG
             PITCH_r_um, PITCH_c_um          =       cfg.PITCH_r_um, cfg.PITCH_c_um
@@ -94,7 +92,15 @@ def overall_yield_simulator(
             die_esd_critical_pad_bitmap = pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"]
             # Read the redundant net to bump ids mapping
             redundant_net_to_bumpids = pad_bitmap_collection["redundant_net_to_bumpids"]
-            valid_pad_mask = (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1) | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1) | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+            valid_pad_mask = (
+                (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection.get(
+                    'POWER_GROUND_PAD_BITMAP',
+                    np.zeros_like(pad_bitmap_collection['CRITICAL_PAD_BITMAP'], dtype=bool),
+                ) == 1)
+            )
             valid_pad_mask_flat = valid_pad_mask.flatten()
             valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
             valid_dummy_pad_bitmap = pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat]
@@ -290,7 +296,10 @@ def overall_yield_simulator(
                 Check the Cu gap, a true Monte Carlo simulator
                 '''
                 # Check the Cu expansion
-                top_dish, bot_dish = Cu_gap_simulator(TOP_DISH_MEAN_nm, TOP_DISH_STD_nm, BOT_DISH_MEAN_nm, BOT_DISH_STD_nm, int(die.num_pads))
+                top_dish, bot_dish = Cu_gap_correlated_simulator(
+                    cfg=cfg,
+                    valid_pad_mask_flat=valid_pad_mask_flat,
+                )
                 Cu_gap_in_valid_pads = top_dish + bot_dish
                 Cu_gap_map = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
                 Cu_gap_map[valid_pad_mask == 1] = Cu_gap_in_valid_pads
@@ -309,6 +318,8 @@ def overall_yield_simulator(
                 zeta_1 = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
                 zeta_0[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 1] * 2 # lower limits of the sum of top and bottom Cu heights
                 zeta_1[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 0] * 2 # upper limits of the sum of top and bottom Cu heights
+                zeta_0 = np.clip(zeta_0, a_max=0, a_min=None)
+                zeta_1 = np.clip(zeta_1, a_max=0, a_min=None)
 
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['mechanical'] += ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)

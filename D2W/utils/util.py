@@ -13,6 +13,14 @@ import json
 from collections import defaultdict
 
 
+_POWER_GROUND_NET_TOKENS = {"vdd", "vss", "vpp", "vddq", "vddql", "gnd", "vcc"}
+
+
+def _is_power_ground_net(net: str) -> bool:
+    net_tokens = str(net).lower().replace("-", "_").replace(".", "_").split("_")
+    return any(token in _POWER_GROUND_NET_TOKENS for token in net_tokens)
+
+
 def print_run_separator(label: str = "Run finished"):
     duck = [
         "        YAP~",
@@ -197,6 +205,7 @@ def _bitmap_collection_cache_signature(
 ) -> str:
     cfg_container = OmegaConf.to_container(cfg, resolve=True)
     signature_payload = {
+        "bitmap_schema_version": 2,
         "cfg": _normalize_cache_value(cfg_container),
         "bmap_path": os.path.abspath(bmap_path),
         "bmap_mtime_ns": os.stat(bmap_path).st_mtime_ns,
@@ -870,25 +879,32 @@ def draw_pad_bitmap(cfg, bitmap_collection, output_path):
     CRITICAL_PAD_BITMAP = bitmap_collection["CRITICAL_PAD_BITMAP"]
     REDUNDANT_PAD_BITMAP = bitmap_collection["REDUNDANT_PAD_BITMAP"]
     DUMMY_PAD_BITMAP = bitmap_collection["DUMMY_PAD_BITMAP"]
+    POWER_GROUND_PAD_BITMAP = bitmap_collection.get(
+        "POWER_GROUND_PAD_BITMAP",
+        np.zeros_like(CRITICAL_PAD_BITMAP, dtype=bool),
+    )
     ## Use legend to show the color
     PAD_BITMAP = np.zeros_like(CRITICAL_PAD_BITMAP, dtype=int)
 
     PAD_BITMAP[CRITICAL_PAD_BITMAP == 1] = 1  # red
     PAD_BITMAP[REDUNDANT_PAD_BITMAP == 1] = 2  # blue
     PAD_BITMAP[DUMMY_PAD_BITMAP == 1] = 3  # green
+    PAD_BITMAP[POWER_GROUND_PAD_BITMAP == 1] = 4  # orange
     # Remaining zeros are non-pad areas
-    PAD_BITMAP[PAD_BITMAP == 0] = 4  # non-pad (light gray)
+    PAD_BITMAP[PAD_BITMAP == 0] = 5  # non-pad (light gray)
 
     fig = plt.figure(figsize=(10, 10))
     cmap = ListedColormap([
         (1.0, 0.5, 0.5),    # 1 - critical (medium red)
         (0.4, 0.4, 0.9),    # 2 - redundant (medium blue)
         (0.0, 0.6, 0.0),    # 3 - dummy (medium green)
-        (0.9, 0.9, 0.9),    # 4 - non-pad (light gray)
+        (1.0, 0.7, 0.2),    # 4 - power/ground (orange)
+        (0.9, 0.9, 0.9),    # 5 - non-pad (light gray)
     ])
     red_patch = patches.Patch(color=(1.0, 0.5, 0.5), label='Critical Pads')
     blue_patch = patches.Patch(color=(0.4, 0.4, 0.9), label='Redundant Pads')
     green_patch = patches.Patch(color=(0.0, 0.6, 0.0), label='Dummy Pads')
+    orange_patch = patches.Patch(color=(1.0, 0.7, 0.2), label='Power/Ground Pads')
     light_gray_patch = patches.Patch(color=(0.9, 0.9, 0.9), label='Non-Pad Areas')
     # plt.legend(
     #     handles=[red_patch, blue_patch, green_patch, light_gray_patch],
@@ -898,7 +914,7 @@ def draw_pad_bitmap(cfg, bitmap_collection, output_path):
     #     frameon=False
     # )
     # plt.legend().set_visible(False)
-    norm = BoundaryNorm(boundaries=[0.5, 1.5, 2.5, 3.5, 4.5], ncolors=cmap.N)
+    norm = BoundaryNorm(boundaries=[0.5, 1.5, 2.5, 3.5, 4.5, 5.5], ncolors=cmap.N)
     plt.axis('off')
     plt.imshow(PAD_BITMAP, cmap=cmap, norm=norm)
     # plt.title("Pad Block Bitmap")
@@ -990,114 +1006,114 @@ def criticality_generator(cfg,
     return
 
 
-def risk_map_generator(cfg,
-                    interface: object,
-                    input_args
-                    ):
-    '''
-    Risk map output format:
-    <pad_coords_x> <pad_coords_y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>
-    '''
-    file_suffix = str(input_args.get("output_file_tag", ""))
-    if not file_suffix:
-        config_path = str(input_args.get("config", ""))
-        criticality_profile = str(input_args.get("criticality_profile", "default"))
-        if config_path:
-            config_stem = os.path.splitext(os.path.basename(config_path))[0]
-            safe_parts = []
-            for ch in f"{config_stem}__{criticality_profile}":
-                if ch.isalnum() or ch in ("-", "_"):
-                    safe_parts.append(ch)
-                else:
-                    safe_parts.append("_")
-            safe_tag = "".join(safe_parts).strip("_")
-            if safe_tag:
-                file_suffix = f"__{safe_tag}"
+# def risk_map_generator(cfg,
+#                     interface: object,
+#                     input_args
+#                     ):
+#     '''
+#     Risk map output format:
+#     <pad_coords_x> <pad_coords_y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>
+#     '''
+#     file_suffix = str(input_args.get("output_file_tag", ""))
+#     if not file_suffix:
+#         config_path = str(input_args.get("config", ""))
+#         criticality_profile = str(input_args.get("criticality_profile", "default"))
+#         if config_path:
+#             config_stem = os.path.splitext(os.path.basename(config_path))[0]
+#             safe_parts = []
+#             for ch in f"{config_stem}__{criticality_profile}":
+#                 if ch.isalnum() or ch in ("-", "_"):
+#                     safe_parts.append(ch)
+#                 else:
+#                     safe_parts.append("_")
+#             safe_tag = "".join(safe_parts).strip("_")
+#             if safe_tag:
+#                 file_suffix = f"__{safe_tag}"
 
-    def append_file_suffix(filename: str) -> str:
-        if not file_suffix:
-            return filename
-        stem, ext = os.path.splitext(filename)
-        return f"{stem}{file_suffix}{ext}"
+#     def append_file_suffix(filename: str) -> str:
+#         if not file_suffix:
+#             return filename
+#         stem, ext = os.path.splitext(filename)
+#         return f"{stem}{file_suffix}{ext}"
 
-    output_dir = os.path.join(cfg.OUTPUT_DIR, input_args['ds_name'], cfg.INTERFACE)
-    risk_map_path = os.path.join(output_dir, append_file_suffix(f"{cfg.INTERFACE}_risk.map"))
-    pad_coords = np.asarray(interface.pad_coords, dtype=np.float64)
-    valid_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
-    risk_map = np.column_stack(
-        (
-            pad_coords[valid_mask, 0],
-            pad_coords[valid_mask, 1],
-            1.0 - np.asarray(interface.pad_yield_map['Y_esd'], dtype=np.float64).reshape(-1)[valid_mask],
-            1.0 - np.asarray(interface.pad_yield_map['Y_ovl'], dtype=np.float64).reshape(-1)[valid_mask],
-            1.0 - np.asarray(interface.pad_yield_map['Y_df'], dtype=np.float64).reshape(-1)[valid_mask],
-            1.0 - np.asarray(interface.pad_yield_map['Y_ce'], dtype=np.float64).reshape(-1)[valid_mask],
-        )
-    )
-    np.savetxt(
-        risk_map_path,
-        risk_map,
-        fmt=["%.6f", "%.6f", "%.12f", "%.12f", "%.12f", "%.12f"],
-    )
-    print("Risk map file saved in ", risk_map_path)
+#     output_dir = os.path.join(cfg.OUTPUT_DIR, input_args['ds_name'], cfg.INTERFACE)
+#     risk_map_path = os.path.join(output_dir, append_file_suffix(f"{cfg.INTERFACE}_risk.map"))
+#     pad_coords = np.asarray(interface.pad_coords, dtype=np.float64)
+#     valid_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+#     risk_map = np.column_stack(
+#         (
+#             pad_coords[valid_mask, 0],
+#             pad_coords[valid_mask, 1],
+#             1.0 - np.asarray(interface.pad_yield_map['Y_esd'], dtype=np.float64).reshape(-1)[valid_mask],
+#             1.0 - np.asarray(interface.pad_yield_map['Y_ovl'], dtype=np.float64).reshape(-1)[valid_mask],
+#             1.0 - np.asarray(interface.pad_yield_map['Y_df'], dtype=np.float64).reshape(-1)[valid_mask],
+#             1.0 - np.asarray(interface.pad_yield_map['Y_ce'], dtype=np.float64).reshape(-1)[valid_mask],
+#         )
+#     )
+#     np.savetxt(
+#         risk_map_path,
+#         risk_map,
+#         fmt=["%.6f", "%.6f", "%.12f", "%.12f", "%.12f", "%.12f"],
+#     )
+#     print("Risk map file saved in ", risk_map_path)
 
-    mechanism_specs = {
-        "esd": ("Y_esd", "ESD Failure Probability"),
-        "overlay": ("Y_ovl", "Overlay Failure Probability"),
-        "particle": ("Y_df", "Particle Failure Probability"),
-        "mechanical": ("Y_ce", "Mechanical Failure Probability"),
-        "overall": ("Y_bond", "Overall Failure Probability"),
-    }
-    for mechanism, (yield_key, colorbar_label) in mechanism_specs.items():
-        failure_map = 1.0 - np.asarray(interface.pad_yield_map[yield_key], dtype=np.float64)
-        masked_failure_map = np.ma.masked_invalid(failure_map)
+#     mechanism_specs = {
+#         "esd": ("Y_esd", "ESD Failure Probability"),
+#         "overlay": ("Y_ovl", "Overlay Failure Probability"),
+#         "particle": ("Y_df", "Particle Failure Probability"),
+#         "mechanical": ("Y_ce", "Mechanical Failure Probability"),
+#         "overall": ("Y_bond", "Overall Failure Probability"),
+#     }
+#     for mechanism, (yield_key, colorbar_label) in mechanism_specs.items():
+#         failure_map = 1.0 - np.asarray(interface.pad_yield_map[yield_key], dtype=np.float64)
+#         masked_failure_map = np.ma.masked_invalid(failure_map)
 
-        finite_vals = failure_map[np.isfinite(failure_map)]
-        vmin = float(np.min(finite_vals)) if finite_vals.size > 0 else 0.0
-        vmax = float(np.max(finite_vals)) if finite_vals.size > 0 else 1.0
-        if vmax <= 0.0:
-            vmax = 1.0
+#         finite_vals = failure_map[np.isfinite(failure_map)]
+#         vmin = float(np.min(finite_vals)) if finite_vals.size > 0 else 0.0
+#         vmax = float(np.max(finite_vals)) if finite_vals.size > 0 else 1.0
+#         if vmax <= 0.0:
+#             vmax = 1.0
 
-        fig, ax = plt.subplots(figsize=(8, 6))
-        extent = None
-        x_label = 'Pad Column Index'
-        y_label = 'Pad Row Index'
-        pitch_c = getattr(cfg, "PITCH_c_um", None)
-        pitch_r = getattr(cfg, "PITCH_r_um", None)
-        if pitch_c not in (None, "None") and pitch_r not in (None, "None"):
-            cols = masked_failure_map.shape[1]
-            rows = masked_failure_map.shape[0]
-            half_w = (cols - 1) * float(pitch_c) / 2.0
-            half_h = (rows - 1) * float(pitch_r) / 2.0
-            extent = [-half_w, half_w, half_h, -half_h]
-            x_label = 'X (um)'
-            y_label = 'Y (um)'
+#         fig, ax = plt.subplots(figsize=(8, 6))
+#         extent = None
+#         x_label = 'Pad Column Index'
+#         y_label = 'Pad Row Index'
+#         pitch_c = getattr(cfg, "PITCH_c_um", None)
+#         pitch_r = getattr(cfg, "PITCH_r_um", None)
+#         if pitch_c not in (None, "None") and pitch_r not in (None, "None"):
+#             cols = masked_failure_map.shape[1]
+#             rows = masked_failure_map.shape[0]
+#             half_w = (cols - 1) * float(pitch_c) / 2.0
+#             half_h = (rows - 1) * float(pitch_r) / 2.0
+#             extent = [-half_w, half_w, half_h, -half_h]
+#             x_label = 'X (um)'
+#             y_label = 'Y (um)'
 
-        image = ax.imshow(
-            masked_failure_map,
-            cmap='viridis',
-            interpolation='nearest',
-            vmin=vmin,
-            vmax=vmax,
-            origin='upper',
-            extent=extent,
-        )
-        fig.colorbar(image, ax=ax, label=colorbar_label)
-        ax.set_title(f"{mechanism.title()} Risk Map")
-        ax.set_xlabel(x_label)
-        ax.set_ylabel(y_label)
+#         image = ax.imshow(
+#             masked_failure_map,
+#             cmap='viridis',
+#             interpolation='nearest',
+#             vmin=vmin,
+#             vmax=vmax,
+#             origin='upper',
+#             extent=extent,
+#         )
+#         fig.colorbar(image, ax=ax, label=colorbar_label)
+#         ax.set_title(f"{mechanism.title()} Risk Map")
+#         ax.set_xlabel(x_label)
+#         ax.set_ylabel(y_label)
 
-        save_path = os.path.join(
-            output_dir,
-            append_file_suffix(f"{cfg.INTERFACE}_{mechanism}_risk_map.png"),
-        )
-        fig.savefig(save_path, dpi=300, bbox_inches='tight')
-        plt.close(fig)
+#         save_path = os.path.join(
+#             output_dir,
+#             append_file_suffix(f"{cfg.INTERFACE}_{mechanism}_risk_map.png"),
+#         )
+#         fig.savefig(save_path, dpi=300, bbox_inches='tight')
+#         plt.close(fig)
 
-    print("Failure mechanism risk maps saved in ", output_dir)
-    print()
+#     print("Failure mechanism risk maps saved in ", output_dir)
+#     print()
 
-    return
+#     return
 
 
 
@@ -1216,6 +1232,7 @@ def convert_3dblox_to_pad_bitmap(cfg,
     CRITICAL_PAD_BITMAP = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
     REDUNDANT_PAD_BITMAP = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
     DUMMY_PAD_BITMAP = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
+    POWER_GROUND_PAD_BITMAP = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
     ESD_CRITICAL_PAD_BITMAP = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
     pad_coords = np.full((cfg.PAD_ARR_ROW * cfg.PAD_ARR_COL, 2), np.nan, dtype=np.float32)  # x, y coordinates of each bump
     # Build a mapping array from physical bump location (r, c) to bump id
@@ -1245,6 +1262,9 @@ def convert_3dblox_to_pad_bitmap(cfg,
             if 'dummy' in current_bump_net.lower():
                 DUMMY_PAD_BITMAP[row, col] = 1
                 continue
+            if _is_power_ground_net(current_bump_net):
+                POWER_GROUND_PAD_BITMAP[row, col] = 1
+                continue
             if num_copies == 1:
                 CRITICAL_PAD_BITMAP[row, col] = 1
                 ESD_CRITICAL_PAD_BITMAP[row, col] = 1
@@ -1264,22 +1284,30 @@ def convert_3dblox_to_pad_bitmap(cfg,
     redundant_net_to_1d_physical_mask = {
         net: np.asarray(physical_mask, dtype=np.int32)
         for net, physical_mask in redundant_net_to_1d_physical_mask.items()
+        if len(physical_mask) > 0 and not _is_power_ground_net(net)
+    }
+    redundant_net_to_bumpids = {
+        net: redundant_net_to_bumpids[net]
+        for net in redundant_net_to_1d_physical_mask
     }
 
     # Count the number of pads
     num_critical_pads = np.sum(CRITICAL_PAD_BITMAP)
     num_redundant_pads = np.sum(REDUNDANT_PAD_BITMAP)
     num_dummy_pads = 0 if DUMMY_PAD_BITMAP is None else np.sum(DUMMY_PAD_BITMAP)
+    num_power_ground_pads = np.sum(POWER_GROUND_PAD_BITMAP)
 
     bitmap_collection = {}
     bitmap_collection["bump_data"] = bump_data
     bitmap_collection["CRITICAL_PAD_BITMAP"] = CRITICAL_PAD_BITMAP
     bitmap_collection["REDUNDANT_PAD_BITMAP"] = REDUNDANT_PAD_BITMAP
     bitmap_collection["DUMMY_PAD_BITMAP"] = DUMMY_PAD_BITMAP
+    bitmap_collection["POWER_GROUND_PAD_BITMAP"] = POWER_GROUND_PAD_BITMAP
     bitmap_collection["ESD_CRITICAL_PAD_BITMAP"] = ESD_CRITICAL_PAD_BITMAP
     bitmap_collection["num_critical_pads"] = num_critical_pads
     bitmap_collection["num_redundant_pads"] = num_redundant_pads
     bitmap_collection["num_dummy_pads"] = num_dummy_pads
+    bitmap_collection["num_power_ground_pads"] = num_power_ground_pads
     bitmap_collection["redundant_net_to_bumpids"] = redundant_net_to_bumpids
     bitmap_collection["redundant_net_to_1d_physical_mask"] = redundant_net_to_1d_physical_mask
     bitmap_collection["pad_coords"] = pad_coords

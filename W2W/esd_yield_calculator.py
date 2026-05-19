@@ -505,6 +505,48 @@ def _select_candidate_pad_indices(
     return np.sort(candidate_idx.astype(np.int64, copy=False))
 
 
+def _select_arcing_candidate_pad_indices(
+    *,
+    contact_limit_um: np.ndarray,
+    sigma_h_um: float,
+    arc_distance_um: float,
+    candidate_sigma_window: float,
+    candidate_min_pads: int,
+    candidate_disable_fraction: float,
+) -> np.ndarray:
+    """
+    Return candidate pads that can plausibly participate in W2W first arcing.
+
+    Unlike pure first-contact, first arcing can occur before physical contact.
+    Pads whose deterministic contact limit is within the voltage-dependent arc
+    distance of the earliest-contact region must remain in the candidate set.
+    """
+    contact_limit_um = np.asarray(contact_limit_um, dtype=np.float64).reshape(-1)
+    pad_count = contact_limit_um.size
+    if pad_count <= 0:
+        return np.zeros((0,), dtype=np.int64)
+
+    if candidate_sigma_window <= 0.0 or sigma_h_um <= 0.0:
+        return np.arange(pad_count, dtype=np.int64)
+
+    min_limit = float(np.min(contact_limit_um))
+    threshold = (
+        min_limit
+        + max(0.0, float(arc_distance_um))
+        + float(candidate_sigma_window) * float(sigma_h_um)
+    )
+    candidate_idx = np.flatnonzero(contact_limit_um <= threshold)
+
+    min_pads = max(1, min(int(candidate_min_pads), pad_count))
+    if candidate_idx.size < min_pads:
+        candidate_idx = np.argpartition(contact_limit_um, min_pads - 1)[:min_pads]
+
+    if candidate_idx.size / float(pad_count) >= float(candidate_disable_fraction):
+        return np.arange(pad_count, dtype=np.int64)
+
+    return np.sort(candidate_idx.astype(np.int64, copy=False))
+
+
 def center_die_indices(die_list: Sequence, tolerance_um: float | None = None) -> np.ndarray:
     """
     Return the 1/2/4 dies that share the wafer-center first-contact location.
@@ -644,18 +686,11 @@ def die_esd_yield_calculator(
             z_top_um=z_top_um,
             exact_sphere=exact_sphere,
         )
-        candidate_idx = _select_candidate_pad_indices(
-            contact_limit_um=contact_limit_um,
-            sigma_h_um=sigma_h_um,
-            candidate_sigma_window=candidate_sigma_window,
-            candidate_min_pads=candidate_min_pads,
-            candidate_disable_fraction=candidate_disable_fraction,
-        )
         warpage_cases.append({
             "warpage_um": abs(float(warpage_um)),
             "weight": float(warpage_weight),
-            "contact_limit_um": contact_limit_um[candidate_idx],
-            "critical_mask": esd_critical_pad_mask[candidate_idx],
+            "contact_limit_um": contact_limit_um,
+            "critical_mask": esd_critical_pad_mask,
         })
         total_w_weight += float(warpage_weight)
     if total_w_weight <= 0.0:
@@ -680,9 +715,17 @@ def die_esd_yield_calculator(
 
         critical_first_arcing_prob_v = 0.0
         for warpage_case in warpage_cases:
-            critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
+            candidate_idx = _select_arcing_candidate_pad_indices(
                 contact_limit_um=warpage_case["contact_limit_um"],
-                critical_mask=warpage_case["critical_mask"],
+                sigma_h_um=sigma_h_um,
+                arc_distance_um=arc_distance_um,
+                candidate_sigma_window=candidate_sigma_window,
+                candidate_min_pads=candidate_min_pads,
+                candidate_disable_fraction=candidate_disable_fraction,
+            )
+            critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
+                contact_limit_um=warpage_case["contact_limit_um"][candidate_idx],
+                critical_mask=warpage_case["critical_mask"][candidate_idx],
                 mu_h_um=mu_h_um,
                 sigma_h_um=sigma_h_um,
                 arc_distance_um=arc_distance_um,

@@ -14,6 +14,12 @@ import matplotlib.pyplot as plt
 import os
 import math
 from scipy.ndimage import distance_transform_edt
+from scipy.spatial import cKDTree
+
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - numba is an optional speed path
+    njit = None
 
 
 def _cfg_get(cfg, key, default=None):
@@ -33,6 +39,84 @@ def _cfg_float(cfg, key, default=None):
             raise ValueError(f"Missing required config value: {key}")
         value = default
     return float(value)
+
+
+if njit is not None:
+    @njit(cache=False)
+    def _redundant_required_distance_from_knn_numba(
+        neighbor_dist_um,
+        neighbor_group_id,
+        tolerated_failures,
+    ):
+        n_points = neighbor_dist_um.shape[0]
+        k_neighbors = neighbor_dist_um.shape[1]
+        max_seen = k_neighbors
+        required_dist_um = np.empty(n_points, dtype=np.float64)
+
+        for point_idx in range(n_points):
+            required_dist_um[point_idx] = np.inf
+            seen_ids = np.empty(max_seen, dtype=np.int64)
+            seen_counts = np.zeros(max_seen, dtype=np.int32)
+            n_seen = 0
+
+            for neighbor_idx in range(k_neighbors):
+                group_id = neighbor_group_id[point_idx, neighbor_idx]
+                if group_id < 0:
+                    continue
+                dist_um = neighbor_dist_um[point_idx, neighbor_idx]
+                if not np.isfinite(dist_um):
+                    continue
+
+                found = False
+                point_done = False
+                for seen_idx in range(n_seen):
+                    if seen_ids[seen_idx] == group_id:
+                        seen_counts[seen_idx] += 1
+                        if seen_counts[seen_idx] > tolerated_failures[group_id]:
+                            required_dist_um[point_idx] = dist_um
+                            point_done = True
+                        found = True
+                        break
+
+                if found:
+                    if point_done:
+                        break
+                    continue
+
+                seen_ids[n_seen] = group_id
+                seen_counts[n_seen] = 1
+                if seen_counts[n_seen] > tolerated_failures[group_id]:
+                    required_dist_um[point_idx] = dist_um
+                    break
+                n_seen += 1
+
+        return required_dist_um
+else:
+    _redundant_required_distance_from_knn_numba = None
+
+
+def _redundant_required_distance_from_knn_py(
+    neighbor_dist_um,
+    neighbor_group_id,
+    tolerated_failures,
+):
+    """Python fallback for the k-nearest redundant-group fatal distance."""
+    required_dist_um = np.full(neighbor_dist_um.shape[0], np.inf, dtype=np.float64)
+    for point_idx in range(neighbor_dist_um.shape[0]):
+        group_counts = {}
+        for neighbor_idx in range(neighbor_dist_um.shape[1]):
+            group_id = int(neighbor_group_id[point_idx, neighbor_idx])
+            if group_id < 0:
+                continue
+            dist_um = float(neighbor_dist_um[point_idx, neighbor_idx])
+            if not np.isfinite(dist_um):
+                continue
+            count = group_counts.get(group_id, 0) + 1
+            if count > int(tolerated_failures[group_id]):
+                required_dist_um[point_idx] = dist_um
+                break
+            group_counts[group_id] = count
+    return required_dist_um
 
 
 def _critical_bitmap_on_die_grid(cfg, critical_pad_bitmap):
@@ -204,6 +288,331 @@ def _die_mask_chunk(cfg, x_coords_um, y_coords_um):
     )
 
 
+def _particle_center_grid(cfg):
+    """
+    Build a particle-center integration grid over the die.
+
+    This grid is deliberately decoupled from the pad pitch. For very fine pad
+    pitches, especially 1 um or 0.1 um, tying the integration grid to every pad
+    location would create arrays that are too large to be useful. The default
+    pitch follows the pad pitch for ordinary cases, then coarsens only when the
+    requested grid would exceed DEFECT_MAX_MODEL_GRID_POINTS.
+    """
+    die_w_um = _cfg_float(cfg, "DIE_W_um")
+    die_l_um = _cfg_float(cfg, "DIE_L_um")
+    pitch_r_um = _cfg_float(cfg, "PITCH_r_um")
+    pitch_c_um = _cfg_float(cfg, "PITCH_c_um")
+    requested_pitch_um = _cfg_float(
+        cfg,
+        "DEFECT_MODEL_GRID_PITCH_um",
+        min(pitch_r_um, pitch_c_um),
+    )
+    if requested_pitch_um <= 0:
+        raise ValueError("DEFECT_MODEL_GRID_PITCH_um must be positive.")
+
+    nx_req = max(1, int(np.ceil(die_w_um / requested_pitch_um)))
+    ny_req = max(1, int(np.ceil(die_l_um / requested_pitch_um)))
+    max_points = int(_cfg_float(cfg, "DEFECT_MAX_MODEL_GRID_POINTS", 25_000_000))
+    max_points = max(1, max_points)
+
+    nx = nx_req
+    ny = ny_req
+    coarsened = False
+    requested_points = nx_req * ny_req
+    if requested_points > max_points:
+        scale = math.sqrt(requested_points / max_points)
+        nx = max(1, int(np.ceil(nx_req / scale)))
+        ny = max(1, int(np.ceil(ny_req / scale)))
+        while nx * ny > max_points:
+            if nx >= ny and nx > 1:
+                nx -= 1
+            elif ny > 1:
+                ny -= 1
+            else:
+                break
+        coarsened = True
+
+    cell_w_um = die_w_um / nx
+    cell_h_um = die_l_um / ny
+    x_coords_um = -die_w_um / 2.0 + (np.arange(nx, dtype=np.float64) + 0.5) * cell_w_um
+    y_coords_um = die_l_um / 2.0 - (np.arange(ny, dtype=np.float64) + 0.5) * cell_h_um
+    info = {
+        "requested_grid_pitch_um": float(requested_pitch_um),
+        "model_grid_cell_w_um": float(cell_w_um),
+        "model_grid_cell_h_um": float(cell_h_um),
+        "requested_grid_shape": (int(ny_req), int(nx_req)),
+        "grid_shape": (int(ny), int(nx)),
+        "coarsened_grid": bool(coarsened),
+        "max_model_grid_points": int(max_points),
+    }
+    return x_coords_um, y_coords_um, cell_w_um * cell_h_um, info
+
+
+def _pad_coords_for_mask(pad_bitmap_collection, pad_mask):
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    pad_mask_flat = np.asarray(pad_mask, dtype=bool).reshape(-1)
+    finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+    return pad_coords[pad_mask_flat & finite_coord_mask].astype(np.float64, copy=False)
+
+
+def _redundant_group_arrays_from_collection(pad_bitmap_collection):
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    total_pad_count = int(pad_coords.shape[0])
+
+    group_id_per_pad = pad_bitmap_collection.get("redundant_group_id_per_pad")
+    tolerated_mechanical = pad_bitmap_collection.get(
+        "redundant_tolerated_mechanical_failures"
+    )
+    if group_id_per_pad is not None and tolerated_mechanical is not None:
+        return (
+            np.asarray(group_id_per_pad, dtype=np.int64).reshape(-1),
+            np.asarray(tolerated_mechanical, dtype=np.int64).reshape(-1),
+        )
+
+    redundant_net_to_1d_physical_mask = pad_bitmap_collection.get(
+        "redundant_net_to_1d_physical_mask",
+        {},
+    )
+    criticality_info = pad_bitmap_collection.get("criticality_info", {})
+    group_id_per_pad = np.full(total_pad_count, -1, dtype=np.int64)
+    tolerated_mechanical = np.zeros(len(redundant_net_to_1d_physical_mask), dtype=np.int64)
+
+    for group_id, (net, physical_idx) in enumerate(
+        redundant_net_to_1d_physical_mask.items()
+    ):
+        physical_idx = np.asarray(physical_idx, dtype=np.int64).reshape(-1)
+        physical_idx = physical_idx[
+            (physical_idx >= 0) & (physical_idx < total_pad_count)
+        ]
+        group_id_per_pad[physical_idx] = group_id
+        tolerated_mechanical[group_id] = int(
+            criticality_info.get(net, {}).get("tolerated_mechanical_failures", 0)
+        )
+    return group_id_per_pad, tolerated_mechanical
+
+
+def _redundant_pad_group_data(pad_bitmap_collection):
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    redundant_mask = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    ).reshape(-1)
+    if redundant_mask.size == 0 or not np.any(redundant_mask):
+        return (
+            np.empty((0, 2), dtype=np.float64),
+            np.empty(0, dtype=np.int64),
+            np.empty(0, dtype=np.int64),
+        )
+
+    group_id_per_pad, tolerated_mechanical = _redundant_group_arrays_from_collection(
+        pad_bitmap_collection
+    )
+    finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+    valid_redundant_mask = (
+        redundant_mask
+        & finite_coord_mask
+        & (group_id_per_pad[: redundant_mask.size] >= 0)
+    )
+    redundant_coords_um = pad_coords[valid_redundant_mask].astype(
+        np.float64,
+        copy=False,
+    )
+    redundant_group_ids = group_id_per_pad[valid_redundant_mask]
+    return redundant_coords_um, redundant_group_ids.astype(np.int64), tolerated_mechanical
+
+
+def _redundant_required_distance_um(
+    redundant_tree,
+    redundant_group_ids,
+    tolerated_mechanical,
+    points_um,
+    k_neighbors,
+):
+    if redundant_tree is None or points_um.shape[0] == 0:
+        return np.full(points_um.shape[0], np.inf, dtype=np.float64)
+
+    k_neighbors = max(1, min(int(k_neighbors), redundant_group_ids.shape[0]))
+    try:
+        neighbor_dist_um, neighbor_idx = redundant_tree.query(
+            points_um,
+            k=k_neighbors,
+            workers=-1,
+        )
+    except TypeError:
+        neighbor_dist_um, neighbor_idx = redundant_tree.query(points_um, k=k_neighbors)
+    if k_neighbors == 1:
+        neighbor_dist_um = neighbor_dist_um.reshape(-1, 1)
+        neighbor_idx = neighbor_idx.reshape(-1, 1)
+
+    neighbor_group_id = np.full(neighbor_idx.shape, -1, dtype=np.int64)
+    valid_neighbor = neighbor_idx < redundant_group_ids.shape[0]
+    neighbor_group_id[valid_neighbor] = redundant_group_ids[
+        neighbor_idx[valid_neighbor]
+    ]
+
+    if _redundant_required_distance_from_knn_numba is not None:
+        return _redundant_required_distance_from_knn_numba(
+            np.asarray(neighbor_dist_um, dtype=np.float64),
+            neighbor_group_id,
+            np.asarray(tolerated_mechanical, dtype=np.int64),
+        )
+    return _redundant_required_distance_from_knn_py(
+        np.asarray(neighbor_dist_um, dtype=np.float64),
+        neighbor_group_id,
+        np.asarray(tolerated_mechanical, dtype=np.int64),
+    )
+
+
+def _fatal_probability_from_required_distance(
+    cfg,
+    required_dist_to_pad_center_um,
+    distance_to_contact_um,
+):
+    pad_top_r_um = _cfg_float(cfg, "PAD_TOP_R_um")
+    k_r = _cfg_float(cfg, "k_r")
+    k_r0 = _cfg_float(cfg, "k_r0")
+    t_0 = _cfg_float(cfg, "t_0")
+    z = _cfg_float(cfg, "z")
+    if z <= 1.0:
+        raise ValueError("Particle thickness exponent z must be greater than 1.")
+
+    fatal_probability = np.zeros(required_dist_to_pad_center_um.shape, dtype=np.float64)
+    finite_mask = np.isfinite(required_dist_to_pad_center_um)
+    if not np.any(finite_mask):
+        return fatal_probability
+
+    required_void_radius_um = np.maximum(
+        required_dist_to_pad_center_um[finite_mask] - pad_top_r_um,
+        0.0,
+    )
+    radius_scale = k_r * distance_to_contact_um[finite_mask] + k_r0
+    if np.any(radius_scale <= 0):
+        raise ValueError("Main void radius scale k_r * L + k_r0 must be positive.")
+
+    required_thickness_um = (required_void_radius_um / radius_scale) ** 2
+    finite_fatal = np.ones(required_thickness_um.shape, dtype=np.float64)
+    needs_large_particle = required_thickness_um > t_0
+    finite_fatal[needs_large_particle] = (
+        t_0 / required_thickness_um[needs_large_particle]
+    ) ** (z - 1.0)
+    fatal_probability[finite_mask] = np.clip(finite_fatal, 0.0, 1.0)
+    return fatal_probability
+
+
+def _fatal_particle_integral_from_pad_layout(
+    cfg,
+    critical_pad_coords_um,
+    redundant_pad_coords_um,
+    redundant_group_ids,
+    tolerated_mechanical,
+):
+    """
+    Layout-aware particle integral for critical and redundant pads.
+
+    It integrates over particle centers on a configurable die grid. The nearest
+    critical pad gives the single-critical fatal radius. Redundant groups use a
+    k-nearest-neighbor scan: a particle becomes fatal for group g when it covers
+    more than tolerated_mechanical[g] pads from that group. This captures a
+    single large void damaging multiple pads in the same redundancy group without
+    modeling the much rarer accumulation of several independent particles.
+    """
+    if critical_pad_coords_um.shape[0] == 0 and redundant_pad_coords_um.shape[0] == 0:
+        return 0.0, {
+            "method": "layout_kdtree_no_sensitive_pads",
+            "grid_shape": (0, 0),
+            "chunk_rows": 0,
+        }
+
+    critical_tree = (
+        cKDTree(critical_pad_coords_um)
+        if critical_pad_coords_um.shape[0] > 0
+        else None
+    )
+    redundant_tree = (
+        cKDTree(redundant_pad_coords_um)
+        if redundant_pad_coords_um.shape[0] > 0
+        else None
+    )
+    redundant_k_neighbors = int(_cfg_float(cfg, "DEFECT_REDUNDANT_K_NEIGHBORS", 128))
+    if redundant_tree is not None:
+        redundant_k_neighbors = min(redundant_k_neighbors, redundant_pad_coords_um.shape[0])
+    else:
+        redundant_k_neighbors = 0
+
+    x_coords_um, y_coords_um, cell_area_um2, grid_info = _particle_center_grid(cfg)
+    chunk_rows = int(_cfg_float(cfg, "DEFECT_CALC_CHUNK_ROWS", 128))
+    chunk_rows = max(1, min(chunk_rows, y_coords_um.shape[0]))
+    max_query_points = int(
+        _cfg_float(
+            cfg,
+            "DEFECT_MAX_QUERY_POINTS_PER_CHUNK",
+            200_000 if redundant_tree is not None else 1_000_000,
+        )
+    )
+    max_query_points = max(1, max_query_points)
+    chunk_rows = min(
+        chunk_rows,
+        max(1, max_query_points // max(1, x_coords_um.shape[0])),
+    )
+    avg_fatal_particles = 0.0
+
+    for row_start in range(0, y_coords_um.shape[0], chunk_rows):
+        row_end = min(row_start + chunk_rows, y_coords_um.shape[0])
+        y_chunk_um = y_coords_um[row_start:row_end]
+        xx_um, yy_um = np.meshgrid(x_coords_um, y_chunk_um, indexing="xy")
+        points_um = np.column_stack((xx_um.ravel(), yy_um.ravel()))
+
+        if critical_tree is not None:
+            try:
+                critical_dist_um, _ = critical_tree.query(points_um, k=1, workers=-1)
+            except TypeError:
+                critical_dist_um, _ = critical_tree.query(points_um, k=1)
+        else:
+            critical_dist_um = np.full(points_um.shape[0], np.inf, dtype=np.float64)
+
+        if redundant_tree is not None:
+            redundant_dist_um = _redundant_required_distance_um(
+                redundant_tree,
+                redundant_group_ids,
+                tolerated_mechanical,
+                points_um,
+                redundant_k_neighbors,
+            )
+        else:
+            redundant_dist_um = np.full(points_um.shape[0], np.inf, dtype=np.float64)
+
+        required_dist_um = np.minimum(critical_dist_um, redundant_dist_um).reshape(
+            y_chunk_um.shape[0],
+            x_coords_um.shape[0],
+        )
+        distance_to_contact_um = _distance_from_first_contact_chunk_um(
+            cfg,
+            x_coords_um,
+            y_chunk_um,
+        )
+        fatal_probability = _fatal_probability_from_required_distance(
+            cfg,
+            required_dist_um,
+            distance_to_contact_um,
+        )
+        density = _particle_density_chunk_um2(cfg, x_coords_um, y_chunk_um)
+        die_mask = _die_mask_chunk(cfg, x_coords_um, y_chunk_um)
+        avg_fatal_particles += float(
+            np.sum(density * fatal_probability * die_mask) * cell_area_um2
+        )
+
+    info = dict(grid_info)
+    info.update(
+        {
+            "method": "layout_kdtree_critical_redundant_chunked",
+            "chunk_rows": int(chunk_rows),
+            "max_query_points_per_chunk": int(max_query_points),
+            "redundant_k_neighbors": int(redundant_k_neighbors),
+        }
+    )
+    return avg_fatal_particles, info
+
+
 def _fatal_particle_integral_from_distance_map(
     cfg,
     dist_to_critical_pad_um,
@@ -320,6 +729,85 @@ def interface_particle_yield_from_critical_bitmap(cfg, pad_bitmap_collection):
     return particle_yield, info
 
 
+def interface_particle_yield_from_pad_layout(cfg, pad_bitmap_collection):
+    """
+    Calculate particle yield from critical signal bumps and redundant groups.
+
+    Critical signal pads fail when a single particle void reaches any critical
+    pad. A redundant group fails when one particle void reaches more pads in the
+    group than the group's mechanical tolerance. Independent multi-particle
+    accumulation within one redundant group is intentionally ignored.
+    """
+    critical_pad_bitmap = np.asarray(
+        pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
+    redundant_pad_bitmap = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
+    has_critical = critical_pad_bitmap.size > 0 and np.any(critical_pad_bitmap)
+    has_redundant = redundant_pad_bitmap.size > 0 and np.any(redundant_pad_bitmap)
+
+    if not has_critical and not has_redundant:
+        return 1.0, {
+            "avg_fatal_particles": 0.0,
+            "effective_critical_area_um2": 0.0,
+            "num_critical_pads": 0,
+            "num_redundant_pads": 0,
+            "redundant_group_count": 0,
+            "method": "no_sensitive_pads",
+        }
+
+    distance_transform_max_cells = int(
+        _cfg_float(cfg, "DEFECT_DISTANCE_TRANSFORM_MAX_CELLS", 25_000_000)
+    )
+    if has_critical and not has_redundant:
+        grid_cell_count = int(
+            math.ceil(_cfg_float(cfg, "DIE_W_um") / _cfg_float(cfg, "PITCH_c_um"))
+            * math.ceil(_cfg_float(cfg, "DIE_L_um") / _cfg_float(cfg, "PITCH_r_um"))
+        )
+        if grid_cell_count <= distance_transform_max_cells:
+            return interface_particle_yield_from_critical_bitmap(
+                cfg,
+                pad_bitmap_collection,
+            )
+
+    critical_pad_coords_um = (
+        _pad_coords_for_mask(pad_bitmap_collection, critical_pad_bitmap)
+        if has_critical
+        else np.empty((0, 2), dtype=np.float64)
+    )
+    (
+        redundant_pad_coords_um,
+        redundant_group_ids,
+        tolerated_mechanical,
+    ) = _redundant_pad_group_data(pad_bitmap_collection)
+
+    avg_fatal_particles, info = _fatal_particle_integral_from_pad_layout(
+        cfg,
+        critical_pad_coords_um,
+        redundant_pad_coords_um,
+        redundant_group_ids,
+        tolerated_mechanical,
+    )
+    particle_yield = float(np.exp(-avg_fatal_particles))
+    D0 = _cfg_float(cfg, "D0")
+    effective_critical_area_um2 = (
+        avg_fatal_particles / D0 if D0 > 0.0 else 0.0
+    )
+    info.update(
+        {
+            "avg_fatal_particles": float(avg_fatal_particles),
+            "effective_critical_area_um2": float(effective_critical_area_um2),
+            "num_critical_pads": int(critical_pad_coords_um.shape[0]),
+            "num_redundant_pads": int(redundant_pad_coords_um.shape[0]),
+            "redundant_group_count": int(tolerated_mechanical.shape[0]),
+        }
+    )
+    return particle_yield, info
+
+
 def stack_defect_yield_calculator(
     cfg_dict: dict,
     die_stack,
@@ -329,8 +817,8 @@ def stack_defect_yield_calculator(
     """
     for interface_name, cfg in cfg_dict.items():
         pad_bitmap_collection = die_stack.interfaces.pad_bitmap_collection_dict[interface_name]
-        particle_yield, info = interface_particle_yield_from_critical_bitmap(
+        particle_yield, info = interface_particle_yield_from_pad_layout(
             cfg,
             pad_bitmap_collection,
         )
-        die_stack.die_yield_per_interface_dict[interface_name]['particle'] = particle_yield 
+        die_stack.die_yield_per_interface_dict[interface_name]['particle'] = particle_yield

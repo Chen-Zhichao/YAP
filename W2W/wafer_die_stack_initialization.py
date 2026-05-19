@@ -286,7 +286,12 @@ def wafer_interface_initialize(
             [PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2]])
     
     # Calculate the total number of pads per die
-    NUM_PADS_PER_DIE = pad_bitmap_collection['num_critical_pads'] + pad_bitmap_collection['num_redundant_pads'] + pad_bitmap_collection['num_dummy_pads']
+    NUM_PADS_PER_DIE = (
+        pad_bitmap_collection['num_critical_pads']
+        + pad_bitmap_collection['num_redundant_pads']
+        + pad_bitmap_collection['num_dummy_pads']
+        + pad_bitmap_collection.get('num_power_ground_pads', 0)
+    )
     
 
     if pad_bitmap_collection['pad_coords'] is not None:
@@ -429,6 +434,35 @@ class WaferStack:
         self.die_stack_yield = np.mean(self.die_stack_yield_list)
 
         return self.die_stack_yield, self.die_stack_yield_list
+
+    def print_interface_yield_table(self):
+        """
+        Print mean die-location yield for each interface and failure mechanism.
+        """
+        interface_names = list(self.cfg_dict.keys())
+        failure_mechanisms = ['overlay', 'particle', 'mechanical', 'ESD', 'warpage', 'overall']
+
+        interface_col_width = max(
+            len("Interface Name"),
+            *(len(interface_name) for interface_name in interface_names),
+        )
+        value_col_width = 11
+
+        print("Interface Yield Table:")
+        header = f"{'Interface Name':<{interface_col_width}}"
+        for failure_mechanism in failure_mechanisms:
+            header += f" {failure_mechanism:>{value_col_width}}"
+        print(header)
+
+        for interface_name in interface_names:
+            row = f"{interface_name:<{interface_col_width}}"
+            for failure_mechanism in failure_mechanisms:
+                values = self.die_yield_list_per_interface_dict[interface_name][failure_mechanism]
+                row += f" {np.nanmean(values):>{value_col_width}.4f}"
+            print(row)
+
+    def print_die_stack_yield(self):
+        self.print_interface_yield_table()
 
     def draw_w2w_stack_3d(self, cfg_dict, itf_pitch=1.0, fig_size=(10, 8), dpi=300,
                         draw_pad_yield_map_option=None, draw_voids=True, figname=None):
@@ -649,8 +683,6 @@ def wafer_stack_list_initialize(
         
     
     return wafer_stack_list
-
-
 
 
 

@@ -36,6 +36,20 @@ def _build_output_file_tag(config_path: str, criticality_profile: str) -> str:
     return f"__{tag}" if tag else ""
 
 
+def _resolve_design_root_and_layout_dir(ds_dir: str) -> tuple[str, str]:
+    layout_dir = ds_dir.rstrip("/")
+    design_root = layout_dir
+    required = ["generated_chiplet_definitions.3dbv", "generated_stack_config.3dbx"]
+    if all(os.path.exists(os.path.join(design_root, filename)) for filename in required):
+        return design_root, layout_dir
+
+    parent_dir = os.path.dirname(design_root)
+    if all(os.path.exists(os.path.join(parent_dir, filename)) for filename in required):
+        return parent_dir, layout_dir
+
+    return design_root, layout_dir
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Simulate assembly yield for W2W hybrid bonding")
     p.add_argument("--config", "-c", required=True, help="Path to skeleton config YAML file")
@@ -168,8 +182,8 @@ def main():
     config_stem = os.path.splitext(os.path.basename(args.config))[0]
     cfg_output_dir = args.config.rsplit('/', 1)[0]
 
-    # Extract the design input files directory if provided
-    input_ds_dir = args.ds_dir
+    # Extract the design input directory and optional layout subdirectory.
+    input_ds_dir, layout_input_dir = _resolve_design_root_and_layout_dir(args.ds_dir)
     # Determine .3dbv path (chiplet definitions)
     _3dbv_path = input_ds_dir + "/generated_chiplet_definitions.3dbv"
     # Determine .3dbx path (stack config)
@@ -179,6 +193,7 @@ def main():
 
     print(">>>>>> Starting D2W yield simulation for design: {}".format(args.ds_name))
     start_time = time.perf_counter()
+    runtime_input_args = dict(vars(args))
     try:
         # Load config and update with design and ADK parameters (from .3dbv and .bmap)
         if os.path.exists(_3dbv_path) and os.path.exists(_3dbx_path):
@@ -218,16 +233,21 @@ def main():
         for cfg in cfg_dict.values():
             cfg.verbose = args.verbose
 
+        runtime_input_args = dict(vars(args))
+        runtime_input_args["ds_dir"] = input_ds_dir
+        runtime_input_args["design_root_dir"] = input_ds_dir
+        runtime_input_args["layout_ds_dir"] = layout_input_dir
+
         # Run assembly yield simulation for each interface
         assembly_yield_dict = {}
         bmap_path_dict = {}
         criticality_path_dict = {}
         pad_bitmap_collection_dict = {}
         for interface, cfg in cfg_dict.items():
-            bmap_path_dict[interface] = resolve_design_file(input_ds_dir, f"{cfg.INTERFACE}.bmap")
+            bmap_path_dict[interface] = resolve_design_file(layout_input_dir, f"{cfg.INTERFACE}.bmap")
             criticality_path_dict[interface] = str(
                 resolve_criticality_path(
-                    input_dir=input_ds_dir,
+                    input_dir=layout_input_dir,
                     interface_name=cfg.INTERFACE,
                     profile=args.criticality_profile,
                 )
@@ -267,7 +287,7 @@ def main():
                     _bmap_path=bmap_path_dict[representative],
                     criticality_path=criticality_path_dict[representative],
                     pad_arrange_pattern=rep_cfg.PAD_ARRANGE_PATTERN,
-                    input_args=vars(args),
+                    input_args=runtime_input_args,
                 )
                 for interface_name in members:
                     pad_bitmap_collection_dict[interface_name] = rep_bitmap_collection
@@ -284,7 +304,7 @@ def main():
                     _bmap_path=bmap_path_dict[interface],
                     criticality_path=criticality_path_dict[interface],
                     pad_arrange_pattern=cfg.PAD_ARRANGE_PATTERN,
-                    input_args=vars(args),
+                    input_args=runtime_input_args,
                 )
         convert_time = time.perf_counter() - start_time - cfg_loading_time
         print("Pad bitmap collection generation finished in {:.2f} seconds.".format(convert_time))
@@ -303,7 +323,7 @@ def main():
                 print(
                     f">>> Simulating representative interface {representative} (x{len(members)})"
                 )
-                rep_args = dict(vars(args))
+                rep_args = dict(runtime_input_args)
                 rep_args["skip_verbose_root_artifacts"] = True
                 _, _, rep_yield_dict = Assembly_Yield_Simulator(
                     input_args=rep_args,
@@ -351,7 +371,7 @@ def main():
                 print(f"Collapsed simulation note saved to {note_path}.")
         else:
             stack_assembly_yield, _, per_interface_yield_dict = Assembly_Yield_Simulator(
-                input_args=vars(args),
+                input_args=runtime_input_args,
                 cfg_skeleton=cfg_skeleton,
                 cfg_dict=cfg_dict,
                 pad_bitmap_collection_dict=pad_bitmap_collection_dict,
@@ -362,7 +382,7 @@ def main():
 
         summary_path = write_simulation_summary(
             output_root=output_root,
-            input_args=vars(args),
+            input_args=runtime_input_args,
             cfg_skeleton=cfg_skeleton,
             cfg_dict=cfg_dict,
             stack_assembly_yield=stack_assembly_yield,
@@ -384,7 +404,7 @@ def main():
         print(f"Total D2W assembly yield simulation finished in {total_runtime:.2f} seconds.")
     finally:
         if cfg_dict:
-            removed_temp_paths = cleanup_runtime_temp_files(cfg_dict, vars(args))
+            removed_temp_paths = cleanup_runtime_temp_files(cfg_dict, runtime_input_args)
             if removed_temp_paths:
                 print(f"Cleaned {len(removed_temp_paths)} runtime temp files.")
         # Generated interface configs are saved under the design's config folder.

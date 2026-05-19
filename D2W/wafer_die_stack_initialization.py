@@ -208,7 +208,12 @@ def die_interface_initialize(
             [-PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2],
             [PAD_ARR_W_um / 2, -PAD_ARR_L_um / 2]])
 
-    num_pads = pad_bitmap_collection['num_critical_pads'] + pad_bitmap_collection['num_redundant_pads'] + pad_bitmap_collection['num_dummy_pads']
+    num_pads = (
+        pad_bitmap_collection['num_critical_pads']
+        + pad_bitmap_collection['num_redundant_pads']
+        + pad_bitmap_collection['num_dummy_pads']
+        + pad_bitmap_collection.get('num_power_ground_pads', 0)
+    )
 
     if pad_bitmap_collection['pad_coords'] is not None:
         PAD_COORDS = pad_bitmap_collection['pad_coords']

@@ -10,6 +10,14 @@ import scipy.io as sio
 import os
 
 
+_POWER_GROUND_NET_TOKENS = {"vdd", "vss", "vpp", "vddq", "vddql", "gnd", "vcc"}
+
+
+def _is_power_ground_net(net: str) -> bool:
+    net_tokens = str(net).lower().replace("-", "_").replace(".", "_").split("_")
+    return any(token in _POWER_GROUND_NET_TOKENS for token in net_tokens)
+
+
 def print_run_separator(label: str = "Run finished"):
     duck = [
         "        YAP~",
@@ -360,34 +368,41 @@ def draw_pad_bitmap(cfg, bitmap_collection):
     CRITICAL_PAD_BITMAP = bitmap_collection["CRITICAL_PAD_BITMAP"]
     REDUNDANT_PAD_BITMAP = bitmap_collection["REDUNDANT_PAD_BITMAP"]
     DUMMY_PAD_BITMAP = bitmap_collection["DUMMY_PAD_BITMAP"]
+    POWER_GROUND_PAD_BITMAP = bitmap_collection.get(
+        "POWER_GROUND_PAD_BITMAP",
+        np.zeros_like(CRITICAL_PAD_BITMAP, dtype=bool),
+    )
     ## Use legend to show the color
     PAD_BITMAP = np.zeros_like(CRITICAL_PAD_BITMAP, dtype=int)
 
     PAD_BITMAP[CRITICAL_PAD_BITMAP == 1] = 1  # red
     PAD_BITMAP[REDUNDANT_PAD_BITMAP == 1] = 2  # blue
     PAD_BITMAP[DUMMY_PAD_BITMAP == 1] = 3  # green
+    PAD_BITMAP[POWER_GROUND_PAD_BITMAP == 1] = 4  # orange
     # Remaining zeros are non-pad areas
-    PAD_BITMAP[PAD_BITMAP == 0] = 4  # non-pad (light gray)
+    PAD_BITMAP[PAD_BITMAP == 0] = 5  # non-pad (light gray)
 
     plt.figure(figsize=(15, 15))
     cmap = ListedColormap([
         (1.0, 0.5, 0.5),    # 1 - critical (medium red)
         (0.4, 0.4, 0.9),    # 2 - redundant (medium blue)
         (0.0, 0.6, 0.0),    # 3 - dummy (medium green)
-        (0.9, 0.9, 0.9),    # 4 - non-pad (light gray)
+        (1.0, 0.7, 0.2),    # 4 - power/ground (orange)
+        (0.9, 0.9, 0.9),    # 5 - non-pad (light gray)
     ])
     red_patch = patches.Patch(color=(1.0, 0.5, 0.5), label='Critical Pads')
     blue_patch = patches.Patch(color=(0.4, 0.4, 0.9), label='Redundant Pads')
     green_patch = patches.Patch(color=(0.0, 0.6, 0.0), label='Dummy Pads')
+    orange_patch = patches.Patch(color=(1.0, 0.7, 0.2), label='Power/Ground Pads')
     light_gray_patch = patches.Patch(color=(0.9, 0.9, 0.9), label='Non-Pad Areas')
     plt.legend(
-        handles=[red_patch, blue_patch, green_patch, light_gray_patch],
+        handles=[red_patch, blue_patch, green_patch, orange_patch, light_gray_patch],
         loc='upper center',
         bbox_to_anchor=(0.5, -0.07),
         ncol=4,
         frameon=False
     )
-    norm = BoundaryNorm(boundaries=[0.5, 1.5, 2.5, 3.5, 4.5], ncolors=cmap.N)
+    norm = BoundaryNorm(boundaries=[0.5, 1.5, 2.5, 3.5, 4.5, 5.5], ncolors=cmap.N)
     plt.imshow(PAD_BITMAP, cmap=cmap, norm=norm)
     plt.title("Pad Block Bitmap")
 
@@ -468,57 +483,57 @@ def criticality_generator(cfg,
     return
 
 
-def risk_map_generator(cfg, 
-                        wafer: object,
-                        ):
-    '''
-    Risk map output format:
-    <pad_coords_x> <pad_coords_y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>
-    W2W's die risk map is the average of all dies on the wafer.
-    '''
-    avg_ovl_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
-    avg_df_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
-    avg_ce_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
-    avg_esd_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
-    avg_bond_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
-    num_dies = len(wafer.die_list)
-    for die_id, die in enumerate(wafer.die_list):
-        avg_ovl_pad_yield_map += die.pad_yield_map['Y_ovl']
-        avg_df_pad_yield_map += die.pad_yield_map['Y_df']
-        avg_ce_pad_yield_map += die.pad_yield_map['Y_ce']
-        avg_esd_pad_yield_map += die.pad_yield_map['Y_esd']
-        avg_bond_pad_yield_map += die.pad_yield_map['Y_bond']
-    avg_ovl_pad_yield_map /= num_dies
-    avg_df_pad_yield_map /= num_dies
-    avg_ce_pad_yield_map /= num_dies
-    avg_esd_pad_yield_map /= num_dies
-    avg_bond_pad_yield_map /= num_dies
+# def risk_map_generator(cfg, 
+#                         wafer: object,
+#                         ):
+#     '''
+#     Risk map output format:
+#     <pad_coords_x> <pad_coords_y> <esd_failure_probability> <overlay_failure_probability> <particle_failure_probability> <mechanical_failure_probability>
+#     W2W's die risk map is the average of all dies on the wafer.
+#     '''
+#     avg_ovl_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
+#     avg_df_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
+#     avg_ce_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
+#     avg_esd_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
+#     avg_bond_pad_yield_map = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=float)
+#     num_dies = len(wafer.die_list)
+#     for die_id, die in enumerate(wafer.die_list):
+#         avg_ovl_pad_yield_map += die.pad_yield_map['Y_ovl']
+#         avg_df_pad_yield_map += die.pad_yield_map['Y_df']
+#         avg_ce_pad_yield_map += die.pad_yield_map['Y_ce']
+#         avg_esd_pad_yield_map += die.pad_yield_map['Y_esd']
+#         avg_bond_pad_yield_map += die.pad_yield_map['Y_bond']
+#     avg_ovl_pad_yield_map /= num_dies
+#     avg_df_pad_yield_map /= num_dies
+#     avg_ce_pad_yield_map /= num_dies
+#     avg_esd_pad_yield_map /= num_dies
+#     avg_bond_pad_yield_map /= num_dies
 
 
-    die_coords = wafer.base_pad_coords
-    risk_map = list()
-    for pad_id in range(len(die_coords)):
-        pad_coords_x = die_coords[pad_id, 0]
-        pad_coords_y = die_coords[pad_id, 1]
-        if np.isnan(pad_coords_x) or np.isnan(pad_coords_y):
-            continue
-        pad_ovl_yield = avg_ovl_pad_yield_map.flatten()[pad_id]
-        pad_df_yield = avg_df_pad_yield_map.flatten()[pad_id]
-        pad_ce_yield = avg_ce_pad_yield_map.flatten()[pad_id]
-        pad_esd_yield = avg_esd_pad_yield_map.flatten()[pad_id]
-        risk_map.append({
-            "pad_coords_x": pad_coords_x,
-            "pad_coords_y": pad_coords_y,
-            "esd_failure_probability": 1 - pad_esd_yield,
-            "overlay_failure_probability": 1 - pad_ovl_yield,
-            "particle_failure_probability": 1 - pad_df_yield,
-            "mechanical_failure_probability": 1 - pad_ce_yield,
-        })
-    with open(cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE + "/" + cfg.INTERFACE + "_risk_map.map", 'w') as f:
-        for pad_risk in risk_map:
-            f.write(f"{pad_risk['pad_coords_x']} {pad_risk['pad_coords_y']} {pad_risk['esd_failure_probability']} {pad_risk['overlay_failure_probability']} {pad_risk['particle_failure_probability']} {pad_risk['mechanical_failure_probability']}\n")
-    print("Risk map file saved in ", cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE + "/" + cfg.INTERFACE + "_risk_map.map")
-    return
+#     die_coords = wafer.base_pad_coords
+#     risk_map = list()
+#     for pad_id in range(len(die_coords)):
+#         pad_coords_x = die_coords[pad_id, 0]
+#         pad_coords_y = die_coords[pad_id, 1]
+#         if np.isnan(pad_coords_x) or np.isnan(pad_coords_y):
+#             continue
+#         pad_ovl_yield = avg_ovl_pad_yield_map.flatten()[pad_id]
+#         pad_df_yield = avg_df_pad_yield_map.flatten()[pad_id]
+#         pad_ce_yield = avg_ce_pad_yield_map.flatten()[pad_id]
+#         pad_esd_yield = avg_esd_pad_yield_map.flatten()[pad_id]
+#         risk_map.append({
+#             "pad_coords_x": pad_coords_x,
+#             "pad_coords_y": pad_coords_y,
+#             "esd_failure_probability": 1 - pad_esd_yield,
+#             "overlay_failure_probability": 1 - pad_ovl_yield,
+#             "particle_failure_probability": 1 - pad_df_yield,
+#             "mechanical_failure_probability": 1 - pad_ce_yield,
+#         })
+#     with open(cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE + "/" + cfg.INTERFACE + "_risk_map.map", 'w') as f:
+#         for pad_risk in risk_map:
+#             f.write(f"{pad_risk['pad_coords_x']} {pad_risk['pad_coords_y']} {pad_risk['esd_failure_probability']} {pad_risk['overlay_failure_probability']} {pad_risk['particle_failure_probability']} {pad_risk['mechanical_failure_probability']}\n")
+#     print("Risk map file saved in ", cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE + "/" + cfg.INTERFACE + "_risk_map.map")
+#     return
 
 def convert_3dblox_to_pad_bitmap(cfg, 
                                  _bmap_path: str, 
@@ -611,6 +626,7 @@ def convert_3dblox_to_pad_bitmap(cfg,
     CRITICAL_PAD_BITMAP = np.zeros((_PAD_ARR_ROW, _PAD_ARR_COL), dtype=bool)
     REDUNDANT_PAD_BITMAP = np.zeros((_PAD_ARR_ROW, _PAD_ARR_COL), dtype=bool)
     DUMMY_PAD_BITMAP = np.zeros((_PAD_ARR_ROW, _PAD_ARR_COL), dtype=bool)
+    POWER_GROUND_PAD_BITMAP = np.zeros((_PAD_ARR_ROW, _PAD_ARR_COL), dtype=bool)
     ESD_CRITICAL_PAD_BITMAP = np.zeros((_PAD_ARR_ROW, _PAD_ARR_COL), dtype=bool)
     pad_coords = np.full((_PAD_ARR_ROW * _PAD_ARR_COL, 2), np.nan, dtype=np.float32)  # x, y coordinates of each bump
     # Build a mapping array from physical bump location (r, c) to bump id
@@ -630,6 +646,9 @@ def convert_3dblox_to_pad_bitmap(cfg,
             if 'dummy' in current_bump_net.lower():
                 DUMMY_PAD_BITMAP[row, col] = 1
                 continue
+            if _is_power_ground_net(current_bump_net):
+                POWER_GROUND_PAD_BITMAP[row, col] = 1
+                continue
             if num_copies == 1:
                 CRITICAL_PAD_BITMAP[row, col] = 1
                 ESD_CRITICAL_PAD_BITMAP[row, col] = 1
@@ -643,10 +662,22 @@ def convert_3dblox_to_pad_bitmap(cfg,
                 continue
     else:   
         raise NotImplementedError("Currently only support checkerboard pad arrangement pattern.")
+
+    redundant_net_to_1d_physical_mask = {
+        net: np.asarray(physical_mask, dtype=int)
+        for net, physical_mask in redundant_net_to_1d_physical_mask.items()
+        if np.asarray(physical_mask).size > 0 and not _is_power_ground_net(net)
+    }
+    redundant_net_to_bumpids = {
+        net: redundant_net_to_bumpids[net]
+        for net in redundant_net_to_1d_physical_mask
+    }
+
     # Count the number of pads
     num_critical_pads = np.sum(CRITICAL_PAD_BITMAP)
     num_redundant_pads = np.sum(REDUNDANT_PAD_BITMAP)
     num_dummy_pads = 0 if DUMMY_PAD_BITMAP is None else np.sum(DUMMY_PAD_BITMAP)
+    num_power_ground_pads = np.sum(POWER_GROUND_PAD_BITMAP)
 
     
     # # Count the number of logical pads in redundant pads & Initialize the redundant net alive count dict
@@ -658,10 +689,12 @@ def convert_3dblox_to_pad_bitmap(cfg,
     bitmap_collection["CRITICAL_PAD_BITMAP"] = CRITICAL_PAD_BITMAP
     bitmap_collection["REDUNDANT_PAD_BITMAP"] = REDUNDANT_PAD_BITMAP
     bitmap_collection["DUMMY_PAD_BITMAP"] = DUMMY_PAD_BITMAP
+    bitmap_collection["POWER_GROUND_PAD_BITMAP"] = POWER_GROUND_PAD_BITMAP
     bitmap_collection["ESD_CRITICAL_PAD_BITMAP"] = ESD_CRITICAL_PAD_BITMAP
     bitmap_collection["num_critical_pads"] = num_critical_pads
     bitmap_collection["num_redundant_pads"] = num_redundant_pads
     bitmap_collection["num_dummy_pads"] = num_dummy_pads
+    bitmap_collection["num_power_ground_pads"] = num_power_ground_pads
     bitmap_collection["redundant_net_to_bumpids"] = redundant_net_to_bumpids
     bitmap_collection["redundant_net_to_1d_physical_mask"] = redundant_net_to_1d_physical_mask
     bitmap_collection["pad_coords"] = pad_coords
@@ -693,6 +726,8 @@ def result_wrapper(
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     if mode in ["d2w_simulation", "w2w_simulation"]:
+        if fail_map_per_interface_dict is None:
+            return
         for mechanism, fail_map in fail_map_per_interface_dict[cfg.INTERFACE].items():
             # Draw the failure map and save the figure to the output directory
             figure = plt.figure(figsize=(10, 10))

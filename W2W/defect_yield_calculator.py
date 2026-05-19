@@ -15,6 +15,66 @@ import math
 import os
 from scipy.ndimage import distance_transform_edt
 
+try:
+    from numba import njit
+except Exception:  # pragma: no cover - numba is an optional acceleration path
+    njit = None
+
+
+if njit is not None:
+    @njit(cache=False)
+    def _redundant_fatal_mask_for_offsets_numba(
+        n_rows,
+        n_cols,
+        group_ids,
+        group_start,
+        group_end,
+        rows,
+        cols,
+        counts,
+        tolerated,
+        offsets,
+    ):
+        scratch = np.zeros((n_rows, n_cols), dtype=np.int32)
+        fatal_mask = np.zeros((n_rows, n_cols), dtype=np.bool_)
+        touched_rows = np.empty(n_rows * n_cols, dtype=np.int64)
+        touched_cols = np.empty(n_rows * n_cols, dtype=np.int64)
+
+        for group_idx in range(group_ids.shape[0]):
+            group_id = group_ids[group_idx]
+            tolerance = tolerated[group_id]
+            touched_count = 0
+            for cell_idx in range(group_start[group_idx], group_end[group_idx]):
+                pad_row = rows[cell_idx]
+                pad_col = cols[cell_idx]
+                pad_count = counts[cell_idx]
+                for offset_idx in range(offsets.shape[0]):
+                    center_row = pad_row - offsets[offset_idx, 0]
+                    center_col = pad_col - offsets[offset_idx, 1]
+                    if (
+                        center_row < 0
+                        or center_row >= n_rows
+                        or center_col < 0
+                        or center_col >= n_cols
+                    ):
+                        continue
+                    if scratch[center_row, center_col] == 0:
+                        touched_rows[touched_count] = center_row
+                        touched_cols[touched_count] = center_col
+                        touched_count += 1
+                    scratch[center_row, center_col] += pad_count
+
+            for touched_idx in range(touched_count):
+                center_row = touched_rows[touched_idx]
+                center_col = touched_cols[touched_idx]
+                if scratch[center_row, center_col] > tolerance:
+                    fatal_mask[center_row, center_col] = True
+                scratch[center_row, center_col] = 0
+
+        return fatal_mask
+else:
+    _redundant_fatal_mask_for_offsets_numba = None
+
 
 def _cfg_get(cfg, key, default=None):
     if hasattr(cfg, "get"):
@@ -40,6 +100,49 @@ def _cfg_bool(cfg, key, default=False):
     if isinstance(value, str):
         return value.strip().lower() in ("1", "true", "yes", "y")
     return bool(value)
+
+
+def _pad_coords_for_mask(pad_bitmap_collection, pad_mask):
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    pad_mask_flat = np.asarray(pad_mask, dtype=bool).reshape(-1)
+    finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+    return pad_coords[pad_mask_flat & finite_coord_mask].astype(np.float64, copy=False)
+
+
+def _redundant_group_arrays_from_collection(pad_bitmap_collection):
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    total_pad_count = int(pad_coords.shape[0])
+
+    group_id_per_pad = pad_bitmap_collection.get("redundant_group_id_per_pad")
+    tolerated_mechanical = pad_bitmap_collection.get(
+        "redundant_tolerated_mechanical_failures"
+    )
+    if group_id_per_pad is not None and tolerated_mechanical is not None:
+        return (
+            np.asarray(group_id_per_pad, dtype=np.int64).reshape(-1),
+            np.asarray(tolerated_mechanical, dtype=np.int64).reshape(-1),
+        )
+
+    redundant_net_to_1d_physical_mask = pad_bitmap_collection.get(
+        "redundant_net_to_1d_physical_mask",
+        {},
+    )
+    criticality_info = pad_bitmap_collection.get("criticality_info", {})
+    group_id_per_pad = np.full(total_pad_count, -1, dtype=np.int64)
+    tolerated_mechanical = np.zeros(len(redundant_net_to_1d_physical_mask), dtype=np.int64)
+
+    for group_id, (net, physical_idx) in enumerate(
+        redundant_net_to_1d_physical_mask.items()
+    ):
+        physical_idx = np.asarray(physical_idx, dtype=np.int64).reshape(-1)
+        physical_idx = physical_idx[
+            (physical_idx >= 0) & (physical_idx < total_pad_count)
+        ]
+        group_id_per_pad[physical_idx] = group_id
+        tolerated_mechanical[group_id] = int(
+            criticality_info.get(net, {}).get("tolerated_mechanical_failures", 0)
+        )
+    return group_id_per_pad, tolerated_mechanical
 
 
 def _critical_bitmap_on_die_grid(cfg, critical_pad_bitmap):
@@ -344,6 +447,39 @@ def _line_offsets_for_direction(length_um, theta_rad, pitch_r_um, pitch_c_um):
     return [(int(row), int(col)) for row, col in offsets]
 
 
+def _disk_offsets(radius_um, pitch_r_um, pitch_c_um):
+    if radius_um <= 0.0:
+        return [(0, 0)]
+    row_lim = int(np.ceil(radius_um / pitch_r_um))
+    col_lim = int(np.ceil(radius_um / pitch_c_um))
+    offsets = []
+    radius_sq = radius_um * radius_um
+    for row_offset in range(-row_lim, row_lim + 1):
+        dy_um = row_offset * pitch_r_um
+        for col_offset in range(-col_lim, col_lim + 1):
+            dx_um = col_offset * pitch_c_um
+            if dx_um * dx_um + dy_um * dy_um <= radius_sq:
+                offsets.append((row_offset, col_offset))
+    return offsets or [(0, 0)]
+
+
+def _structure_offsets_for_tail_and_main(
+    main_radius_um,
+    tail_length_um,
+    theta_rad,
+    pitch_r_um,
+    pitch_c_um,
+):
+    disk_offsets = _disk_offsets(main_radius_um, pitch_r_um, pitch_c_um)
+    line_offsets = _line_offsets_for_direction(
+        tail_length_um,
+        theta_rad,
+        pitch_r_um,
+        pitch_c_um,
+    )
+    return sorted(set(disk_offsets).union(line_offsets))
+
+
 def _directed_line_dilation(mask, offsets):
     """
     Directed dilation for particle centers.
@@ -378,6 +514,149 @@ def _directed_line_dilation(mask, offsets):
     return out
 
 
+def _cell_index_from_coords(x_um, y_um, x_coords_um, y_coords_um):
+    pitch_c_um = float(abs(x_coords_um[1] - x_coords_um[0]))
+    pitch_r_um = float(abs(y_coords_um[0] - y_coords_um[1]))
+    col = np.rint((x_um - x_coords_um[0]) / pitch_c_um).astype(np.int64)
+    row = np.rint((y_coords_um[0] - y_um) / pitch_r_um).astype(np.int64)
+    return row, col
+
+
+def _redundant_group_cells_on_model_grid(
+    pad_bitmap_collection,
+    x_coords_um,
+    y_coords_um,
+):
+    redundant_mask = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    ).reshape(-1)
+    if redundant_mask.size == 0 or not np.any(redundant_mask):
+        return None
+
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+    group_id_per_pad, tolerated_mechanical = _redundant_group_arrays_from_collection(
+        pad_bitmap_collection
+    )
+    finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+    valid_mask = (
+        redundant_mask
+        & finite_coord_mask
+        & (group_id_per_pad[: redundant_mask.size] >= 0)
+    )
+    if not np.any(valid_mask):
+        return None
+
+    red_coords = pad_coords[valid_mask]
+    red_group_ids = group_id_per_pad[valid_mask].astype(np.int64, copy=False)
+    rows, cols = _cell_index_from_coords(
+        red_coords[:, 0].astype(np.float64, copy=False),
+        red_coords[:, 1].astype(np.float64, copy=False),
+        x_coords_um,
+        y_coords_um,
+    )
+    in_grid = (
+        (rows >= 0)
+        & (rows < y_coords_um.shape[0])
+        & (cols >= 0)
+        & (cols < x_coords_um.shape[0])
+    )
+    if not np.any(in_grid):
+        return None
+
+    triples = np.column_stack((red_group_ids[in_grid], rows[in_grid], cols[in_grid]))
+    unique_triples, counts = np.unique(triples, axis=0, return_counts=True)
+    order = np.argsort(unique_triples[:, 0], kind="stable")
+    unique_triples = unique_triples[order]
+    counts = counts[order].astype(np.int32, copy=False)
+
+    group_ids = unique_triples[:, 0].astype(np.int64, copy=False)
+    group_start = []
+    group_end = []
+    unique_group_ids = []
+    cursor = 0
+    while cursor < group_ids.shape[0]:
+        group_id = int(group_ids[cursor])
+        end = cursor + 1
+        while end < group_ids.shape[0] and int(group_ids[end]) == group_id:
+            end += 1
+        unique_group_ids.append(group_id)
+        group_start.append(cursor)
+        group_end.append(end)
+        cursor = end
+
+    return {
+        "group_ids": np.asarray(unique_group_ids, dtype=np.int64),
+        "group_start": np.asarray(group_start, dtype=np.int64),
+        "group_end": np.asarray(group_end, dtype=np.int64),
+        "rows": unique_triples[:, 1].astype(np.int64, copy=False),
+        "cols": unique_triples[:, 2].astype(np.int64, copy=False),
+        "counts": counts,
+        "tolerated_mechanical": np.asarray(tolerated_mechanical, dtype=np.int64),
+        "num_redundant_pads": int(np.sum(redundant_mask)),
+    }
+
+
+def _redundant_fatal_mask_for_offsets(
+    shape,
+    redundant_cell_data,
+    offsets,
+):
+    if redundant_cell_data is None:
+        return np.zeros(shape, dtype=bool)
+
+    n_rows, n_cols = shape
+    if _redundant_fatal_mask_for_offsets_numba is not None:
+        offsets_array = np.asarray(offsets, dtype=np.int64)
+        return _redundant_fatal_mask_for_offsets_numba(
+            int(n_rows),
+            int(n_cols),
+            redundant_cell_data["group_ids"],
+            redundant_cell_data["group_start"],
+            redundant_cell_data["group_end"],
+            redundant_cell_data["rows"],
+            redundant_cell_data["cols"],
+            redundant_cell_data["counts"],
+            redundant_cell_data["tolerated_mechanical"],
+            offsets_array,
+        )
+
+    scratch = np.zeros(shape, dtype=np.int32)
+    fatal_mask = np.zeros(shape, dtype=bool)
+    touched = []
+
+    group_ids = redundant_cell_data["group_ids"]
+    group_start = redundant_cell_data["group_start"]
+    group_end = redundant_cell_data["group_end"]
+    rows = redundant_cell_data["rows"]
+    cols = redundant_cell_data["cols"]
+    counts = redundant_cell_data["counts"]
+    tolerated = redundant_cell_data["tolerated_mechanical"]
+
+    for group_idx, group_id in enumerate(group_ids):
+        tolerance = int(tolerated[int(group_id)])
+        touched.clear()
+        for cell_idx in range(int(group_start[group_idx]), int(group_end[group_idx])):
+            pad_row = int(rows[cell_idx])
+            pad_col = int(cols[cell_idx])
+            pad_count = int(counts[cell_idx])
+            for row_offset, col_offset in offsets:
+                center_row = pad_row - int(row_offset)
+                center_col = pad_col - int(col_offset)
+                if not (0 <= center_row < n_rows and 0 <= center_col < n_cols):
+                    continue
+                if scratch[center_row, center_col] == 0:
+                    touched.append((center_row, center_col))
+                scratch[center_row, center_col] += pad_count
+
+        for center_row, center_col in touched:
+            if scratch[center_row, center_col] > tolerance:
+                fatal_mask[center_row, center_col] = True
+            scratch[center_row, center_col] = 0
+
+    return fatal_mask
+
+
 def _particle_thickness_quadrature(cfg):
     n_nodes = int(_cfg_float(cfg, "DEFECT_TAIL_THICKNESS_NODES", 12))
     n_nodes = max(1, n_nodes)
@@ -395,12 +674,21 @@ def _particle_thickness_quadrature(cfg):
 
 def _tail_dilation_fatal_integral(
     cfg,
-    critical_pad_bitmap,
+    pad_bitmap_collection,
     die_center_radius_um,
 ):
     """
     Direction-averaged main-void + directed-tail fatal-particle integral.
+
+    Critical pads are fatal when the main void or directed tail overlaps any
+    critical pad. Redundant groups are fatal when that same single particle
+    structure overlaps more pads in one group than the group's mechanical
+    tolerance.
     """
+    critical_pad_bitmap = np.asarray(
+        pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
     default_grid_pitch_um = max(
         400.0,
         _cfg_float(cfg, "PITCH_r_um"),
@@ -430,11 +718,18 @@ def _tail_dilation_fatal_integral(
             margin_um=model_margin_um,
         )
     )
-    if not np.any(critical_region_mask):
+    redundant_cell_data = _redundant_group_cells_on_model_grid(
+        pad_bitmap_collection,
+        x_coords_um,
+        y_coords_um,
+    )
+    if not np.any(critical_region_mask) and redundant_cell_data is None:
         return 0.0, {
             "tail_grid_shape": tuple(int(v) for v in critical_region_mask.shape),
             "tail_grid_pitch_um": float(grid_pitch_um),
             "tail_model_margin_um": float(model_margin_um),
+            "num_redundant_pads": 0,
+            "redundant_group_count": 0,
         }
 
     pitch_c_eff_um = float(abs(x_coords_um[1] - x_coords_um[0]))
@@ -455,21 +750,45 @@ def _tail_dilation_fatal_integral(
 
         tail_length_um = min(tail_scale_um * sqrt_thickness, length_cap_um)
         if tail_length_um <= 0.0:
-            fatal_probability += thickness_weight * main_hit_mask.astype(np.float64)
+            redundant_hit = np.zeros(critical_region_mask.shape, dtype=bool)
+            if redundant_cell_data is not None:
+                redundant_hit = _redundant_fatal_mask_for_offsets(
+                    critical_region_mask.shape,
+                    redundant_cell_data,
+                    _disk_offsets(main_radius_um, pitch_r_eff_um, pitch_c_eff_um),
+                )
+            fatal_probability += thickness_weight * (
+                main_hit_mask | redundant_hit
+            ).astype(np.float64)
             continue
 
         tail_hit_count = np.zeros(critical_region_mask.shape, dtype=np.float64)
         for theta_rad in angles_rad:
-            offsets = _line_offsets_for_direction(
+            line_offsets = _line_offsets_for_direction(
                 tail_length_um,
                 theta_rad,
                 pitch_r_eff_um,
                 pitch_c_eff_um,
             )
-            tail_hit_count += _directed_line_dilation(
+            critical_tail_hit = _directed_line_dilation(
                 critical_region_mask,
-                offsets,
+                line_offsets,
             )
+            redundant_hit = np.zeros(critical_region_mask.shape, dtype=bool)
+            if redundant_cell_data is not None:
+                structure_offsets = _structure_offsets_for_tail_and_main(
+                    main_radius_um,
+                    tail_length_um,
+                    theta_rad,
+                    pitch_r_eff_um,
+                    pitch_c_eff_um,
+                )
+                redundant_hit = _redundant_fatal_mask_for_offsets(
+                    critical_region_mask.shape,
+                    redundant_cell_data,
+                    structure_offsets,
+                )
+            tail_hit_count += (critical_tail_hit | redundant_hit).astype(np.float64)
 
         tail_hit_probability = tail_hit_count / float(n_angles)
         conditional_fatal_probability = np.where(
@@ -489,6 +808,12 @@ def _tail_dilation_fatal_integral(
         "tail_num_angles": int(n_angles),
         "tail_num_thickness_nodes": int(len(thickness_um)),
         "tail_length_cap_um": float(length_cap_um),
+        "num_redundant_pads": (
+            0 if redundant_cell_data is None else int(redundant_cell_data["num_redundant_pads"])
+        ),
+        "redundant_group_count": (
+            0 if redundant_cell_data is None else int(redundant_cell_data["group_ids"].shape[0])
+        ),
     }
     return avg_fatal_particles, info
 
@@ -501,10 +826,15 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
         pad_bitmap_collection["CRITICAL_PAD_BITMAP"],
         dtype=bool,
     )
-    if not np.any(critical_pad_bitmap):
+    redundant_pad_bitmap = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
+    if not np.any(critical_pad_bitmap) and not np.any(redundant_pad_bitmap):
         return np.ones(wafer_interface.num_dies, dtype=np.float64), {
             "method": "critical_bitmap_distance_transform",
             "num_critical_pads": 0,
+            "num_redundant_pads": 0,
         }
 
     yield_array = np.full(wafer_interface.num_dies, np.nan, dtype=np.float64)
@@ -534,7 +864,7 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
             if include_void_tail:
                 avg_fatal_particles, tail_info = _tail_dilation_fatal_integral(
                     cfg,
-                    critical_pad_bitmap,
+                    pad_bitmap_collection,
                     die_center_radius_um=float(np.linalg.norm(die.die_center)),
                 )
                 chunk_rows = tail_info["tail_grid_shape"][0]
@@ -573,7 +903,7 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
             if include_void_tail:
                 avg_fatal_particles, tail_info = _tail_dilation_fatal_integral(
                     cfg,
-                    critical_pad_bitmap,
+                    pad_bitmap_collection,
                     die_center_radius_um=die_center_radius_um,
                 )
                 chunk_rows = tail_info["tail_grid_shape"][0]
@@ -596,6 +926,7 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
     info = {
         "method": method,
         "num_critical_pads": int(np.sum(critical_pad_bitmap)),
+        "num_redundant_pads": int(np.sum(redundant_pad_bitmap)),
         "grid_shape": tuple(int(v) for v in grid_shape),
         "chunk_rows": int(chunk_rows),
         "num_die_groups": int(num_groups),

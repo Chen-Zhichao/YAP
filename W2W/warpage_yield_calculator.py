@@ -383,18 +383,23 @@ def _effective_material_properties_from_volume_fraction(
         volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
         source = "placeholder_pure_si"
 
-    if any(value < 0.0 for value in volumes.values()):
+    material_volumes = {
+        material: float(volumes.get(material, 0.0))
+        for material in material_defaults
+    }
+
+    if any(value < 0.0 for value in material_volumes.values()):
         raise ValueError(f"{mix_prefix} volume fractions must be non-negative: {volumes}")
 
-    total_volume = sum(volumes.values())
+    total_volume = sum(material_volumes.values())
     if total_volume <= 0.0:
-        volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
+        material_volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
         total_volume = 1.0
         source = "placeholder_pure_si"
 
     weights = {
         material: volume / total_volume
-        for material, volume in volumes.items()
+        for material, volume in material_volumes.items()
     }
     E_GPa = sum(material_defaults[material]["E_GPa"] * weights[material] for material in weights)
     nu = sum(material_defaults[material]["nu"] * weights[material] for material in weights)
@@ -407,9 +412,9 @@ def _effective_material_properties_from_volume_fraction(
         "E_GPa": float(E_GPa),
         "nu": float(nu),
         "alpha_ppm_K": float(alpha_ppm_K),
-        "Cu_V": float(volumes["Cu"]),
-        "Sio2_V": float(volumes["Sio2"]),
-        "Si_V": float(volumes["Si"]),
+        "Cu_V": float(material_volumes["Cu"]),
+        "Sio2_V": float(material_volumes["Sio2"]),
+        "Si_V": float(material_volumes["Si"]),
         "volume_sum": float(total_volume),
         "w2w_die_area_fill_factor": float(volumes.get("area_fill_factor", 1.0)),
         "material_property_source": source,

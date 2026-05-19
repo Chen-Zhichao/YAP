@@ -6,8 +6,17 @@
 #### Date: Feb 20, 2026
 
 import numpy as np
+import re
 from scipy.special import ndtr
 from debond import debond_dishing_bounds_calculator, debond_dishing_intervals_from_coords
+
+
+_PG_NET_RE = re.compile(r"(^|_)(vdd|vss|vpp|vddq|vddql|gnd|vcc)($|_)", re.IGNORECASE)
+
+
+def _is_non_signal_shared_net(net: str) -> bool:
+    lowered = str(net).lower()
+    return "dummy" in lowered or _PG_NET_RE.search(str(net)) is not None
 
 
 # =====================================================================
@@ -349,6 +358,9 @@ def _redundant_group_yield_spatial(
 
     redundant_yield = 1.0
     for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+        if _is_non_signal_shared_net(redundant_net):
+            continue
+
         physical_mask = np.asarray(physical_mask, dtype=np.int64).reshape(-1)
         physical_mask = physical_mask[physical_mask >= 0]
         if physical_mask.size == 0:
@@ -516,7 +528,20 @@ def stack_stress_yield_calculator(
         redundant_pad_mask_flat = (
             pad_bitmap_collection["REDUNDANT_PAD_BITMAP"].reshape(-1).astype(bool)
         )
-        selected_pad_mask_flat = critical_pad_mask_flat | redundant_pad_mask_flat
+        redundant_signal_mask_flat = np.zeros_like(redundant_pad_mask_flat)
+        for redundant_net, physical_mask in pad_bitmap_collection.get(
+            "redundant_net_to_1d_physical_mask",
+            {},
+        ).items():
+            if _is_non_signal_shared_net(redundant_net):
+                continue
+            physical_mask = np.asarray(physical_mask, dtype=np.int64).reshape(-1)
+            physical_mask = physical_mask[
+                (physical_mask >= 0) & (physical_mask < redundant_signal_mask_flat.size)
+            ]
+            redundant_signal_mask_flat[physical_mask] = True
+
+        selected_pad_mask_flat = critical_pad_mask_flat | redundant_signal_mask_flat
         selected_flat_idx = np.flatnonzero(selected_pad_mask_flat).astype(np.int64)
         critical_flat_idx = np.flatnonzero(critical_pad_mask_flat).astype(np.int64)
         if selected_flat_idx.size == 0:
@@ -647,4 +672,3 @@ def stack_stress_yield_calculator(
         #     )
         # )
         waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array
-

@@ -101,6 +101,12 @@ def build_interface_signature(cfg, pad_bitmap_collection):
         "critical_bitmap": _hash_array(pad_bitmap_collection["CRITICAL_PAD_BITMAP"]),
         "redundant_bitmap": _hash_array(pad_bitmap_collection["REDUNDANT_PAD_BITMAP"]),
         "dummy_bitmap": _hash_array(pad_bitmap_collection["DUMMY_PAD_BITMAP"]),
+        "power_ground_bitmap": _hash_array(
+            pad_bitmap_collection.get(
+                "POWER_GROUND_PAD_BITMAP",
+                np.zeros_like(pad_bitmap_collection["CRITICAL_PAD_BITMAP"], dtype=bool),
+            )
+        ),
         "esd_bitmap": _hash_array(pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"]),
         "pad_coords": _hash_array(pad_bitmap_collection["pad_coords"]),
         "redundant_groups": _redundant_group_signature(pad_bitmap_collection),
