@@ -66,7 +66,44 @@ def Assembly_Yield_Simulator(
     run_overlay = 'overlay' in active_mechanisms
     run_particle = 'particle' in active_mechanisms
     run_warpage = 'warpage' in active_mechanisms
+    warpage_only_fast_path = active_mechanisms == {'warpage'}
     epoch_yield_list = []
+
+    if warpage_only_fast_path:
+        _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
+        failed_stack_count = 0
+        completed_stack_count = 0
+
+        for start_idx in range(0, NUM_WAFER_STACKS, SIM_BATCH_SIZE):
+            current_batch_size = min(SIM_BATCH_SIZE, NUM_WAFER_STACKS - start_idx)
+            start_time = time.time()
+            warpage_process_samples = sample_w2w_warpage_process(
+                cfg_dict            =       cfg_dict,
+                _3dbx_path          =       _3dbx_path,
+                num_samples         =       current_batch_size,
+                num_dies_per_wafer  =       None,
+            )
+            stack_pass_vector = np.asarray(
+                warpage_process_samples["stack_pass_vector"],
+                dtype=bool,
+            )
+            failed_stack_count += int(np.count_nonzero(~stack_pass_vector))
+            completed_stack_count += current_batch_size
+            epoch_yield = float(np.mean(stack_pass_vector))
+            epoch_yield_list.append(epoch_yield)
+
+            _print_progress(
+                f"Warpage-only progress: {completed_stack_count}/{NUM_WAFER_STACKS} "
+                f"wafer stacks simulated. Epoch yield: {epoch_yield:.4f}. "
+                f"Time taken: {time.time() - start_time:.2f} seconds."
+            )
+
+        print(f"\r{_CLEAR_LINE}\nSimulation for all epochs completed.")
+        if input_args['verbose']:
+            print(f"{failed_stack_count} wafer stack failures due to warpage issues.")
+            print(f"{failed_stack_count} wafer stack failures in total.")
+        assembly_yield = float(np.mean(epoch_yield_list)) if epoch_yield_list else 0.0
+        return assembly_yield, epoch_yield_list
 
     if input_args['verbose']:
         print("Verbose mode enabled: Tracking failure reasons for each die.")

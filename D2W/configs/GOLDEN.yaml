@@ -68,7 +68,7 @@ d2w_simulation:
   BOT_INI_BOW_STD_um: 5.0                    # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
-  WARPAGE_LIMIT_UM: 20                # Warpage limit (um)
+  STACK_WARPAGE_TH: 20                                # Total stack warpage threshold (um)
   ANNEAL_MODE: "batch"                # batch: all layers anneal once after stacking; sequential: anneal after each bond
 
   # === Defect Parameters ===
@@ -256,7 +256,7 @@ d2w_modeling:
   BOT_INI_BOW_STD_um: 5.0                    # Initial bottom stack/die bow std (µm)
   k_mag: 0.1                           # Magnification slope coefficient
   M_0: 0                                # Magnification offset
-  WARPAGE_LIMIT_UM: 20                # Warpage limit (um)
+  STACK_WARPAGE_TH: 20                                # Total stack warpage threshold (um)
   ANNEAL_MODE: "batch"                # batch: all layers anneal once after stacking; sequential: anneal after each bond
 
   # === Defect Parameters ===

@@ -45,6 +45,12 @@ def die_pad_misalignment(
     return pad_misalignment
 
 
+def _residual_pass_probability(upper_limits_um, mean_um, std_um):
+    if std_um <= 0:
+        return (mean_um <= upper_limits_um).astype(float)
+    return norm.cdf(upper_limits_um, loc=mean_um, scale=std_um)
+
+
 def max_allowed_misalignment_calculator(
         cfg, PAD_TOP_R_um, PAD_BOT_R_um, PITCH_r_um, PITCH_c_um, CONTACT_AREA_CONSTRAINT, CRITICAL_DIST_CONSTRAINT
     ):
@@ -182,44 +188,46 @@ def stack_overlay_yield_calculator(
             magnification_sigma,
             num_samples,
         )
-        overlay_die_yield_list = []
 
         # print(system_translation_x_samples_um.mean()*1e3, " nm")
         # print(system_translation_y_samples_um.mean()*1e3, " nm")
         # print(system_rotation_samples_rad.mean() * 150e+3 * 1e3, " nm")
         # print(system_magnification_samples_ppm.mean() * 150e+3 * 1e3, " nm")
         
-        # # Record the time
-        # start_time = time.time()
-        for die_id, die in enumerate(waf_stack.interfaces.interface_dict[interface_name].die_list):
-            far_dx_samples_0 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[0, 1] + system_magnification_samples_ppm * die.pad_array_box[0, 0])
-            far_dy_samples_0 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[0, 0] + system_magnification_samples_ppm * die.pad_array_box[0, 1])
-            far_dx_samples_1 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[1, 1] + system_magnification_samples_ppm * die.pad_array_box[1, 0])
-            far_dy_samples_1 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[1, 0] + system_magnification_samples_ppm * die.pad_array_box[1, 1])
-            far_dx_samples_2 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[2, 1] + system_magnification_samples_ppm * die.pad_array_box[2, 0])
-            far_dy_samples_2 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[2, 0] + system_magnification_samples_ppm * die.pad_array_box[2, 1])
-            far_dx_samples_3 = (system_translation_x_samples_um - system_rotation_samples_rad * die.pad_array_box[3, 1] + system_magnification_samples_ppm * die.pad_array_box[3, 0])
-            far_dy_samples_3 = (system_translation_y_samples_um + system_rotation_samples_rad * die.pad_array_box[3, 0] + system_magnification_samples_ppm * die.pad_array_box[3, 1])
-            far_pad_misalignment_samples_0 = np.sqrt(far_dx_samples_0**2 + far_dy_samples_0**2)
-            far_pad_misalignment_samples_1 = np.sqrt(far_dx_samples_1**2 + far_dy_samples_1**2)
-            far_pad_misalignment_samples_2 = np.sqrt(far_dx_samples_2**2 + far_dy_samples_2**2)
-            far_pad_misalignment_samples_3 = np.sqrt(far_dx_samples_3**2 + far_dy_samples_3**2)
+        die_list = waf_stack.interfaces.interface_dict[interface_name].die_list
+        corner_coords_um = np.asarray(
+            [die.pad_array_box for die in die_list],
+            dtype=float,
+        )
+        overlay_die_yield = np.empty(len(die_list), dtype=float)
 
-            upper_limit_0 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_0
-            lower_limit_0 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_0
-            upper_limit_1 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_1
-            lower_limit_1 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_1
-            upper_limit_2 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_2
-            lower_limit_2 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_2
-            upper_limit_3 = MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_3
-            lower_limit_3 = -MAX_ALLOWED_MISALIGNMENT_um - far_pad_misalignment_samples_3
-            
-            current_die_corner_yield_0 = np.mean(norm.cdf(upper_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-            current_die_corner_yield_1 = np.mean(norm.cdf(upper_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-            current_die_corner_yield_2 = np.mean(norm.cdf(upper_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-            current_die_corner_yield_3 = np.mean(norm.cdf(upper_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) - norm.cdf(lower_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
+        tx = system_translation_x_samples_um[:, None, None]
+        ty = system_translation_y_samples_um[:, None, None]
+        theta = system_rotation_samples_rad[:, None, None]
+        mag = system_magnification_samples_ppm[:, None, None]
 
-            current_die_yield = min(current_die_corner_yield_0, current_die_corner_yield_1, current_die_corner_yield_2, current_die_corner_yield_3)
-            overlay_die_yield_list.append(current_die_yield)
+        # Keep the memory bounded for large wafer maps while still avoiding the
+        # old Python loop over dies and corners.
+        chunk_size = 512
+        for start_idx in range(0, len(die_list), chunk_size):
+            stop_idx = min(start_idx + chunk_size, len(die_list))
+            coords = corner_coords_um[start_idx:stop_idx]
+            x = coords[None, :, :, 0]
+            y = coords[None, :, :, 1]
+            dx = tx - theta * y + mag * x
+            dy = ty + theta * x + mag * y
+            corner_misalignment = np.sqrt(dx**2 + dy**2)
+            worst_corner_misalignment = np.max(corner_misalignment, axis=2)
+            upper_limits = (
+                MAX_ALLOWED_MISALIGNMENT_um - worst_corner_misalignment
+            )
+            overlay_die_yield[start_idx:stop_idx] = np.mean(
+                _residual_pass_probability(
+                    upper_limits,
+                    RANDOM_MISALIGNMENT_MEAN_um,
+                    RANDOM_MISALIGNMENT_STD_um,
+                ),
+                axis=0,
+            )
 
-        waf_stack.die_yield_list_per_interface_dict[interface_name]['overlay'] = np.array(overlay_die_yield_list)
+        waf_stack.die_yield_list_per_interface_dict[interface_name]['overlay'] = overlay_die_yield
