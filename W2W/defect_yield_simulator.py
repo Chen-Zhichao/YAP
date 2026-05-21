@@ -164,7 +164,9 @@ def defect_yield_simulator(
         VOID_SHAPE = cfg.VOID_SHAPE
         
         # num_particles calculation
-        total_particles = np.pi * WAF_R_um**2 * NUM_STACKS * D0
+        total_particles = np.random.poisson(
+            np.pi * WAF_R_um**2 * NUM_STACKS * D0
+        )
         particles_per_interface = np.random.multinomial(
             total_particles, [1 / NUM_STACKS] * NUM_STACKS
         )

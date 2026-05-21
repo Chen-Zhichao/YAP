@@ -245,7 +245,7 @@ def stack_overlay_yield_calculator(
             CRITICAL_DIST_CONSTRAINT=cfg.CRITICAL_DIST_CONSTRAINT,
         )
 
-        boundary_coords = getattr(interface, "ovl_critical_pad_boundary_coords", None)
+        boundary_coords = getattr(interface, "ovl_active_pad_boundary_coords", None)
         if boundary_coords is None:
             boundary_coords = interface.pad_array_box
         boundary_coords = np.asarray(boundary_coords, dtype=np.float64)
@@ -274,16 +274,17 @@ def stack_overlay_yield_calculator(
         )
         pad_misalignment_samples = np.sqrt(dx_samples**2 + dy_samples**2)
 
-        upper_limits = max_allowed_misalignment_um - pad_misalignment_samples
-        lower_limits = -max_allowed_misalignment_um - pad_misalignment_samples
-        corner_yields = np.mean(
-            norm.cdf(
-                upper_limits, loc=cfg.RANDOM_MISALIGNMENT_MEAN_um, scale=cfg.RANDOM_MISALIGNMENT_STD_um,
+        worst_pad_misalignment_samples = np.max(pad_misalignment_samples, axis=1)
+        upper_limits = max_allowed_misalignment_um - worst_pad_misalignment_samples
+        if cfg.RANDOM_MISALIGNMENT_STD_um > 0.0:
+            sample_pass_prob = norm.cdf(
+                upper_limits,
+                loc=cfg.RANDOM_MISALIGNMENT_MEAN_um,
+                scale=cfg.RANDOM_MISALIGNMENT_STD_um,
             )
-            - norm.cdf(
-                lower_limits, loc=cfg.RANDOM_MISALIGNMENT_MEAN_um, scale=cfg.RANDOM_MISALIGNMENT_STD_um,
-            ),
-            axis=0,
-        )
-        interface_overlay_yield = float(np.min(corner_yields))
+        else:
+            sample_pass_prob = (
+                cfg.RANDOM_MISALIGNMENT_MEAN_um <= upper_limits
+            ).astype(float)
+        interface_overlay_yield = float(np.mean(sample_pass_prob))
         die_stack.die_yield_per_interface_dict[interface_name]['overlay'] = interface_overlay_yield

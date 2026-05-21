@@ -13,6 +13,7 @@ import numpy as np
 import sympy as sp
 import math
 import os
+import hashlib
 from scipy.ndimage import distance_transform_edt
 
 try:
@@ -526,6 +527,7 @@ def _redundant_group_cells_on_model_grid(
     pad_bitmap_collection,
     x_coords_um,
     y_coords_um,
+    cell_count_mode="actual",
 ):
     redundant_mask = np.asarray(
         pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
@@ -569,6 +571,18 @@ def _redundant_group_cells_on_model_grid(
     order = np.argsort(unique_triples[:, 0], kind="stable")
     unique_triples = unique_triples[order]
     counts = counts[order].astype(np.int32, copy=False)
+    cell_count_mode = str(cell_count_mode).strip().lower()
+    if cell_count_mode in ("binary", "one", "presence"):
+        # On a coarse modeling grid, many same-group pads can collapse into a
+        # single grid cell. Counting all collapsed pads as simultaneously hit is
+        # overly pessimistic for redundancy tolerance. Treat each occupied
+        # group-cell as one hit while the critical-pad area still uses the
+        # coarse dilation grid.
+        counts = np.ones_like(counts, dtype=np.int32)
+    elif cell_count_mode not in ("actual", "count"):
+        raise ValueError(
+            "DEFECT_REDUNDANT_CELL_COUNT_MODE must be 'binary' or 'actual'."
+        )
 
     group_ids = unique_triples[:, 0].astype(np.int64, copy=False)
     group_start = []
@@ -672,19 +686,7 @@ def _particle_thickness_quadrature(cfg):
     return thickness_um, weights
 
 
-def _tail_dilation_fatal_integral(
-    cfg,
-    pad_bitmap_collection,
-    die_center_radius_um,
-):
-    """
-    Direction-averaged main-void + directed-tail fatal-particle integral.
-
-    Critical pads are fatal when the main void or directed tail overlaps any
-    critical pad. Redundant groups are fatal when that same single particle
-    structure overlaps more pads in one group than the group's mechanical
-    tolerance.
-    """
+def _build_tail_layout_cache(cfg, pad_bitmap_collection, max_die_center_radius_um):
     critical_pad_bitmap = np.asarray(
         pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros(0, dtype=bool)),
         dtype=bool,
@@ -698,16 +700,19 @@ def _tail_dilation_fatal_integral(
     grid_pitch_um = max(grid_pitch_um, 1e-9)
 
     pad_top_r_um = _cfg_float(cfg, "PAD_TOP_R_um")
-    radius_scale_um = _cfg_float(cfg, "k_r") * die_center_radius_um + _cfg_float(cfg, "k_r0")
-    tail_scale_um = _cfg_float(cfg, "k_L", 0.0) * die_center_radius_um
-
     n_angles = int(_cfg_float(cfg, "DEFECT_TAIL_NUM_ANGLES", 16))
     n_angles = max(1, n_angles)
     angles_rad = np.linspace(0.0, 2.0 * np.pi, n_angles, endpoint=False)
     thickness_um, thickness_weights = _particle_thickness_quadrature(cfg)
-    length_cap_default_um = tail_scale_um * np.sqrt(float(np.max(thickness_um)))
+    max_sqrt_thickness = np.sqrt(float(np.max(thickness_um)))
+
+    max_radius_scale_um = (
+        _cfg_float(cfg, "k_r") * float(max_die_center_radius_um) + _cfg_float(cfg, "k_r0")
+    )
+    max_tail_scale_um = _cfg_float(cfg, "k_L", 0.0) * float(max_die_center_radius_um)
+    length_cap_default_um = max_tail_scale_um * max_sqrt_thickness
     length_cap_um = _cfg_float(cfg, "DEFECT_TAIL_LENGTH_CAP_um", length_cap_default_um)
-    max_main_radius_um = radius_scale_um * np.sqrt(float(np.max(thickness_um)))
+    max_main_radius_um = max_radius_scale_um * max_sqrt_thickness
     model_margin_um = max(length_cap_um, max_main_radius_um) + pad_top_r_um
 
     critical_region_mask, dist_to_critical_center_um, x_coords_um, y_coords_um = (
@@ -722,25 +727,92 @@ def _tail_dilation_fatal_integral(
         pad_bitmap_collection,
         x_coords_um,
         y_coords_um,
+        cell_count_mode=_cfg_get(cfg, "DEFECT_REDUNDANT_CELL_COUNT_MODE", "actual"),
     )
-    if not np.any(critical_region_mask) and redundant_cell_data is None:
-        return 0.0, {
-            "tail_grid_shape": tuple(int(v) for v in critical_region_mask.shape),
-            "tail_grid_pitch_um": float(grid_pitch_um),
-            "tail_model_margin_um": float(model_margin_um),
-            "num_redundant_pads": 0,
-            "redundant_group_count": 0,
-        }
 
     pitch_c_eff_um = float(abs(x_coords_um[1] - x_coords_um[0]))
     pitch_r_eff_um = float(abs(y_coords_um[0] - y_coords_um[1]))
-    cell_area_um2 = pitch_r_eff_um * pitch_c_eff_um
     required_main_radius_um = np.maximum(
         dist_to_critical_center_um - pad_top_r_um,
         0.0,
     )
-
     density = _particle_density_chunk_um2(cfg, x_coords_um, y_coords_um)
+
+    return {
+        "critical_region_mask": critical_region_mask,
+        "redundant_cell_data": redundant_cell_data,
+        "x_coords_um": x_coords_um,
+        "y_coords_um": y_coords_um,
+        "pitch_r_eff_um": pitch_r_eff_um,
+        "pitch_c_eff_um": pitch_c_eff_um,
+        "cell_area_um2": pitch_r_eff_um * pitch_c_eff_um,
+        "required_main_radius_um": required_main_radius_um,
+        "density": density,
+        "angles_rad": angles_rad,
+        "thickness_um": thickness_um,
+        "thickness_weights": thickness_weights,
+        "tail_grid_pitch_um": float(grid_pitch_um),
+        "tail_model_margin_um": float(model_margin_um),
+        "tail_num_angles": int(n_angles),
+        "tail_num_thickness_nodes": int(len(thickness_um)),
+        "num_redundant_pads": (
+            0 if redundant_cell_data is None else int(redundant_cell_data["num_redundant_pads"])
+        ),
+        "redundant_group_count": (
+            0 if redundant_cell_data is None else int(redundant_cell_data["group_ids"].shape[0])
+        ),
+    }
+
+
+def _tail_dilation_fatal_integral(
+    cfg,
+    pad_bitmap_collection,
+    die_center_radius_um,
+    layout_cache=None,
+):
+    """
+    Direction-averaged main-void + directed-tail fatal-particle integral.
+
+    Critical pads are fatal when the main void or directed tail overlaps any
+    critical pad. Redundant groups are fatal when that same single particle
+    structure overlaps more pads in one group than the group's mechanical
+    tolerance.
+    """
+    pad_top_r_um = _cfg_float(cfg, "PAD_TOP_R_um")
+    radius_scale_um = _cfg_float(cfg, "k_r") * die_center_radius_um + _cfg_float(cfg, "k_r0")
+    tail_scale_um = _cfg_float(cfg, "k_L", 0.0) * die_center_radius_um
+
+    if layout_cache is None:
+        layout_cache = _build_tail_layout_cache(
+            cfg,
+            pad_bitmap_collection,
+            max_die_center_radius_um=die_center_radius_um,
+        )
+    critical_region_mask = layout_cache["critical_region_mask"]
+    redundant_cell_data = layout_cache["redundant_cell_data"]
+    x_coords_um = layout_cache["x_coords_um"]
+    y_coords_um = layout_cache["y_coords_um"]
+    pitch_r_eff_um = layout_cache["pitch_r_eff_um"]
+    pitch_c_eff_um = layout_cache["pitch_c_eff_um"]
+    cell_area_um2 = layout_cache["cell_area_um2"]
+    required_main_radius_um = layout_cache["required_main_radius_um"]
+    density = layout_cache["density"]
+    angles_rad = layout_cache["angles_rad"]
+    thickness_um = layout_cache["thickness_um"]
+    thickness_weights = layout_cache["thickness_weights"]
+
+    length_cap_default_um = tail_scale_um * np.sqrt(float(np.max(thickness_um)))
+    length_cap_um = _cfg_float(cfg, "DEFECT_TAIL_LENGTH_CAP_um", length_cap_default_um)
+
+    if not np.any(critical_region_mask) and redundant_cell_data is None:
+        return 0.0, {
+            "tail_grid_shape": tuple(int(v) for v in critical_region_mask.shape),
+            "tail_grid_pitch_um": float(layout_cache["tail_grid_pitch_um"]),
+            "tail_model_margin_um": float(layout_cache["tail_model_margin_um"]),
+            "num_redundant_pads": 0,
+            "redundant_group_count": 0,
+        }
+
     fatal_probability = np.zeros(critical_region_mask.shape, dtype=np.float64)
 
     for thickness, thickness_weight in zip(thickness_um, thickness_weights):
@@ -790,7 +862,7 @@ def _tail_dilation_fatal_integral(
                 )
             tail_hit_count += (critical_tail_hit | redundant_hit).astype(np.float64)
 
-        tail_hit_probability = tail_hit_count / float(n_angles)
+        tail_hit_probability = tail_hit_count / float(len(angles_rad))
         conditional_fatal_probability = np.where(
             main_hit_mask,
             1.0,
@@ -803,17 +875,13 @@ def _tail_dilation_fatal_integral(
     )
     info = {
         "tail_grid_shape": tuple(int(v) for v in critical_region_mask.shape),
-        "tail_grid_pitch_um": float(grid_pitch_um),
-        "tail_model_margin_um": float(model_margin_um),
-        "tail_num_angles": int(n_angles),
+        "tail_grid_pitch_um": float(layout_cache["tail_grid_pitch_um"]),
+        "tail_model_margin_um": float(layout_cache["tail_model_margin_um"]),
+        "tail_num_angles": int(layout_cache["tail_num_angles"]),
         "tail_num_thickness_nodes": int(len(thickness_um)),
         "tail_length_cap_um": float(length_cap_um),
-        "num_redundant_pads": (
-            0 if redundant_cell_data is None else int(redundant_cell_data["num_redundant_pads"])
-        ),
-        "redundant_group_count": (
-            0 if redundant_cell_data is None else int(redundant_cell_data["group_ids"].shape[0])
-        ),
+        "num_redundant_pads": int(layout_cache["num_redundant_pads"]),
+        "redundant_group_count": int(layout_cache["redundant_group_count"]),
     }
     return avg_fatal_particles, info
 
@@ -860,12 +928,24 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
 
     if use_exact_die_position:
         chunk_rows = 0
+        tail_layout_cache = None
+        if include_void_tail:
+            max_die_center_radius_um = max(
+                float(np.linalg.norm(die.die_center))
+                for die in wafer_interface.die_list
+            )
+            tail_layout_cache = _build_tail_layout_cache(
+                cfg,
+                pad_bitmap_collection,
+                max_die_center_radius_um=max_die_center_radius_um,
+            )
         for die_ind, die in enumerate(wafer_interface.die_list):
             if include_void_tail:
                 avg_fatal_particles, tail_info = _tail_dilation_fatal_integral(
                     cfg,
                     pad_bitmap_collection,
                     die_center_radius_um=float(np.linalg.norm(die.die_center)),
+                    layout_cache=tail_layout_cache,
                 )
                 chunk_rows = tail_info["tail_grid_shape"][0]
             else:
@@ -897,6 +977,17 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
         )
         chunk_rows = 0
         tail_info = {}
+        tail_layout_cache = None
+        if include_void_tail:
+            max_die_center_radius_um = max(
+                float(np.linalg.norm(wafer_interface.die_list[int(group["representative_index"])].die_center))
+                for group in radial_info["layers"]
+            )
+            tail_layout_cache = _build_tail_layout_cache(
+                cfg,
+                pad_bitmap_collection,
+                max_die_center_radius_um=max_die_center_radius_um,
+            )
         for group in radial_info["layers"]:
             rep_die = wafer_interface.die_list[int(group["representative_index"])]
             die_center_radius_um = float(np.linalg.norm(rep_die.die_center))
@@ -905,6 +996,7 @@ def _particle_yield_array_from_critical_bitmap(cfg, wafer_interface, pad_bitmap_
                     cfg,
                     pad_bitmap_collection,
                     die_center_radius_um=die_center_radius_um,
+                    layout_cache=tail_layout_cache,
                 )
                 chunk_rows = tail_info["tail_grid_shape"][0]
             else:
@@ -958,6 +1050,70 @@ def get_bitmap_bounds(*,
     return width, height
 
 
+def _array_digest(array):
+    array = np.ascontiguousarray(array)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(str(array.shape).encode("utf-8"))
+    digest.update(str(array.dtype).encode("utf-8"))
+    digest.update(array.view(np.uint8))
+    return digest.hexdigest()
+
+
+def _particle_model_cache_key(cfg, wafer_interface, pad_bitmap_collection):
+    cfg_keys = (
+        "PITCH_r_um",
+        "PITCH_c_um",
+        "DIE_W_um",
+        "DIE_L_um",
+        "PAD_TOP_R_um",
+        "PAD_ARR_W_um",
+        "PAD_ARR_L_um",
+        "D0",
+        "D1",
+        "EDGE_REGION_WIDTH_um",
+        "DEFECT_TAIL_GRID_PITCH_um",
+        "DEFECT_TAIL_NUM_ANGLES",
+        "DEFECT_TAIL_THICKNESS_NODES",
+        "DEFECT_TAIL_LENGTH_CAP_um",
+        "DEFECT_REDUNDANT_CELL_COUNT_MODE",
+        "DEFECT_USE_EXACT_DIE_POSITION",
+        "DEFECT_RADIAL_BIN_UM",
+        "DEFECT_RADIAL_DECIMALS",
+        "t_0",
+        "z",
+        "k_r",
+        "k_r0",
+        "k_L",
+        "k_n",
+        "k_S",
+        "VOID_SHAPE",
+    )
+    key_parts = [("num_dies", int(wafer_interface.num_dies))]
+    for cfg_key in cfg_keys:
+        key_parts.append((cfg_key, _cfg_get(cfg, cfg_key, None)))
+
+    critical_bitmap = np.asarray(
+        pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
+    redundant_bitmap = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    )
+    group_id_per_pad, tolerated_mechanical = _redundant_group_arrays_from_collection(
+        pad_bitmap_collection
+    )
+    key_parts.extend(
+        [
+            ("critical_bitmap", _array_digest(critical_bitmap)),
+            ("redundant_bitmap", _array_digest(redundant_bitmap)),
+            ("redundant_group_id_per_pad", _array_digest(group_id_per_pad)),
+            ("redundant_tolerated_mechanical", _array_digest(tolerated_mechanical)),
+        ]
+    )
+    return tuple(key_parts)
+
+
 
 
 
@@ -972,14 +1128,24 @@ def stack_defect_yield_calculator(
     """
     Calculate particle yield from the critical-pad layout on each W2W interface.
     """
+    model_cache = {}
     for interface_name, cfg in cfg_dict.items():
         wafer_interface = waf_stack.interfaces.interface_dict[interface_name]
         pad_bitmap_collection = waf_stack.interfaces.pad_bitmap_collection_dict[interface_name]
 
-        defect_yield_array, info = _particle_yield_array_from_critical_bitmap(
-            cfg,
-            wafer_interface,
-            pad_bitmap_collection,
-        )
+        cache_key = _particle_model_cache_key(cfg, wafer_interface, pad_bitmap_collection)
+        if cache_key in model_cache:
+            defect_yield_array, info = model_cache[cache_key]
+            info = dict(info)
+            info["cache_hit"] = True
+        else:
+            defect_yield_array, info = _particle_yield_array_from_critical_bitmap(
+                cfg,
+                wafer_interface,
+                pad_bitmap_collection,
+            )
+            info = dict(info)
+            info["cache_hit"] = False
+            model_cache[cache_key] = (defect_yield_array.copy(), dict(info))
         waf_stack.die_yield_list_per_interface_dict[interface_name]['particle'] = defect_yield_array
         waf_stack.interfaces.failure_params_dict[interface_name]["particle_model_info"] = info

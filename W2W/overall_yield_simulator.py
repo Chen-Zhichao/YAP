@@ -18,6 +18,24 @@ from overlay_yield_simulator import die_pad_misalignment
 from Cu_gap_simulator import Cu_gap_correlated_simulator
 from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
+from Cu_expansion_yield_calculator import stack_stress_yield_calculator
+
+
+_CLEAR_LINE = "\033[K"
+_MECHANICAL_DIE_YIELD_CACHE = {}
+
+
+def _print_status(message: str):
+    print(f"\r{message}{_CLEAR_LINE}", flush=True)
+
+
+def _print_progress(message: str):
+    print(f"\r{message}{_CLEAR_LINE}", end="", flush=True)
+
+
+def _clear_progress_line():
+    print(f"\r{_CLEAR_LINE}", end="", flush=True)
+
 
 def total_memory_mb(obj):
     total = sys.getsizeof(obj)
@@ -30,6 +48,94 @@ def total_memory_mb(obj):
                 # fallback
                 total += sys.getsizeof(item)
     return total / 1024 / 1024  # MB
+
+
+def _increment_redundant_group_counts(
+    new_fail_mask,
+    group_id_source,
+    redundant_failed_counts,
+):
+    if (
+        group_id_source is None
+        or redundant_failed_counts is None
+        or not np.any(new_fail_mask)
+    ):
+        return False
+
+    group_ids = np.asarray(group_id_source[new_fail_mask], dtype=np.int64).reshape(-1)
+    group_ids = group_ids[group_ids >= 0]
+    if group_ids.size <= 0:
+        return False
+
+    redundant_failed_counts += np.bincount(
+        group_ids,
+        minlength=redundant_failed_counts.shape[0],
+    ).astype(redundant_failed_counts.dtype, copy=False)
+    return True
+
+
+def _group_limit_exceeded(redundant_failed_counts, tolerated_failures):
+    if redundant_failed_counts is None or tolerated_failures is None:
+        return False
+    if redundant_failed_counts.shape[0] == 0:
+        return False
+    return bool(np.any(redundant_failed_counts > tolerated_failures))
+
+
+def _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection):
+    dish_keys = (
+        "TOP_DISH_MEAN_nm",
+        "TOP_DISH_STD_L_nm",
+        "TOP_DISH_STD_T_nm",
+        "TOP_DISH_STD_E_nm",
+        "BOT_DISH_MEAN_nm",
+        "BOT_DISH_STD_L_nm",
+        "BOT_DISH_STD_T_nm",
+        "BOT_DISH_STD_E_nm",
+        "TL_um",
+    )
+    cfg_part = tuple(
+        (key, round(float(getattr(cfg, key, 0.0)), 12))
+        for key in dish_keys
+    )
+    return (
+        str(getattr(cfg, "DESIGN", "")),
+        str(getattr(cfg, "INTERFACE", "")),
+        int(getattr(cfg, "PAD_ARR_ROW")),
+        int(getattr(cfg, "PAD_ARR_COL")),
+        round(float(getattr(cfg, "PITCH_r_um")), 12),
+        round(float(getattr(cfg, "PITCH_c_um")), 12),
+        id(pad_bitmap_collection),
+        cfg_part,
+    )
+
+
+_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
+
+
+def _active_failure_mechanisms(input_args):
+    raw = input_args.get('mechanism_filter', 'all')
+    if raw is None:
+        return set(_FAILURE_MECHANISMS)
+    if isinstance(raw, (set, list, tuple)):
+        requested = [str(item).strip() for item in raw]
+    else:
+        requested = [item.strip() for item in str(raw).split(',')]
+    requested = [item for item in requested if item]
+    if not requested or any(item.lower() == 'all' for item in requested):
+        return set(_FAILURE_MECHANISMS)
+
+    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
+    active = set()
+    for item in requested:
+        key = item.lower()
+        if key not in canonical:
+            raise ValueError(
+                f"Unknown mechanism_filter '{item}'. "
+                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
+            )
+        active.add(canonical[key])
+    return active
 
 
 def overall_yield_simulator(
@@ -45,10 +151,16 @@ def overall_yield_simulator(
 
     # Read the parameters
     NUM_STACKS = len(waf_stack_list)
+    active_mechanisms = _active_failure_mechanisms(input_args)
+    run_overlay = 'overlay' in active_mechanisms
+    run_particle = 'particle' in active_mechanisms
+    run_mechanical = 'mechanical' in active_mechanisms
+    run_esd = 'ESD' in active_mechanisms
+    mechanical_only_fast_path = active_mechanisms == {'mechanical'}
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
     epoch_fail_vec_per_interface_dict = {}    # This dict stores failure reason (each mechanism) for all die samples in this epoch
-    failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
+    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
 
     if input_args['verbose']:
         for interface_name, cfg in cfg_dict.items():
@@ -63,14 +175,23 @@ def overall_yield_simulator(
             pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
             cfg = cfg_dict[interface_name]
             cfg.num_dies_per_wafer = num_dies_per_wafer
-            print("Simulating stack {}/{} interface {}/{}: {} ...".format(epoch*NUM_STACKS+stack_ind+1, cfg.NUM_WAFER_STACKS, interface_ind+1, len(waf_stack.interfaces.interface_dict), interface_name))
+            _print_status(
+                "Simulating stack {}/{} interface {}/{}: {} ...".format(
+                    epoch * NUM_STACKS + stack_ind + 1,
+                    cfg.NUM_WAFER_STACKS,
+                    interface_ind + 1,
+                    len(waf_stack.interfaces.interface_dict),
+                    interface_name,
+                )
+            )
             # Read the parameters needed for this interface
             WAF_R_um                        =       cfg.WAF_R_um
-            system_translation_x_um         =       waf_stack.interfaces.failure_params_dict[interface_name]['system_translation_x_um']
-            system_translation_y_um         =       waf_stack.interfaces.failure_params_dict[interface_name]['system_translation_y_um']   
-            system_rotation_rad             =       waf_stack.interfaces.failure_params_dict[interface_name]['system_rotation_rad']
-            system_magnification_ppm        =       waf_stack.interfaces.failure_params_dict[interface_name]['system_magnification_ppm']
-            MAX_ALLOWED_MISALIGNMENT_um     =       waf_stack.interfaces.failure_params_dict[interface_name]['MAX_ALLOWED_MISALIGNMENT_um']
+            failure_params                   =       waf_stack.interfaces.failure_params_dict[interface_name]
+            system_translation_x_um         =       failure_params.get('system_translation_x_um', 0.0)
+            system_translation_y_um         =       failure_params.get('system_translation_y_um', 0.0)
+            system_rotation_rad             =       failure_params.get('system_rotation_rad', 0.0)
+            system_magnification_ppm        =       failure_params.get('system_magnification_ppm', 0.0)
+            MAX_ALLOWED_MISALIGNMENT_um     =       failure_params.get('MAX_ALLOWED_MISALIGNMENT_um', np.inf)
             RANDOM_MISALIGNMENT_MEAN_um     =       cfg.RANDOM_MISALIGNMENT_MEAN_um
             RANDOM_MISALIGNMENT_STD_um      =       cfg.RANDOM_MISALIGNMENT_STD_um
             PAD_ARR_W_um, PAD_ARR_L_um      =       cfg.PAD_ARR_W_um, cfg.PAD_ARR_L_um
@@ -110,37 +231,124 @@ def overall_yield_simulator(
             criticality_info = pad_bitmap_collection["criticality_info"]
             # Read the redundant net to 1D physical mask mapping
             redundant_net_to_1d_physical_mask = pad_bitmap_collection["redundant_net_to_1d_physical_mask"]
+            redundant_group_id_per_pad = pad_bitmap_collection.get("redundant_group_id_per_pad")
+            redundant_tolerated_esd_failures = pad_bitmap_collection.get(
+                "redundant_tolerated_esd_failures"
+            )
+            redundant_tolerated_mechanical_failures = pad_bitmap_collection.get(
+                "redundant_tolerated_mechanical_failures"
+            )
+            if redundant_group_id_per_pad is not None:
+                redundant_group_id_grid = np.asarray(
+                    redundant_group_id_per_pad,
+                    dtype=np.int32,
+                ).reshape(PAD_ARR_ROW, PAD_ARR_COL)
+            else:
+                redundant_group_id_grid = None
             esd_center_tol_um = getattr(cfg, "ESD_CENTER_TOL_UM", None)
             selected_esd_die_ind = choose_center_die_index(
                 waf_interface.die_list,
                 tolerance_um=None if esd_center_tol_um is None else float(esd_center_tol_um),
             )
 
+            if mechanical_only_fast_path:
+                cache_key = _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection)
+                if cache_key not in _MECHANICAL_DIE_YIELD_CACHE:
+                    if not hasattr(waf_stack, "die_yield_list_per_interface_dict"):
+                        waf_stack.die_yield_list_per_interface_dict = {
+                            name: {"mechanical": np.ones(num_dies_per_wafer, dtype=float)}
+                            for name in waf_stack.interfaces.interface_dict
+                        }
+                    stack_stress_yield_calculator(
+                        cfg_dict={interface_name: cfg},
+                        waf_stack=waf_stack,
+                    )
+                    mechanical_yield_array = waf_stack.die_yield_list_per_interface_dict[
+                        interface_name
+                    ]['mechanical']
+                    _MECHANICAL_DIE_YIELD_CACHE[cache_key] = float(
+                        np.nanmean(mechanical_yield_array)
+                    )
+                mechanical_die_yield = _MECHANICAL_DIE_YIELD_CACHE[cache_key]
+
+                candidate_mask = (
+                    np.ones(num_dies_per_wafer, dtype=bool)
+                    if cfg.verbose
+                    else waf_stack.die_stack_survival.astype(bool, copy=True)
+                )
+                candidate_idx = np.flatnonzero(candidate_mask)
+                fail_mask = np.zeros(num_dies_per_wafer, dtype=bool)
+                if candidate_idx.size > 0:
+                    fail_mask[candidate_idx] = (
+                        np.random.random(candidate_idx.size) > mechanical_die_yield
+                    )
+
+                if np.any(fail_mask):
+                    waf_stack.die_stack_survival[fail_mask] = False
+                    for failed_die_ind in np.flatnonzero(fail_mask):
+                        waf_interface.die_list[int(failed_die_ind)].survival = False
+                    if cfg.verbose:
+                        epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][
+                            stack_ind, fail_mask
+                        ] = 1
+                        epoch_fail_vec_per_interface_dict[interface_name]['overall'][
+                            stack_ind, fail_mask
+                        ] = 1
+
+                _print_status(
+                    "Mechanical-only fast path for stack {}/{} interface {}/{}: "
+                    "{} yield {:.6f}, failed {}/{} dies.".format(
+                        epoch * NUM_STACKS + stack_ind + 1,
+                        cfg.NUM_WAFER_STACKS,
+                        interface_ind + 1,
+                        len(waf_stack.interfaces.interface_dict),
+                        interface_name,
+                        mechanical_die_yield,
+                        int(np.count_nonzero(fail_mask)),
+                        int(candidate_idx.size),
+                    )
+                )
+                continue
+
             for die_ind, die in enumerate(waf_interface.die_list):
                 die_pad_coords = waf_interface.base_pad_coords + die.die_center
                 valid_die_pad_coords = die_pad_coords[valid_pad_mask_flat]
                 die_count += 1
                 if die_count % 10 == 0 or die_count == len(waf_interface.die_list):
-                    print("Processing die {}/{}...Time taken for every 10 dies: {:.2f} seconds".format(die_count, len(waf_interface.die_list), (time.time() - start_time) / die_count * 10), end='\r')
+                    _print_progress(
+                        "Processing die {}/{}...Time taken for every 10 dies: {:.2f} seconds".format(
+                            die_count,
+                            len(waf_interface.die_list),
+                            (time.time() - start_time) / die_count * 10,
+                        )
+                    )
                     # start_time = time.time()
-                redundant_pad_fail_map = np.zeros((PAD_ARR_ROW, PAD_ARR_COL))
+                redundant_pad_fail_map = np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=bool)
+                if redundant_group_id_grid is not None:
+                    redundant_failed_counts = np.zeros(
+                        len(redundant_tolerated_mechanical_failures),
+                        dtype=np.int32,
+                    )
+                else:
+                    redundant_failed_counts = None
                 temp_overall_fail_map = np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=int)  # This map is used to store the fail pads for this die stack for all mechanisms, which will be used for visualization. It is reset for each die.
                 
                 '''
                 Check the overlay errors
                 '''
                 # # Check the pad misalignment
-                die.pad_misalignment = die_pad_misalignment(die=die, 
-                                                            base_pad_coords=waf_interface.base_pad_coords,
-                                                            system_translation_x_um=system_translation_x_um,
-                                                            system_translation_y_um=system_translation_y_um,
-                                                            system_rotation_rad=system_rotation_rad,
-                                                            system_magnification_ppm=system_magnification_ppm,
-                                                            RANDOM_MISALIGNMENT_MEAN_um=RANDOM_MISALIGNMENT_MEAN_um,
-                                                            RANDOM_MISALIGNMENT_STD_um=RANDOM_MISALIGNMENT_STD_um,
-                                                            approximate_set=approximate_set,
-                                                            )
-                if approximate_set == 1:
+                if run_overlay:
+                    die.pad_misalignment = die_pad_misalignment(die=die,
+                                                                base_pad_coords=waf_interface.base_pad_coords,
+                                                                system_translation_x_um=system_translation_x_um,
+                                                                system_translation_y_um=system_translation_y_um,
+                                                                system_rotation_rad=system_rotation_rad,
+                                                                system_magnification_ppm=system_magnification_ppm,
+                                                                RANDOM_MISALIGNMENT_MEAN_um=RANDOM_MISALIGNMENT_MEAN_um,
+                                                                RANDOM_MISALIGNMENT_STD_um=RANDOM_MISALIGNMENT_STD_um,
+                                                                approximate_set=approximate_set,
+                                                                )
+                if run_overlay and approximate_set == 1:
                     # pad fail criteria: pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um
                     die.pad_misalignment = die.pad_misalignment.reshape(cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL)
                     if cfg.verbose:
@@ -158,24 +366,48 @@ def overall_yield_simulator(
                         if not cfg.verbose:
                             continue
                     # Check if too many redundant pad misalignment is greater than the maximum allowed misalignment
-                    redundant_pad_misalignment = die.pad_misalignment * die_redundant_pad_bitmap    # Shape: (PAD_ARR_ROW, PAD_ARR_COL)
-                    redundant_pad_fail_map[redundant_pad_misalignment > MAX_ALLOWED_MISALIGNMENT_um] = 1 # 1: redundant pad fails, shape: (PAD_ARR_ROW, PAD_ARR_COL)
-                    for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
-                        tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
-                        num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
-                        if num_fail_pad_in_net > tolerated_mechanical_failures:
+                    overlay_redundant_fail_mask = (
+                        (die.pad_misalignment > MAX_ALLOWED_MISALIGNMENT_um)
+                        & die_redundant_pad_bitmap.astype(bool)
+                    )
+                    new_overlay_redundant_fail_mask = (
+                        overlay_redundant_fail_mask
+                        & (~redundant_pad_fail_map)
+                    )
+                    redundant_pad_fail_map[overlay_redundant_fail_mask] = True
+                    if redundant_group_id_grid is not None:
+                        _increment_redundant_group_counts(
+                            new_overlay_redundant_fail_mask,
+                            redundant_group_id_grid,
+                            redundant_failed_counts,
+                        )
+                        if _group_limit_exceeded(
+                            redundant_failed_counts,
+                            redundant_tolerated_mechanical_failures,
+                        ):
                             waf_interface.die_list[die_ind].survival = False
                             waf_stack.die_stack_survival[die_ind] = False
                             if cfg.verbose:
                                 epoch_fail_vec_per_interface_dict[interface_name]['overlay'][stack_ind, die_ind] = 1
                                 epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
-                            break
+                    else:
+                        for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+                            tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
+                            num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
+                            if num_fail_pad_in_net > tolerated_mechanical_failures:
+                                waf_interface.die_list[die_ind].survival = False
+                                waf_stack.die_stack_survival[die_ind] = False
+                                if cfg.verbose:
+                                    epoch_fail_vec_per_interface_dict[interface_name]['overlay'][stack_ind, die_ind] = 1
+                                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
+                                break
                     # # Get the fail bump indices
                     # fail_bump_id = mapping_physical_to_bumpid[redundant_pad_fail_map == 1]
                     # # Switch to set for easier checking
                     # fail_bump_id_set = set(fail_bump_id.astype(int))
                 # Delete the die.pad_misalignment to save memory
-                del die.pad_misalignment
+                if hasattr(die, "pad_misalignment"):
+                    del die.pad_misalignment
             
                 
                 # # Check every net connecting redundant pads, if all the redundant pad replicas fail, then the die fails
@@ -192,7 +424,10 @@ def overall_yield_simulator(
                 # # Check the void overlap with the pad
                 # Assuming wafer.voids is an array of shape (N, 3), where N is the number of voids. [x, y, r]
                 # Critical pad bitmap is a 2D array of shape (PAD_ARR_ROW, PAD_ARR_COL) with 1s for critical pads and 0s for non-critical pads
-                voids = np.array(waf_stack.interfaces.failure_params_dict[interface_name]['voids'])  # shape (N, 3), N is the number of voids
+                if run_particle:
+                    voids = np.array(failure_params['voids'])  # shape (N, 3), N is the number of voids
+                else:
+                    voids = np.empty((0, 3), dtype=float)
                 if voids.size > 0:
                     # Coordinates and dimensions of the die pad array box
                     pad_array_box_x = die.pad_array_box[2][0]
@@ -264,19 +499,38 @@ def overall_yield_simulator(
                         else:   # Voids overlapping with the redundant pads.
                             # Check if any void overlaps with the redundant critical pads
                             overlap_redundant = overlap_void_pad_mask & check_redundant_pad_bitmap.astype(bool) # shape (H, W)
-                            # if overlap #pads is greater than a percentage of the total pads, then the die fails
-                            redundant_pad_fail_map[PAD_ARR_ROW-j_max-1:PAD_ARR_ROW-j_min, i_min:i_max+1][overlap_redundant] = 1 
-                            for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
-                                tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
-                                num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
-                                if num_fail_pad_in_net > tolerated_mechanical_failures:
+                            row_slice = slice(PAD_ARR_ROW-j_max-1, PAD_ARR_ROW-j_min)
+                            col_slice = slice(i_min, i_max+1)
+                            redundant_fail_submap = redundant_pad_fail_map[row_slice, col_slice]
+                            new_overlap_redundant = overlap_redundant & (~redundant_fail_submap)
+                            redundant_fail_submap[overlap_redundant] = True
+                            if redundant_group_id_grid is not None:
+                                _increment_redundant_group_counts(
+                                    new_overlap_redundant,
+                                    redundant_group_id_grid[row_slice, col_slice],
+                                    redundant_failed_counts,
+                                )
+                                if _group_limit_exceeded(
+                                    redundant_failed_counts,
+                                    redundant_tolerated_mechanical_failures,
+                                ):
                                     waf_interface.die_list[die_ind].survival = False
                                     waf_stack.die_stack_survival[die_ind] = False
                                     if cfg.verbose:
                                         epoch_fail_vec_per_interface_dict[interface_name]['particle'][stack_ind, die_ind] = 1
                                         epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
-                                    if not cfg.verbose:
-                                        break                        
+                            else:
+                                for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+                                    tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
+                                    num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
+                                    if num_fail_pad_in_net > tolerated_mechanical_failures:
+                                        waf_interface.die_list[die_ind].survival = False
+                                        waf_stack.die_stack_survival[die_ind] = False
+                                        if cfg.verbose:
+                                            epoch_fail_vec_per_interface_dict[interface_name]['particle'][stack_ind, die_ind] = 1
+                                            epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
+                                        if not cfg.verbose:
+                                            break
                             # # Get the fail bump indices
                             # fail_bump_id = mapping_physical_to_bumpid[redundant_pad_fail_map == 1]
                             # # Switch to set for easier checking
@@ -296,61 +550,90 @@ def overall_yield_simulator(
                 Check the Cu gap, a true Monte Carlo simulator
                 '''
                 # Check the Cu expansion
-                top_dish, bot_dish = Cu_gap_correlated_simulator(
-                    cfg=cfg,
-                    valid_pad_mask_flat=valid_pad_mask_flat,
-                )
-                Cu_gap_in_valid_pads = top_dish + bot_dish
-                Cu_gap_map = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
-                Cu_gap_map[valid_pad_mask == 1] = Cu_gap_in_valid_pads
+                top_dish = bot_dish = None
+                if run_mechanical or run_esd:
+                    top_dish, bot_dish = Cu_gap_correlated_simulator(
+                        cfg=cfg,
+                        valid_pad_mask_flat=valid_pad_mask_flat,
+                    )
 
-                # Calculate the safe range for single pad Cu recess
-                if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind)) or cfg.DEBUG:
-                    if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/'):
-                        os.makedirs(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/')
-                    # start_time = time.time()
-                    valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
-                    # print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
-                    np.save(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind), valid_pad_dishing_bound_array)
-                else:
-                    valid_pad_dishing_bound_array = np.load(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind))
-                zeta_0 = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
-                zeta_1 = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
-                zeta_0[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 1] * 2 # lower limits of the sum of top and bottom Cu heights
-                zeta_1[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 0] * 2 # upper limits of the sum of top and bottom Cu heights
-                zeta_0 = np.clip(zeta_0, a_max=0, a_min=None)
-                zeta_1 = np.clip(zeta_1, a_max=0, a_min=None)
+                if run_mechanical:
+                    Cu_gap_in_valid_pads = top_dish + bot_dish
+                    Cu_gap_map = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
+                    Cu_gap_map[valid_pad_mask == 1] = Cu_gap_in_valid_pads
 
-                if cfg.verbose:
-                    epoch_fail_map_per_interface_dict[interface_name]['mechanical'] += ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
-                    temp_overall_fail_map |= ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
-                # Check critical pad Cu gap
-                critical_pad_Cu_gap = Cu_gap_map * die_critical_pad_bitmap      # Shape: (PAD_ARR_ROW, PAD_ARR_COL)
-                if np.any(critical_pad_Cu_gap > zeta_1 * die_critical_pad_bitmap) or np.any(critical_pad_Cu_gap < zeta_0 * die_critical_pad_bitmap):
-                    # print("Die fails due to critical pad Cu gap failure.")
-                    waf_interface.die_list[die_ind].survival = False
-                    waf_stack.die_stack_survival[die_ind] = False
+                    # Calculate the safe range for single pad Cu recess
+                    if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind)) or cfg.DEBUG:
+                        if not os.path.exists(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/'):
+                            os.makedirs(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + '/')
+                        # start_time = time.time()
+                        valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(cfg, valid_die_pad_coords) # (num_pads, 2) array: (dishing_low_nm, dishing_high_nm)
+                        # print("Dishing bound calculation time: {:.2f} seconds".format(time.time() - start_time))
+                        np.save(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind), valid_pad_dishing_bound_array)
+                    else:
+                        valid_pad_dishing_bound_array = np.load(cfg.OUTPUT_DIR + cfg.DESIGN + '/temp/' + cfg.INTERFACE + "/" + cfg.INTERFACE + "_dishing_bound_array_die_{}.npy".format(die_ind))
+                    zeta_0 = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
+                    zeta_1 = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
+                    zeta_0[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 1] * 2 # lower limits of the sum of top and bottom Cu heights
+                    zeta_1[valid_pad_mask == 1] = - valid_pad_dishing_bound_array[:, 0] * 2 # upper limits of the sum of top and bottom Cu heights
+                    zeta_0 = np.clip(zeta_0, a_max=0, a_min=None)
+                    zeta_1 = np.clip(zeta_1, a_max=0, a_min=None)
+
                     if cfg.verbose:
-                        epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind, die_ind] = 1
-                        epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
-                    if not cfg.verbose:
-                        continue
-                
-                # Check redundant pad Cu gap
-                redundant_pad_Cu_gap = Cu_gap_map * die_redundant_pad_bitmap    # Shape: (PAD_ARR_ROW, PAD_ARR_COL)
-                redundant_pad_fail_map[redundant_pad_Cu_gap > zeta_1 * die_redundant_pad_bitmap] = 1
-                redundant_pad_fail_map[redundant_pad_Cu_gap < zeta_0 * die_redundant_pad_bitmap] = 1
-                for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
-                    tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
-                    num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
-                    if num_fail_pad_in_net > tolerated_mechanical_failures:
+                        epoch_fail_map_per_interface_dict[interface_name]['mechanical'] += ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
+                        temp_overall_fail_map |= ((Cu_gap_map > zeta_1) | (Cu_gap_map < zeta_0)).astype(int)
+                    # Check critical pad Cu gap
+                    critical_pad_Cu_gap = Cu_gap_map * die_critical_pad_bitmap      # Shape: (PAD_ARR_ROW, PAD_ARR_COL)
+                    if np.any(critical_pad_Cu_gap > zeta_1 * die_critical_pad_bitmap) or np.any(critical_pad_Cu_gap < zeta_0 * die_critical_pad_bitmap):
+                        # print("Die fails due to critical pad Cu gap failure.")
                         waf_interface.die_list[die_ind].survival = False
                         waf_stack.die_stack_survival[die_ind] = False
                         if cfg.verbose:
                             epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind, die_ind] = 1
                             epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
                         if not cfg.verbose:
-                            break
+                            continue
+
+                    # Check redundant pad Cu gap
+                    redundant_pad_Cu_gap_fail_mask = (
+                        (
+                            (Cu_gap_map > zeta_1)
+                            | (Cu_gap_map < zeta_0)
+                        )
+                        & die_redundant_pad_bitmap.astype(bool)
+                    )
+                    new_redundant_pad_Cu_gap_fail_mask = (
+                        redundant_pad_Cu_gap_fail_mask
+                        & (~redundant_pad_fail_map)
+                    )
+                    redundant_pad_fail_map[redundant_pad_Cu_gap_fail_mask] = True
+                    if redundant_group_id_grid is not None:
+                        _increment_redundant_group_counts(
+                            new_redundant_pad_Cu_gap_fail_mask,
+                            redundant_group_id_grid,
+                            redundant_failed_counts,
+                        )
+                        if _group_limit_exceeded(
+                            redundant_failed_counts,
+                            redundant_tolerated_mechanical_failures,
+                        ):
+                            waf_interface.die_list[die_ind].survival = False
+                            waf_stack.die_stack_survival[die_ind] = False
+                            if cfg.verbose:
+                                epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind, die_ind] = 1
+                                epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
+                    else:
+                        for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+                            tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
+                            num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
+                            if num_fail_pad_in_net > tolerated_mechanical_failures:
+                                waf_interface.die_list[die_ind].survival = False
+                                waf_stack.die_stack_survival[die_ind] = False
+                                if cfg.verbose:
+                                    epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind, die_ind] = 1
+                                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
+                                if not cfg.verbose:
+                                    break
                 # # Get the fail bump indices
                 # fail_bump_id = mapping_physical_to_bumpid[redundant_pad_fail_map == 1]
                 # # Switch to set for easier checking
@@ -366,7 +649,7 @@ def overall_yield_simulator(
                 '''
                 Check the ESD failure
                 '''
-                if selected_esd_die_ind is not None and die_ind == selected_esd_die_ind:
+                if run_esd and selected_esd_die_ind is not None and die_ind == selected_esd_die_ind:
                     first_contact_pad_idx, survive_bool = esd_failure_simulator(
                                                     cfg=cfg,
                                                     pad_coords_um=valid_die_pad_coords,
@@ -394,7 +677,7 @@ def overall_yield_simulator(
                             continue
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['overall'] += temp_overall_fail_map.astype(int)               
-            print("")
+            _clear_progress_line()
             # Record the time
             # print("The time for checking wafer {} is {} seconds.".format(waf_ind, time.time() - start_time))
             # # print("The number of survival dies in the wafer is {}.".format(wafer.survival_die))

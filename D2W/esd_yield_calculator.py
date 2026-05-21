@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import hashlib
 from typing import Tuple
 
 import numpy as np
@@ -10,6 +11,19 @@ from numpy.polynomial.legendre import leggauss
 from scipy.special import log_ndtr
 
 EPS0_F_PER_M = 8.8541878128e-12
+
+
+def _array_digest(array: np.ndarray) -> str:
+    arr = np.ascontiguousarray(array)
+    digest = hashlib.sha1()
+    digest.update(str(arr.shape).encode("utf-8"))
+    digest.update(str(arr.dtype).encode("utf-8"))
+    digest.update(arr.view(np.uint8))
+    return digest.hexdigest()
+
+
+def _cache_float(value: float) -> float:
+    return round(float(value), 15)
 
 
 def _z_linear_coeffs(ax_deg: float, ay_deg: float) -> Tuple[float, float, float]:
@@ -593,6 +607,191 @@ def pad_esd_yield_map_generator(
     return valid_pad_yield_map_vec, fig, float(p_fail_avg)
 
 
+def _d2w_voltage_failure_average(
+    *,
+    cfg,
+    top_die_w_um: float,
+    top_die_h_um: float,
+) -> float:
+    v_min_v = float(cfg.V_MIN_V)
+    v_max_v = float(cfg.V_MAX_V)
+    voltage_q = int(getattr(cfg, "ESD_ANALYTICAL_VOLTAGE_Q", 5))
+    voltage_norm = v_max_v - v_min_v
+    if voltage_norm <= 0.0:
+        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
+
+    weibull_k = float(cfg.WEIBULL_K)
+    weibull_lambda = float(cfg.WEIBULL_LAMBDA)
+    cutoff_min_a = float(cfg.CUTOFF_MIN_A)
+    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
+
+    p_fail_avg = 0.0
+    for v_chg, v_weight in zip(v_nodes, v_weights):
+        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
+        p_fail_v = _compute_p_fail_for_die(
+            top_die_w_um,
+            top_die_h_um,
+            float(v_chg),
+            cfg=cfg,
+            geff_um=arc_distance_um,
+            weibull_k=weibull_k,
+            weibull_lambda=weibull_lambda,
+            cutoff_min_a=cutoff_min_a,
+        )
+        p_fail_avg += (float(v_weight) / voltage_norm) * float(p_fail_v)
+
+    return float(p_fail_avg)
+
+
+def _d2w_first_touch_cache_key(
+    *,
+    cfg,
+    pad_coords_um: np.ndarray,
+    esd_critical_pad_mask: np.ndarray,
+    pad_size_um: float,
+    tilt_x_mean_deg: float,
+    tilt_x_std_deg: float,
+    tilt_y_mean_deg: float,
+    tilt_y_std_deg: float,
+    top_dish_mean_nm: float,
+    top_dish_std_nm: float,
+    bot_dish_mean_nm: float,
+    bot_dish_std_nm: float,
+    z_top_um: float,
+) -> tuple:
+    return (
+        _array_digest(np.asarray(pad_coords_um, dtype=np.float64)),
+        _array_digest(np.asarray(esd_critical_pad_mask, dtype=bool)),
+        _cache_float(pad_size_um),
+        _cache_float(tilt_x_mean_deg),
+        _cache_float(tilt_x_std_deg),
+        _cache_float(tilt_y_mean_deg),
+        _cache_float(tilt_y_std_deg),
+        _cache_float(top_dish_mean_nm),
+        _cache_float(top_dish_std_nm),
+        _cache_float(bot_dish_mean_nm),
+        _cache_float(bot_dish_std_nm),
+        _cache_float(z_top_um),
+        int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48)),
+        int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5)),
+        int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5)),
+        _cache_float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0)),
+        int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000)),
+        bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True)),
+        _cache_float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW", 8.0)),
+        int(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_MIN_PADS", 4096)),
+        _cache_float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION", 0.8)),
+    )
+
+
+def _d2w_critical_first_touch_probability(
+    *,
+    cfg,
+    pad_coords_um: np.ndarray,
+    esd_critical_pad_mask: np.ndarray,
+    pad_size_um: float,
+    tilt_x_mean_deg: float,
+    tilt_x_std_deg: float,
+    tilt_y_mean_deg: float,
+    tilt_y_std_deg: float,
+    top_dish_mean_nm: float,
+    top_dish_std_nm: float,
+    bot_dish_mean_nm: float,
+    bot_dish_std_nm: float,
+    z_top_um: float,
+) -> float:
+    quadrature_points = int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48))
+    outer_qx = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5))
+    outer_qy = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5))
+    tail_sigma = float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0))
+    chunk_size = int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000))
+    fill_residual_uniformly = bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True))
+    candidate_sigma_window = float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW", 8.0))
+    candidate_min_pads = int(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_MIN_PADS", 4096))
+    candidate_disable_fraction = float(
+        getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION", 0.8)
+    )
+    verbose = bool(getattr(cfg, "verbose", False))
+
+    pad_coords_um = np.asarray(pad_coords_um, dtype=np.float64)
+    esd_critical_pad_mask = np.asarray(esd_critical_pad_mask, dtype=bool).reshape(-1)
+    if pad_coords_um.ndim != 2 or pad_coords_um.shape[1] != 2:
+        raise ValueError("pad_coords_um must have shape (n_pads, 2).")
+    pad_count = pad_coords_um.shape[0]
+    if esd_critical_pad_mask.size != pad_count:
+        raise ValueError("esd_critical_pad_mask must have the same length as pad_coords_um.")
+    if pad_count <= 0:
+        raise ValueError("pad_coords_um is empty; analytical ESD yield calculation needs at least one pad.")
+    if not np.any(esd_critical_pad_mask):
+        return 0.0
+
+    mu_h_um = (float(top_dish_mean_nm) + float(bot_dish_mean_nm)) * 1e-3
+    sigma_h_um = math.sqrt(max(float(top_dish_std_nm), 0.0) ** 2 + max(float(bot_dish_std_nm), 0.0) ** 2) * 1e-3
+    if sigma_h_um <= 0.0:
+        raise ValueError("Combined dishing sigma is zero. Analytical ESD yield requires positive variation.")
+
+    x_nodes, x_weights = hermgauss(outer_qx)
+    y_nodes, y_weights = hermgauss(outer_qy)
+
+    total_cases = int(outer_qx) * int(outer_qy)
+    case_id = 0
+    critical_first_touch_prob = 0.0
+    total_outer_weight = 0.0
+
+    for xa, wa in zip(x_nodes, x_weights):
+        theta_x_deg = float(tilt_x_mean_deg) + math.sqrt(2.0) * float(tilt_x_std_deg) * float(xa)
+
+        for yb, wb in zip(y_nodes, y_weights):
+            theta_y_deg = float(tilt_y_mean_deg) + math.sqrt(2.0) * float(tilt_y_std_deg) * float(yb)
+            outer_coeff = float(wa * wb / math.pi)
+
+            contact_limit_um = _deterministic_contact_limit_um(
+                pad_coords_um=pad_coords_um,
+                pad_size_um=float(pad_size_um),
+                tilt_x_deg=theta_x_deg,
+                tilt_y_deg=theta_y_deg,
+                z_top_um=float(z_top_um),
+            )
+            candidate_idx = _select_candidate_pad_indices(
+                contact_limit_um=contact_limit_um,
+                sigma_h_um=sigma_h_um,
+                candidate_sigma_window=candidate_sigma_window,
+                candidate_min_pads=candidate_min_pads,
+                candidate_disable_fraction=candidate_disable_fraction,
+            )
+            critical_first_touch_prob_case = _fixed_tilt_critical_probability(
+                contact_limit_um=contact_limit_um[candidate_idx],
+                critical_mask=esd_critical_pad_mask[candidate_idx],
+                mu_h_um=mu_h_um,
+                sigma_h_um=sigma_h_um,
+                quadrature_points=quadrature_points,
+                tail_sigma=tail_sigma,
+                chunk_size=chunk_size,
+                fill_residual_uniformly=fill_residual_uniformly,
+            )
+
+            critical_first_touch_prob += outer_coeff * critical_first_touch_prob_case
+            total_outer_weight += outer_coeff
+            case_id += 1
+
+            if verbose:
+                print(
+                    f"[ESD analytical first-touch] {case_id}/{total_cases} | "
+                    f"theta_x={theta_x_deg:.3e} deg | "
+                    f"theta_y={theta_y_deg:.3e} deg",
+                    end="\r",
+                    flush=True,
+                )
+
+    if total_outer_weight > 0.0:
+        critical_first_touch_prob /= total_outer_weight
+
+    if verbose:
+        print()
+
+    return float(np.clip(critical_first_touch_prob, 0.0, 1.0))
+
+
 def die_esd_yield_calculator(
     *,
     cfg,
@@ -634,26 +833,6 @@ def die_esd_yield_calculator(
     else:
         z_top_um = float(z_top_um)
 
-    v_min_v = float(cfg.V_MIN_V)
-    v_max_v = float(cfg.V_MAX_V)
-    weibull_k = float(cfg.WEIBULL_K)
-    weibull_lambda = float(cfg.WEIBULL_LAMBDA)
-    cutoff_min_a = float(cfg.CUTOFF_MIN_A)
-
-    quadrature_points = int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48))
-    outer_qx = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5))
-    outer_qy = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5))
-    voltage_q = int(getattr(cfg, "ESD_ANALYTICAL_VOLTAGE_Q", 5))
-    tail_sigma = float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0))
-    chunk_size = int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000))
-    fill_residual_uniformly = bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True))
-    candidate_sigma_window = float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW", 8.0))
-    candidate_min_pads = int(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_MIN_PADS", 4096))
-    candidate_disable_fraction = float(
-        getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION", 0.8)
-    )
-    verbose = bool(getattr(cfg, "verbose", False))
-
     pad_coords_um = np.asarray(pad_coords_um, dtype=np.float64)
     esd_critical_pad_mask = np.asarray(esd_critical_pad_mask, dtype=bool).reshape(-1)
     if pad_coords_um.ndim != 2 or pad_coords_um.shape[1] != 2:
@@ -668,90 +847,27 @@ def die_esd_yield_calculator(
     if critical_count <= 0:
         return 1.0
 
-    mu_h_um = (top_dish_mean_nm + bot_dish_mean_nm) * 1e-3
-    sigma_h_um = math.sqrt(max(top_dish_std_nm, 0.0) ** 2 + max(bot_dish_std_nm, 0.0) ** 2) * 1e-3
-    if sigma_h_um <= 0.0:
-        raise ValueError("Combined dishing sigma is zero. Analytical ESD yield requires positive variation.")
-
-    x_nodes, x_weights = hermgauss(outer_qx)
-    y_nodes, y_weights = hermgauss(outer_qy)
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
-    voltage_norm = v_max_v - v_min_v
-    if voltage_norm <= 0.0:
-        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
-
-    p_fail_avg = 0.0
-    for v_chg, v_weight in zip(v_nodes, v_weights):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        p_fail_v = _compute_p_fail_for_die(
-            top_die_w_um,
-            top_die_h_um,
-            float(v_chg),
-            cfg=cfg,
-            geff_um=arc_distance_um,
-            weibull_k=weibull_k,
-            weibull_lambda=weibull_lambda,
-            cutoff_min_a=cutoff_min_a,
-        )
-        p_fail_avg += (float(v_weight) / voltage_norm) * float(p_fail_v)
-
-    total_cases = int(outer_qx) * int(outer_qy)
-    case_id = 0
-    critical_first_touch_prob = 0.0
-    total_outer_weight = 0.0
-
-    for xa, wa in zip(x_nodes, x_weights):
-        theta_x_deg = tilt_x_mean_deg + math.sqrt(2.0) * tilt_x_std_deg * float(xa)
-
-        for yb, wb in zip(y_nodes, y_weights):
-            theta_y_deg = tilt_y_mean_deg + math.sqrt(2.0) * tilt_y_std_deg * float(yb)
-            outer_coeff = float(wa * wb / math.pi)
-
-            contact_limit_um = _deterministic_contact_limit_um(
-                pad_coords_um=pad_coords_um,
-                pad_size_um=pad_size_um,
-                tilt_x_deg=theta_x_deg,
-                tilt_y_deg=theta_y_deg,
-                z_top_um=z_top_um,
-            )
-            candidate_idx = _select_candidate_pad_indices(
-                contact_limit_um=contact_limit_um,
-                sigma_h_um=sigma_h_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
-            )
-            critical_first_touch_prob_case = _fixed_tilt_critical_probability(
-                contact_limit_um=contact_limit_um[candidate_idx],
-                critical_mask=esd_critical_pad_mask[candidate_idx],
-                mu_h_um=mu_h_um,
-                sigma_h_um=sigma_h_um,
-                quadrature_points=quadrature_points,
-                tail_sigma=tail_sigma,
-                chunk_size=chunk_size,
-                fill_residual_uniformly=fill_residual_uniformly,
-            )
-
-            critical_first_touch_prob += outer_coeff * critical_first_touch_prob_case
-            total_outer_weight += outer_coeff
-            case_id += 1
-
-            if verbose:
-                print(
-                    f"[ESD analytical die] {case_id}/{total_cases} | "
-                    f"theta_x={theta_x_deg:.3e} deg | "
-                    f"theta_y={theta_y_deg:.3e} deg",
-                    end="\r",
-                    flush=True,
-                )
-
-    if total_outer_weight > 0.0:
-        critical_first_touch_prob /= total_outer_weight
-
+    p_fail_avg = _d2w_voltage_failure_average(
+        cfg=cfg,
+        top_die_w_um=top_die_w_um,
+        top_die_h_um=top_die_h_um,
+    )
+    critical_first_touch_prob = _d2w_critical_first_touch_probability(
+        cfg=cfg,
+        pad_coords_um=pad_coords_um,
+        esd_critical_pad_mask=esd_critical_pad_mask,
+        pad_size_um=pad_size_um,
+        tilt_x_mean_deg=tilt_x_mean_deg,
+        tilt_x_std_deg=tilt_x_std_deg,
+        tilt_y_mean_deg=tilt_y_mean_deg,
+        tilt_y_std_deg=tilt_y_std_deg,
+        top_dish_mean_nm=top_dish_mean_nm,
+        top_dish_std_nm=top_dish_std_nm,
+        bot_dish_mean_nm=bot_dish_mean_nm,
+        bot_dish_std_nm=bot_dish_std_nm,
+        z_top_um=z_top_um,
+    )
     die_failure_probability = float(p_fail_avg) * float(np.clip(critical_first_touch_prob, 0.0, 1.0))
-
-    if verbose:
-        print()
 
     return float(1.0 - np.clip(die_failure_probability, 0.0, 1.0))
 
@@ -770,6 +886,7 @@ def stack_esd_yield_calculator(
     competition, and the die-level failure probability is the sum of per-pad
     ESD risks over critical pads only.
     """
+    first_touch_cache = {}
     for interface_name, cfg in cfg_dict.items():
         interface = die_stack.interfaces.interface_dict[interface_name]
         pad_bitmap_collection = die_stack.interfaces.pad_bitmap_collection_dict[interface_name]
@@ -803,20 +920,52 @@ def stack_esd_yield_calculator(
             die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = 1.0
             continue
 
-        die_esd_yield = die_esd_yield_calculator(
+        active_pad_coords = pad_coords[active_mask]
+        active_esd_critical_mask = esd_critical_mask[active_mask]
+        pad_size_um = float(cfg.PAD_TOP_R_um) * 2.0
+        top_dish_mean_nm = _cfg_float(cfg, ["TOP_DISH_MEAN_nm"], 0.0)
+        top_dish_std_nm = _dish_std_nm_from_cfg(cfg, "TOP")
+        bot_dish_mean_nm = _cfg_float(cfg, ["BOT_DISH_MEAN_nm"], 0.0)
+        bot_dish_std_nm = _dish_std_nm_from_cfg(cfg, "BOT")
+        z_top_um = _cfg_float(cfg, ["ESD_Z_TOP_UM"], 0.1)
+
+        first_touch_key = _d2w_first_touch_cache_key(
             cfg=cfg,
-            pad_coords_um=pad_coords[active_mask],
-            esd_critical_pad_mask=esd_critical_mask[active_mask],
-            pad_size_um=float(cfg.PAD_TOP_R_um) * 2.0,
-            top_die_w_um=float(interface.DIE_W_um),
-            top_die_h_um=float(interface.DIE_L_um),
+            pad_coords_um=active_pad_coords,
+            esd_critical_pad_mask=active_esd_critical_mask,
+            pad_size_um=pad_size_um,
             tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
             tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
             tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
             tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
-            top_dish_mean_nm=_cfg_float(cfg, ["TOP_DISH_MEAN_nm"], 0.0),
-            top_dish_std_nm=_dish_std_nm_from_cfg(cfg, "TOP"),
-            bot_dish_mean_nm=_cfg_float(cfg, ["BOT_DISH_MEAN_nm"], 0.0),
-            bot_dish_std_nm=_dish_std_nm_from_cfg(cfg, "BOT"),
+            top_dish_mean_nm=top_dish_mean_nm,
+            top_dish_std_nm=top_dish_std_nm,
+            bot_dish_mean_nm=bot_dish_mean_nm,
+            bot_dish_std_nm=bot_dish_std_nm,
+            z_top_um=z_top_um,
         )
+        if first_touch_key not in first_touch_cache:
+            first_touch_cache[first_touch_key] = _d2w_critical_first_touch_probability(
+                cfg=cfg,
+                pad_coords_um=active_pad_coords,
+                esd_critical_pad_mask=active_esd_critical_mask,
+                pad_size_um=pad_size_um,
+                tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
+                tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
+                tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
+                tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
+                top_dish_mean_nm=top_dish_mean_nm,
+                top_dish_std_nm=top_dish_std_nm,
+                bot_dish_mean_nm=bot_dish_mean_nm,
+                bot_dish_std_nm=bot_dish_std_nm,
+                z_top_um=z_top_um,
+            )
+
+        p_fail_avg = _d2w_voltage_failure_average(
+            cfg=cfg,
+            top_die_w_um=float(interface.DIE_W_um),
+            top_die_h_um=float(interface.DIE_L_um),
+        )
+        die_failure_probability = float(p_fail_avg) * float(first_touch_cache[first_touch_key])
+        die_esd_yield = float(1.0 - np.clip(die_failure_probability, 0.0, 1.0))
         die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = die_esd_yield

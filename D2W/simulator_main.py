@@ -59,6 +59,15 @@ def parse_args():
     p.add_argument("--plot", "-plot", default=False, action="store_true", help="Enable optional debug plots")
     p.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output during simulation")
     p.add_argument(
+        "--mechanism-filter",
+        default="all",
+        help=(
+            "Comma-separated failure mechanisms to simulate. "
+            "Use all, overlay, particle, mechanical, ESD, or warpage. "
+            "Example: --mechanism-filter particle,mechanical"
+        ),
+    )
+    p.add_argument(
         "--save-failure-maps",
         action="store_true",
         help=(
@@ -128,6 +137,7 @@ def write_simulation_summary(
         f.write(f"criticality_profile: {input_args['criticality_profile']}\n")
         f.write(f"verbose: {input_args['verbose']}\n")
         f.write(f"plot: {input_args['plot']}\n")
+        f.write(f"mechanism_filter: {input_args['mechanism_filter']}\n")
         f.write(f"save_failure_maps: {input_args['save_failure_maps']}\n")
         f.write("random_source: system_entropy\n")
         f.write(f"NUM_DIE_STACKS: {cfg_skeleton.NUM_DIE_STACKS}\n")

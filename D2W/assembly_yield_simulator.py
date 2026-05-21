@@ -24,6 +24,34 @@ def _append_file_suffix(filename, file_suffix):
     return f"{stem}{file_suffix}{ext}"
 
 
+_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
+
+
+def _active_failure_mechanisms(input_args):
+    raw = input_args.get('mechanism_filter', 'all')
+    if raw is None:
+        return set(_FAILURE_MECHANISMS)
+    if isinstance(raw, (set, list, tuple)):
+        requested = [str(item).strip() for item in raw]
+    else:
+        requested = [item.strip() for item in str(raw).split(',')]
+    requested = [item for item in requested if item]
+    if not requested or any(item.lower() == 'all' for item in requested):
+        return set(_FAILURE_MECHANISMS)
+
+    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
+    active = set()
+    for item in requested:
+        key = item.lower()
+        if key not in canonical:
+            raise ValueError(
+                f"Unknown mechanism_filter '{item}'. "
+                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
+            )
+        active.add(canonical[key])
+    return active
+
+
 def Assembly_Yield_Simulator(
     input_args: dict,
     cfg_skeleton: object,
@@ -34,7 +62,8 @@ def Assembly_Yield_Simulator(
     NUM_DIE_STACKS = cfg_skeleton.NUM_DIE_STACKS
     SIM_BATCH_SIZE = cfg_skeleton.SIM_BATCH_SIZE
     num_sim_epoch = NUM_DIE_STACKS // SIM_BATCH_SIZE
-    failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
+    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
+    active_mechanisms = _active_failure_mechanisms(input_args)
     epoch_yield_list = []
     epoch_interface_yield_list_dict = {interface_name: [] for interface_name in cfg_dict}
     skip_verbose_root_artifacts = bool(input_args.get('skip_verbose_root_artifacts', False))
@@ -54,6 +83,7 @@ def Assembly_Yield_Simulator(
 
     if input_args['verbose']:
         print("Verbose mode enabled: Tracking failure reasons for each die interface.")
+        print("Active failure mechanisms: {}.".format(", ".join(sorted(active_mechanisms))))
         fail_map_per_interface_dict = {}
         fail_vec_per_interface_dict = {}
         for interface_name, cfg in cfg_dict.items():
@@ -74,19 +104,21 @@ def Assembly_Yield_Simulator(
         )
 
         # Generate overlay misalignment component samples for each bonding interface in each stack
-        overlay_term_simulator(
-            cfg_dict              =       cfg_dict,
-            die_stack_list        =       die_stack_list,
-            input_args            =       input_args,
-            stack_cfg_dict        =       stack_cfg_dict,
-            simulation_epoch      =       epoch,
-        )
+        if 'overlay' in active_mechanisms:
+            overlay_term_simulator(
+                cfg_dict              =       cfg_dict,
+                die_stack_list        =       die_stack_list,
+                input_args            =       input_args,
+                stack_cfg_dict        =       stack_cfg_dict,
+                simulation_epoch      =       epoch,
+            )
 
         # Generate void defects
-        defect_yield_simulator(
-            cfg_dict        =       cfg_dict,
-            die_stack_list  =       die_stack_list,
-        )
+        if 'particle' in active_mechanisms:
+            defect_yield_simulator(
+                cfg_dict        =       cfg_dict,
+                die_stack_list  =       die_stack_list,
+            )
 
 
 
@@ -156,6 +188,7 @@ def Assembly_Yield_Simulator(
             print("{} die stack failures due to particle defects.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['particle']))))
             print("{} die stack failures due to mechanical issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['mechanical']))))
             print("{} die stack failures due to ESD issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['ESD']))))
+            print("{} die stack failures due to warpage issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['warpage']))))
             print("{} die stack failures in total.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overall']))))
             output_dir = os.path.join(cfg.OUTPUT_DIR, input_args['ds_name'])
             if save_failure_maps and not skip_verbose_root_artifacts:

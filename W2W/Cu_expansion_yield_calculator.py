@@ -7,16 +7,56 @@
 
 import numpy as np
 import re
+import hashlib
 from scipy.special import ndtr
 from debond import debond_dishing_bounds_calculator, debond_dishing_intervals_from_coords
 
 
 _PG_NET_RE = re.compile(r"(^|_)(vdd|vss|vpp|vddq|vddql|gnd|vcc)($|_)", re.IGNORECASE)
+_MECHANICAL_MODEL_CACHE = {}
 
 
 def _is_non_signal_shared_net(net: str) -> bool:
     lowered = str(net).lower()
     return "dummy" in lowered or _PG_NET_RE.search(str(net)) is not None
+
+
+def _mechanical_model_cache_key(cfg, pad_bitmap_collection):
+    hasher = hashlib.sha1()
+    for key in (
+        "CRITICAL_PAD_BITMAP",
+        "REDUNDANT_PAD_BITMAP",
+        "redundant_group_id_per_pad",
+        "redundant_tolerated_mechanical_failures",
+        "redundant_tolerated_esd_failures",
+    ):
+        if key not in pad_bitmap_collection:
+            continue
+        arr = np.asarray(pad_bitmap_collection[key])
+        hasher.update(str(arr.shape).encode("utf-8"))
+        if arr.dtype == np.bool_:
+            hasher.update(np.packbits(arr.reshape(-1)).tobytes())
+        else:
+            hasher.update(np.ascontiguousarray(arr).tobytes())
+
+    for key in (
+        "TOP_DISH_MEAN_nm",
+        "TOP_DISH_STD_L_nm",
+        "TOP_DISH_STD_T_nm",
+        "TOP_DISH_STD_E_nm",
+        "BOT_DISH_MEAN_nm",
+        "BOT_DISH_STD_L_nm",
+        "BOT_DISH_STD_T_nm",
+        "BOT_DISH_STD_E_nm",
+        "TL_um",
+        "PITCH_r_um",
+        "PITCH_c_um",
+        "PAD_ARR_ROW",
+        "PAD_ARR_COL",
+    ):
+        hasher.update(f"{key}={getattr(cfg, key, None)};".encode("utf-8"))
+
+    return hasher.hexdigest()
 
 
 # =====================================================================
@@ -300,6 +340,44 @@ def cu_recess_redundant_group_yield_spatial(
 
     zG, wG = _gh_nodes_weights(n_gh_outer)
     zT, wT = _gh_nodes_weights(n_gh_inner)
+
+    if tolerated_failures == 1:
+        outer_vals = np.zeros(n_gh_outer, dtype=np.float64)
+        for g_idx, g_val in enumerate(zG):
+            mu_g = mu + sigma_L * g_val
+            block_p0 = []
+            block_p1 = []
+
+            for start, stop in zip(block_starts, block_stops):
+                a_block = a_s[start:stop]
+                b_block = b_s[start:stop]
+                mean_t = mu_g + sigma_T * zT[:, None]
+
+                if sigma_eps > 0:
+                    pass_probs = ndtr((b_block[None, :] - mean_t) / sigma_eps) - ndtr(
+                        (a_block[None, :] - mean_t) / sigma_eps
+                    )
+                else:
+                    pass_probs = (
+                        (mean_t >= a_block[None, :])
+                        & (mean_t <= b_block[None, :])
+                    ).astype(np.float64)
+                pass_probs = np.clip(pass_probs, 1e-300, 1.0)
+                fail_probs = 1.0 - pass_probs
+                p0_t = np.prod(pass_probs, axis=1)
+                p1_t = p0_t * np.sum(fail_probs / pass_probs, axis=1)
+                block_p0.append(float(np.sum(wT * p0_t)))
+                block_p1.append(float(np.sum(wT * p1_t)))
+
+            block_p0 = np.clip(np.asarray(block_p0, dtype=np.float64), 1e-300, 1.0)
+            block_p1 = np.clip(np.asarray(block_p1, dtype=np.float64), 0.0, 1.0)
+            total_p0 = float(np.prod(block_p0))
+            outer_vals[g_idx] = total_p0 * (
+                1.0 + float(np.sum(block_p1 / block_p0))
+            )
+
+        return float(np.clip(np.sum(wG * outer_vals), 0.0, 1.0))
+
     outer_vals = np.zeros(n_gh_outer, dtype=np.float64)
 
     for g_idx, g_val in enumerate(zG):
@@ -356,7 +434,7 @@ def _redundant_group_yield_spatial(
     if not redundant_net_to_1d_physical_mask:
         return 1.0
 
-    redundant_yield = 1.0
+    representative_groups = {}
     for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
         if _is_non_signal_shared_net(redundant_net):
             continue
@@ -384,22 +462,47 @@ def _redundant_group_yield_spatial(
         tolerated_failures = int(
             criticality_info[redundant_net]["tolerated_mechanical_failures"]
         )
+
+        lower = lower_limits_by_selected_idx[selected_pos]
+        upper = upper_limits_by_selected_idx[selected_pos]
+        block_indices = block_indices_from_flat_indices(
+            physical_mask,
+            cfg.PAD_ARR_COL,
+            block_size_r,
+            block_size_c,
+        )
+        _, compact_blocks = np.unique(block_indices, return_inverse=True)
+        order = np.lexsort((upper, lower, compact_blocks))
+        key = (
+            tolerated_failures,
+            tuple(np.round(lower[order], 9)),
+            tuple(np.round(upper[order], 9)),
+            tuple(compact_blocks[order].astype(np.int16, copy=False)),
+        )
+        if key in representative_groups:
+            representative_groups[key]["count"] += 1
+        else:
+            representative_groups[key] = {
+                "count": 1,
+                "lower": lower[order],
+                "upper": upper[order],
+                "blocks": compact_blocks[order],
+                "tolerated_failures": tolerated_failures,
+            }
+
+    redundant_yield = 1.0
+    for group in representative_groups.values():
         group_yield = cu_recess_redundant_group_yield_spatial(
             mu=mu,
-            a=lower_limits_by_selected_idx[selected_pos],
-            b=upper_limits_by_selected_idx[selected_pos],
+            a=group["lower"],
+            b=group["upper"],
             sigma_L=sigma_L,
             sigma_T=sigma_T,
             sigma_eps=sigma_eps,
-            block_indices=block_indices_from_flat_indices(
-                physical_mask,
-                cfg.PAD_ARR_COL,
-                block_size_r,
-                block_size_c,
-            ),
-            tolerated_failures=tolerated_failures,
+            block_indices=group["blocks"],
+            tolerated_failures=group["tolerated_failures"],
         )
-        redundant_yield *= group_yield
+        redundant_yield *= group_yield ** group["count"]
         if redundant_yield <= 0.0:
             return 0.0
 
@@ -491,16 +594,19 @@ def stack_stress_yield_calculator(
         waf_stack,
 ):
     """
-    Cu-expansion (mechanical) yield per die, using:
-      1) Radial-layer grouping  — ~1200 dies  →  ~20 representative groups
-      2) Vertex-distance cache  — skip GH when dishing bounds are identical
-      3) debond_dishing_bounds_calculator()        — one-shot radial LUT
-         debond_dishing_intervals_from_coords()    — per-pad lookup on cache miss
+    Cu-expansion (mechanical) yield per die.
+
+    W2W now uses the same die-level Cu-recess model as D2W for this term:
+    the dishing survival interval is a function of the local interface/pad
+    geometry only, not the die's wafer-center position. Therefore each
+    interface has one representative die-level mechanical yield, broadcast
+    to every die on the wafer.
     """
     for interface_name, cfg in cfg_dict.items():
         cfg.num_dies_per_wafer = waf_stack.num_dies_per_wafer
         interface = waf_stack.interfaces.interface_dict[interface_name]
         pad_bitmap_collection = waf_stack.interfaces.pad_bitmap_collection_dict[interface_name]
+        cache_key = _mechanical_model_cache_key(cfg, pad_bitmap_collection)
 
         # --- Config ---
         PAD_ARR_ROW, PAD_ARR_COL = cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL
@@ -522,6 +628,11 @@ def stack_stress_yield_calculator(
         sigma_eps = np.sqrt(TOP_DISH_STD_E_nm**2 + BOT_DISH_STD_E_nm**2)
 
         stress_yield_array = np.full(interface.num_dies, np.nan, dtype=np.float64)
+        if cache_key in _MECHANICAL_MODEL_CACHE:
+            stress_yield_array[:] = _MECHANICAL_MODEL_CACHE[cache_key]
+            waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array
+            continue
+
         critical_pad_mask_flat = (
             pad_bitmap_collection["CRITICAL_PAD_BITMAP"].reshape(-1).astype(bool)
         )
@@ -570,105 +681,48 @@ def stack_stress_yield_calculator(
             block_size_c,
         )
 
-        # ---- 1) Build radial dishing LUT once (no pad coords needed) ----
-        radial_lut_array = debond_dishing_bounds_calculator(
-            cfg, print_radial_lut=False, plot_radial_lut_flag=False,
-        )  # columns: [r_um, D_upper_bound_nm, D_lower_bound_nm]
+        pad_dishing_bound_array = debond_dishing_intervals_from_coords(
+            cfg,
+            selected_base_pad_xy,
+        )
+        upper_limits = np.clip(
+            -pad_dishing_bound_array[:, 0] * 2,
+            a_min=None,
+            a_max=0,
+        )
+        lower_limits = np.clip(
+            -pad_dishing_bound_array[:, 1] * 2,
+            a_min=None,
+            a_max=0,
+        )
 
-        # ---- 2) Group dies by radial layer ----
-        radial_bin_um = max(cfg.DIE_W_um, cfg.DIE_L_um)
-        radial_info = interface.get_die_radial_layers(radius_bin_um=radial_bin_um)
-        die_groups = radial_info['layers']
-        # print(
-        #     "[{}] Radial-layer acceleration: {} dies -> {} representative groups".format(
-        #         interface_name, interface.num_dies, len(die_groups),
-        #     )
-        # )
+        if critical_flat_idx.size > 0:
+            critical_yield = cu_recess_die_yield_spatial(
+                mu=mu,
+                a=lower_limits[critical_pos],
+                b=upper_limits[critical_pos],
+                sigma_L=sigma_L,
+                sigma_T=sigma_T,
+                sigma_eps=sigma_eps,
+                block_indices=critical_block_idx,
+            )
+        else:
+            critical_yield = 1.0
 
-        # ---- 3) Vertex-distance yield cache ----
-        #   key  = (D_upper_bound_min, D_upper_bound_max, D_lower_bound_min, D_lower_bound_max) rounded to 0.1 nm
-        #   value = computed die yield
-        yield_cache = {}    # type: dict[tuple, float]
-        cache_hits  = 0
-
-        for grp in die_groups:
-            die_ind = int(grp['representative_index'])
-            die = interface.die_list[die_ind]
-
-            # Build cache key from die vertex distances → LUT dishing values
-            vkey = _vertex_distance_key(die, radial_lut_array, decimals=1)
-
-            if vkey in yield_cache:
-                stress_die_yield = yield_cache[vkey]
-                cache_hits += 1
-            else:
-                # Cache miss: query per-pad dishing bounds via coords API
-                die_pad_coords = selected_base_pad_xy + die.die_center   # (N_selected, 2) um
-                pad_dishing_bound_array = debond_dishing_intervals_from_coords(
-                    cfg, die_pad_coords,
-                )  # (N_pads, 2): each row sorted (D_low_nm, D_high_nm)
-                # print(
-                #     "Pad dishing lookup for die {} (layer {}, count {}): {:.2f}s".format(
-                #         die_ind, grp['layer_id'], grp['count'],
-                #         time.time() - start_time,
-                #     )
-                # )
-
-                # Match simulator convention: lower/upper Cu-height bounds
-                # are clipped to <= 0 after converting from dishing intervals.
-                upper_limits = np.clip(
-                    -pad_dishing_bound_array[:, 0] * 2,
-                    a_min=None,
-                    a_max=0,
-                )
-                lower_limits = np.clip(
-                    -pad_dishing_bound_array[:, 1] * 2,
-                    a_min=None,
-                    a_max=0,
-                )
-
-                if critical_flat_idx.size > 0:
-                    critical_yield = cu_recess_die_yield_spatial(
-                        mu=mu,
-                        a=lower_limits[critical_pos],
-                        b=upper_limits[critical_pos],
-                        sigma_L=sigma_L,
-                        sigma_T=sigma_T,
-                        sigma_eps=sigma_eps,
-                        block_indices=critical_block_idx,
-                        # g=0.0,
-                    )
-                else:
-                    critical_yield = 1.0
-
-                redundant_yield = _redundant_group_yield_spatial(
-                    mu=mu,
-                    lower_limits_by_selected_idx=lower_limits,
-                    upper_limits_by_selected_idx=upper_limits,
-                    selected_flat_idx=selected_flat_idx,
-                    cfg=cfg,
-                    sigma_L=sigma_L,
-                    sigma_T=sigma_T,
-                    sigma_eps=sigma_eps,
-                    pad_bitmap_collection=pad_bitmap_collection,
-                    block_size_r=block_size_r,
-                    block_size_c=block_size_c,
-                )
-                stress_die_yield = float(critical_yield * redundant_yield)
-                # print(
-                #     "GH yield for die {} (layer {}, count {}): {:.6f}  [{:.2f}s]".format(
-                #         die_ind, grp['layer_id'], grp['count'],
-                #         stress_die_yield, time.time() - time_before,
-                #     )
-                # )
-                yield_cache[vkey] = stress_die_yield
-
-            # Broadcast to all dies in this radial group
-            stress_yield_array[grp['indices']] = stress_die_yield
-
-        # print(
-        #     "[{}] Vertex-distance cache: {} groups, {} hits, {} unique GH evaluations".format(
-        #         interface_name, len(die_groups), cache_hits, len(yield_cache),
-        #     )
-        # )
+        redundant_yield = _redundant_group_yield_spatial(
+            mu=mu,
+            lower_limits_by_selected_idx=lower_limits,
+            upper_limits_by_selected_idx=upper_limits,
+            selected_flat_idx=selected_flat_idx,
+            cfg=cfg,
+            sigma_L=sigma_L,
+            sigma_T=sigma_T,
+            sigma_eps=sigma_eps,
+            pad_bitmap_collection=pad_bitmap_collection,
+            block_size_r=block_size_r,
+            block_size_c=block_size_c,
+        )
+        stress_die_yield = float(critical_yield * redundant_yield)
+        _MECHANICAL_MODEL_CACHE[cache_key] = stress_die_yield
+        stress_yield_array[:] = stress_die_yield
         waf_stack.die_yield_list_per_interface_dict[interface_name]['mechanical'] = stress_yield_array

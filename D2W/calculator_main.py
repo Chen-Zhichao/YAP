@@ -33,6 +33,15 @@ def parse_args():
     p.add_argument("--ds_dir", required=True, help="Path to design directory")
     p.add_argument("--plot", "-plot", default=False, action="store_true", help="Enable plotting of the pad risk map")
     p.add_argument("--verbose", "-v", action="store_true", help="Enable verbose output during simulation")
+    p.add_argument(
+        "--mechanism-filter",
+        default="all",
+        help=(
+            "Comma-separated failure mechanisms to model. "
+            "Use all, overlay, particle, mechanical, ESD, or warpage. "
+            "Example: --mechanism-filter particle,mechanical"
+        ),
+    )
     p.add_argument("--debug", action="store_true", help="Enable debug output when loading config")
     return p.parse_args()
 

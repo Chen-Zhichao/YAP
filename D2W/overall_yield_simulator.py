@@ -55,6 +55,94 @@ def _group_limit_exceeded(
     return bool(np.any(redundant_failed_counts > tolerated_failures))
 
 
+def _pad_misalignment_for_coords(
+    *,
+    pad_coords_um: np.ndarray | None,
+    die_center_um: np.ndarray,
+    system_translation_x_um: float,
+    system_translation_y_um: float,
+    system_rotation_rad: float,
+    system_magnification_ppm: float,
+    random_misalignment_mean_um: float,
+    random_misalignment_std_um: float,
+) -> np.ndarray:
+    if pad_coords_um is None or len(pad_coords_um) == 0:
+        return np.empty((0,), dtype=np.float64)
+
+    coords = np.asarray(pad_coords_um, dtype=np.float64)
+    x = coords[:, 0] + die_center_um[0]
+    y = coords[:, 1] + die_center_um[1]
+    dx = system_translation_x_um - system_rotation_rad * y + system_magnification_ppm * x
+    dy = system_translation_y_um + system_rotation_rad * x + system_magnification_ppm * y
+    misalignment = np.sqrt(dx * dx + dy * dy)
+    if random_misalignment_std_um > 0.0 or random_misalignment_mean_um != 0.0:
+        misalignment += np.random.normal(
+            random_misalignment_mean_um,
+            random_misalignment_std_um,
+            len(coords),
+        )
+    return misalignment
+
+
+def _overlay_corner_only_enabled(cfg) -> bool:
+    return True
+
+
+_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
+
+
+def _active_failure_mechanisms(input_args):
+    raw = input_args.get('mechanism_filter', 'all')
+    if raw is None:
+        return set(_FAILURE_MECHANISMS)
+    if isinstance(raw, (set, list, tuple)):
+        requested = [str(item).strip() for item in raw]
+    else:
+        requested = [item.strip() for item in str(raw).split(',')]
+    requested = [item for item in requested if item]
+    if not requested or any(item.lower() == 'all' for item in requested):
+        return set(_FAILURE_MECHANISMS)
+
+    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
+    active = set()
+    for item in requested:
+        key = item.lower()
+        if key not in canonical:
+            raise ValueError(
+                f"Unknown mechanism_filter '{item}'. "
+                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
+            )
+        active.add(canonical[key])
+    return active
+
+
+def _dishing_bound_cache_path_for_mask(cfg, input_args: dict, mask_name: str) -> str:
+    base_path = get_dishing_bound_cache_path(cfg, input_args)
+    stem, ext = os.path.splitext(base_path)
+    return f"{stem}__{mask_name}{ext}"
+
+
+def _load_or_compute_dishing_bounds(
+    *,
+    cfg,
+    input_args: dict,
+    coords_um: np.ndarray,
+    mask_name: str,
+) -> np.ndarray:
+    dishing_cache_path = _dishing_bound_cache_path_for_mask(cfg, input_args, mask_name)
+    recompute_dishing_bounds = bool(cfg.DEBUG) or not os.path.exists(dishing_cache_path)
+    if not recompute_dishing_bounds:
+        dishing_bound_array = np.load(dishing_cache_path)
+        if dishing_bound_array.shape[0] != coords_um.shape[0]:
+            recompute_dishing_bounds = True
+
+    if recompute_dishing_bounds:
+        dishing_bound_array = debond_dishing_intervals_from_coords(cfg, coords_um)
+        atomic_save_npy(dishing_cache_path, dishing_bound_array)
+
+    return dishing_bound_array
+
+
 def _build_interface_static_cache(
     *,
     cfg_dict: dict,
@@ -62,6 +150,10 @@ def _build_interface_static_cache(
     base_pad_coords_dict: dict,
     input_args: dict,
 ) -> dict:
+    active_mechanisms = _active_failure_mechanisms(input_args)
+    run_overlay = 'overlay' in active_mechanisms
+    run_mechanical = 'mechanical' in active_mechanisms
+    run_esd = 'ESD' in active_mechanisms
     interface_static_cache = {}
     for interface_name, cfg in cfg_dict.items():
         pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
@@ -78,30 +170,87 @@ def _build_interface_static_cache(
             | dummy_pad_bitmap
             | power_ground_pad_bitmap
         )
-        valid_pad_mask_flat = valid_pad_mask.reshape(-1)
-        valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
-        valid_die_pad_coords = np.asarray(
-            base_pad_coords_dict[interface_name][valid_pad_mask_flat],
-            dtype=np.float32,
-        )
-
-        dishing_cache_path = get_dishing_bound_cache_path(cfg, input_args)
-        recompute_dishing_bounds = bool(cfg.DEBUG) or not os.path.exists(dishing_cache_path)
-        if not recompute_dishing_bounds:
-            valid_pad_dishing_bound_array = np.load(dishing_cache_path)
-            if valid_pad_dishing_bound_array.shape[0] != valid_die_pad_coords.shape[0]:
-                recompute_dishing_bounds = True
-
-        if recompute_dishing_bounds:
-            valid_pad_dishing_bound_array = debond_dishing_intervals_from_coords(
-                cfg,
-                valid_die_pad_coords,
+        flat_critical = critical_pad_bitmap.reshape(-1)
+        flat_redundant = redundant_pad_bitmap.reshape(-1)
+        flat_power_ground = power_ground_pad_bitmap.reshape(-1)
+        overlay_critical_linear_idx = None
+        overlay_redundant_linear_idx = None
+        overlay_power_ground_linear_idx = None
+        overlay_critical_coords = None
+        overlay_redundant_coords = None
+        overlay_power_ground_coords = None
+        overlay_redundant_group_ids = None
+        overlay_corner_only = _overlay_corner_only_enabled(cfg)
+        if run_overlay and not overlay_corner_only:
+            base_pad_coords = base_pad_coords_dict[interface_name]
+            overlay_critical_linear_idx = np.flatnonzero(flat_critical)
+            overlay_redundant_linear_idx = np.flatnonzero(flat_redundant)
+            overlay_power_ground_linear_idx = np.flatnonzero(flat_power_ground)
+            overlay_critical_coords = np.asarray(
+                base_pad_coords[overlay_critical_linear_idx],
+                dtype=np.float32,
             )
-            atomic_save_npy(dishing_cache_path, valid_pad_dishing_bound_array)
+            overlay_redundant_coords = np.asarray(
+                base_pad_coords[overlay_redundant_linear_idx],
+                dtype=np.float32,
+            )
+            overlay_power_ground_coords = np.asarray(
+                base_pad_coords[overlay_power_ground_linear_idx],
+                dtype=np.float32,
+            )
+            group_id_per_pad = pad_bitmap_collection.get("redundant_group_id_per_pad")
+            if group_id_per_pad is not None:
+                overlay_redundant_group_ids = np.asarray(
+                    group_id_per_pad,
+                    dtype=np.int32,
+                ).reshape(-1)[overlay_redundant_linear_idx]
+
+        valid_pad_mask_flat = None
+        valid_linear_idx = None
+        valid_die_pad_coords = None
+        valid_pad_dishing_bound_array = None
+        if run_esd:
+            valid_pad_mask_flat = valid_pad_mask.reshape(-1)
+            valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
+            valid_die_pad_coords = np.asarray(
+                base_pad_coords_dict[interface_name][valid_pad_mask_flat],
+                dtype=np.float32,
+            )
+            valid_pad_dishing_bound_array = _load_or_compute_dishing_bounds(
+                cfg=cfg,
+                input_args=input_args,
+                coords_um=valid_die_pad_coords,
+                mask_name="valid",
+            )
 
         mechanical_active_pad_mask = critical_pad_bitmap | redundant_pad_bitmap
         mechanical_active_pad_mask_flat = mechanical_active_pad_mask.reshape(-1)
+        mechanical_active_linear_idx = np.flatnonzero(mechanical_active_pad_mask_flat)
         num_mechanical_active_pads = int(np.count_nonzero(mechanical_active_pad_mask_flat))
+        mechanical_active_die_pad_coords = None
+        mechanical_active_dishing_bound_array = None
+        mechanical_active_critical_mask = None
+        mechanical_active_redundant_mask = None
+        mechanical_active_group_ids = None
+        if run_mechanical:
+            mechanical_active_die_pad_coords = np.asarray(
+                base_pad_coords_dict[interface_name][mechanical_active_pad_mask_flat],
+                dtype=np.float32,
+            )
+            mechanical_active_dishing_bound_array = _load_or_compute_dishing_bounds(
+                cfg=cfg,
+                input_args=input_args,
+                coords_um=mechanical_active_die_pad_coords,
+                mask_name="mechanical_active",
+            )
+            mechanical_active_critical_mask = flat_critical[mechanical_active_pad_mask_flat]
+            mechanical_active_redundant_mask = flat_redundant[mechanical_active_pad_mask_flat]
+            group_id_per_pad = pad_bitmap_collection.get("redundant_group_id_per_pad")
+            if group_id_per_pad is not None:
+                mechanical_active_group_ids = np.asarray(
+                    group_id_per_pad,
+                    dtype=np.int32,
+                ).reshape(-1)[mechanical_active_pad_mask_flat]
 
         use_mechanical_die_level_sampling = False
 
@@ -115,6 +264,21 @@ def _build_interface_static_cache(
             "valid_pad_dishing_bound_array": valid_pad_dishing_bound_array,
             "use_mechanical_die_level_sampling": use_mechanical_die_level_sampling,
             "die_level_mechanical_yield": die_level_mechanical_yield,
+            "overlay_critical_linear_idx": overlay_critical_linear_idx,
+            "overlay_redundant_linear_idx": overlay_redundant_linear_idx,
+            "overlay_power_ground_linear_idx": overlay_power_ground_linear_idx,
+            "overlay_critical_coords": overlay_critical_coords,
+            "overlay_redundant_coords": overlay_redundant_coords,
+            "overlay_power_ground_coords": overlay_power_ground_coords,
+            "overlay_redundant_group_ids": overlay_redundant_group_ids,
+            "overlay_corner_only": overlay_corner_only,
+            "mechanical_active_pad_mask": mechanical_active_pad_mask,
+            "mechanical_active_pad_mask_flat": mechanical_active_pad_mask_flat,
+            "mechanical_active_linear_idx": mechanical_active_linear_idx,
+            "mechanical_active_dishing_bound_array": mechanical_active_dishing_bound_array,
+            "mechanical_active_critical_mask": mechanical_active_critical_mask,
+            "mechanical_active_redundant_mask": mechanical_active_redundant_mask,
+            "mechanical_active_group_ids": mechanical_active_group_ids,
             "num_mechanical_active_pads": num_mechanical_active_pads,
         }
     return interface_static_cache
@@ -136,10 +300,16 @@ def overall_yield_simulator(
     }
     global_stack_offset = int(input_args.get('global_stack_offset', 0))
     save_failure_maps = bool(input_args.get('save_failure_maps', False))
+    active_mechanisms = _active_failure_mechanisms(input_args)
+    run_overlay = 'overlay' in active_mechanisms
+    run_particle = 'particle' in active_mechanisms
+    run_mechanical = 'mechanical' in active_mechanisms
+    run_esd = 'ESD' in active_mechanisms
+    run_warpage = 'warpage' in active_mechanisms
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
     epoch_fail_vec_per_interface_dict = {}    # This dict stores failure reason (each mechanism) for all die samples in this epoch
-    failure_mechanism_list = ['overlay', 'particle', 'mechanical', 'ESD', 'overall']
+    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
     if input_args['verbose']:
         for interface_name, cfg in cfg_dict.items():
             epoch_fail_map_per_interface_dict[interface_name], epoch_fail_vec_per_interface_dict[interface_name] = {}, {}
@@ -148,18 +318,24 @@ def overall_yield_simulator(
                     epoch_fail_map_per_interface_dict[interface_name][failure_mechanism] = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))
                 epoch_fail_vec_per_interface_dict[interface_name][failure_mechanism] = np.zeros((NUM_STACKS))
 
-    interface_static_cache = _build_interface_static_cache(
-        cfg_dict=cfg_dict,
-        pad_bitmap_collection_dict=pad_bitmap_collection_dict,
-        base_pad_coords_dict=base_pad_coords_dict,
-        input_args=input_args,
-    )
-    stack_warpage_fail_vector = stack_warpage_fail_vector_for_epoch(
-        input_args=input_args,
-        cfg_dict=cfg_dict,
-        stack_cfg_dict=stack_cfg_dict,
-        num_samples=NUM_STACKS,
-    )
+    if run_overlay or run_mechanical or run_esd:
+        interface_static_cache = _build_interface_static_cache(
+            cfg_dict=cfg_dict,
+            pad_bitmap_collection_dict=pad_bitmap_collection_dict,
+            base_pad_coords_dict=base_pad_coords_dict,
+            input_args=input_args,
+        )
+    else:
+        interface_static_cache = {interface_name: {} for interface_name in cfg_dict}
+    if run_warpage:
+        stack_warpage_fail_vector = stack_warpage_fail_vector_for_epoch(
+            input_args=input_args,
+            cfg_dict=cfg_dict,
+            stack_cfg_dict=stack_cfg_dict,
+            num_samples=NUM_STACKS,
+        )
+    else:
+        stack_warpage_fail_vector = np.zeros((NUM_STACKS,), dtype=bool)
 
 
     for stack_ind, die_stack in enumerate(die_stack_list):
@@ -167,7 +343,7 @@ def overall_yield_simulator(
             # if stack_ind % 1 == 0:
             #     print("Simulating die stack {}/{} ".format(stack_ind+1, NUM_STACKS), end='\r')
             pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
-            static_cache = interface_static_cache[interface_name]
+            static_cache = interface_static_cache.get(interface_name, {})
             cfg = cfg_dict[interface_name]
             temp_overall_fail_map = (
                 np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL), dtype=bool)
@@ -181,11 +357,12 @@ def overall_yield_simulator(
             PITCH_c_um, PITCH_r_um              = cfg.PITCH_c_um, cfg.PITCH_r_um
             PAD_TOP_R_um                        = cfg.PAD_TOP_R_um
             base_pad_coords                     = base_pad_coords_dict[interface_name]
-            system_translation_x_um             = die_stack.interfaces.failure_params_dict[interface_name]['system_translation_x_um']
-            system_translation_y_um             = die_stack.interfaces.failure_params_dict[interface_name]['system_translation_y_um']
-            system_rotation_rad                 = die_stack.interfaces.failure_params_dict[interface_name]['system_rotation_rad']
-            system_magnification_ppm            = die_stack.interfaces.failure_params_dict[interface_name]['system_magnification_ppm']
-            MAX_ALLOWED_MISALIGNMENT_um         = die_stack.interfaces.failure_params_dict[interface_name]['MAX_ALLOWED_MISALIGNMENT_um']
+            failure_params                      = die_stack.interfaces.failure_params_dict[interface_name]
+            system_translation_x_um             = failure_params.get('system_translation_x_um', 0.0)
+            system_translation_y_um             = failure_params.get('system_translation_y_um', 0.0)
+            system_rotation_rad                 = failure_params.get('system_rotation_rad', 0.0)
+            system_magnification_ppm            = failure_params.get('system_magnification_ppm', 0.0)
+            MAX_ALLOWED_MISALIGNMENT_um         = failure_params.get('MAX_ALLOWED_MISALIGNMENT_um', np.inf)
             RANDOM_MISALIGNMENT_MEAN_um         = cfg.RANDOM_MISALIGNMENT_MEAN_um
             RANDOM_MISALIGNMENT_STD_um          = cfg.RANDOM_MISALIGNMENT_STD_um
             TILT_X_MEAN_DEG, TILT_X_STD_DEG     = cfg.TILT_X_MEAN_DEG, cfg.TILT_X_STD_DEG
@@ -193,31 +370,98 @@ def overall_yield_simulator(
             approximate_set                     = cfg.approximate_set
 
 
-            # Get the valid pad mask
-            valid_pad_mask = static_cache["valid_pad_mask"]
-            valid_pad_mask_flat = static_cache["valid_pad_mask_flat"]
-            valid_linear_idx = static_cache["valid_linear_idx"]
-            valid_die_pad_coords = static_cache["valid_die_pad_coords"]
-            valid_pad_dishing_bound_array = static_cache["valid_pad_dishing_bound_array"]
+            # Get pad subsets used by Cu mechanical and ESD models.
+            if run_esd:
+                valid_pad_mask = static_cache["valid_pad_mask"]
+                valid_pad_mask_flat = static_cache["valid_pad_mask_flat"]
+                valid_linear_idx = static_cache["valid_linear_idx"]
+                valid_die_pad_coords = static_cache["valid_die_pad_coords"]
+                valid_pad_dishing_bound_array = static_cache["valid_pad_dishing_bound_array"]
+            else:
+                valid_pad_mask = None
+                valid_pad_mask_flat = None
+                valid_linear_idx = None
+                valid_die_pad_coords = None
+                valid_pad_dishing_bound_array = None
+            if run_mechanical:
+                mechanical_active_pad_mask = static_cache["mechanical_active_pad_mask"]
+                mechanical_active_pad_mask_flat = static_cache["mechanical_active_pad_mask_flat"]
+                mechanical_active_linear_idx = static_cache["mechanical_active_linear_idx"]
+                mechanical_active_dishing_bound_array = static_cache["mechanical_active_dishing_bound_array"]
+                mechanical_active_critical_mask = static_cache["mechanical_active_critical_mask"]
+                mechanical_active_redundant_mask = static_cache["mechanical_active_redundant_mask"]
+                mechanical_active_group_ids = static_cache["mechanical_active_group_ids"]
+            else:
+                mechanical_active_pad_mask = None
+                mechanical_active_pad_mask_flat = None
+                mechanical_active_linear_idx = None
+                mechanical_active_dishing_bound_array = None
+                mechanical_active_critical_mask = None
+                mechanical_active_redundant_mask = None
+                mechanical_active_group_ids = None
 
             # Read the critical pad bitmap
             die_critical_pad_bitmap = pad_bitmap_collection["CRITICAL_PAD_BITMAP"]
             # Read the redundant critical pad bitmap
             die_redundant_pad_bitmap = pad_bitmap_collection["REDUNDANT_PAD_BITMAP"]
+            # Read the power/ground pad bitmap. PG pads are required overlay pads,
+            # but they do not use redundant-group tolerance.
+            die_power_ground_pad_bitmap = pad_bitmap_collection.get(
+                "POWER_GROUND_PAD_BITMAP",
+                np.zeros_like(die_critical_pad_bitmap, dtype=bool),
+            ).astype(bool)
+            if run_overlay:
+                overlay_corner_only = static_cache.get("overlay_corner_only", True)
+                if overlay_corner_only:
+                    overlay_boundary_coords = getattr(
+                        die_interface,
+                        "ovl_active_pad_boundary_coords",
+                        None,
+                    )
+                    if overlay_boundary_coords is None:
+                        overlay_boundary_coords = die_interface.pad_array_box
+                    overlay_critical_coords = None
+                    overlay_redundant_coords = None
+                    overlay_power_ground_coords = None
+                    overlay_redundant_linear_idx = None
+                    overlay_redundant_group_ids = None
+                    overlay_power_ground_linear_idx = None
+                else:
+                    overlay_boundary_coords = None
+                    overlay_critical_coords = static_cache["overlay_critical_coords"]
+                    overlay_redundant_coords = static_cache["overlay_redundant_coords"]
+                    overlay_power_ground_coords = static_cache["overlay_power_ground_coords"]
+                    overlay_redundant_linear_idx = static_cache["overlay_redundant_linear_idx"]
+                    overlay_redundant_group_ids = static_cache["overlay_redundant_group_ids"]
+                    overlay_power_ground_linear_idx = static_cache["overlay_power_ground_linear_idx"]
+                overlay_fail_map_flat = (
+                    np.zeros(PAD_ARR_ROW * PAD_ARR_COL, dtype=bool)
+                    if cfg.verbose and save_failure_maps and not overlay_corner_only
+                    else None
+                )
+            else:
+                overlay_corner_only = True
+                overlay_boundary_coords = None
+                overlay_critical_coords = None
+                overlay_redundant_coords = None
+                overlay_power_ground_coords = None
+                overlay_redundant_linear_idx = None
+                overlay_redundant_group_ids = None
+                overlay_power_ground_linear_idx = None
+                overlay_fail_map_flat = None
+            power_ground_overlay_fail_ratio = float(
+                getattr(cfg, "POWER_GROUND_OVERLAY_FAIL_RATIO", 0.10)
+            )
+            power_ground_overlay_fail_count_th = int(
+                np.ceil(
+                    power_ground_overlay_fail_ratio
+                    * np.count_nonzero(die_power_ground_pad_bitmap)
+                )
+            )
             # Read the ESD critical pad bitmap
             die_esd_critical_pad_bitmap = pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"]
             # Read the redundant net to bump ids mapping
             redundant_net_to_bumpids = pad_bitmap_collection["redundant_net_to_bumpids"]
-            # Get the valid pad mask
-            valid_pad_mask = (
-                (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1)
-                | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1)
-                | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
-                | (pad_bitmap_collection.get(
-                    'POWER_GROUND_PAD_BITMAP',
-                    np.zeros_like(pad_bitmap_collection['CRITICAL_PAD_BITMAP'], dtype=bool),
-                ) == 1)
-            )
             # Read the mapping from physical to bump id
             mapping_physical_to_bumpid = pad_bitmap_collection["mapping_physical_to_bumpid"]
             # Read the criticality info
@@ -250,27 +494,63 @@ def overall_yield_simulator(
             """
             # Check the pad misalignment
             # pad_misalignment_time_start = time.perf_counter()
-            die_interface.pad_misalignment = die_pad_misalignment(die_interface=die_interface,
-                                                        base_pad_coords=base_pad_coords,
-                                                        system_translation_x_um=system_translation_x_um,
-                                                        system_translation_y_um=system_translation_y_um,
-                                                        system_rotation_rad=system_rotation_rad,
-                                                        system_magnification_ppm=system_magnification_ppm,
-                                                        RANDOM_MISALIGNMENT_MEAN_um=RANDOM_MISALIGNMENT_MEAN_um,
-                                                        RANDOM_MISALIGNMENT_STD_um=RANDOM_MISALIGNMENT_STD_um,
-                                                        approximate_set=approximate_set,
-                                                        )
+            if run_overlay:
+                if overlay_corner_only:
+                    overlay_boundary_misalignment = _pad_misalignment_for_coords(
+                        pad_coords_um=overlay_boundary_coords,
+                        die_center_um=np.zeros(2, dtype=np.float64),
+                        system_translation_x_um=system_translation_x_um,
+                        system_translation_y_um=system_translation_y_um,
+                        system_rotation_rad=system_rotation_rad,
+                        system_magnification_ppm=system_magnification_ppm,
+                        random_misalignment_mean_um=0.0,
+                        random_misalignment_std_um=0.0,
+                    )
+                    worst_boundary_misalignment = (
+                        float(np.max(overlay_boundary_misalignment))
+                        if overlay_boundary_misalignment.size > 0
+                        else 0.0
+                    )
+                    if (
+                        RANDOM_MISALIGNMENT_STD_um > 0.0
+                        or RANDOM_MISALIGNMENT_MEAN_um != 0.0
+                    ):
+                        worst_boundary_misalignment += float(
+                            np.random.normal(
+                                RANDOM_MISALIGNMENT_MEAN_um,
+                                RANDOM_MISALIGNMENT_STD_um,
+                            )
+                        )
+                    critical_overlay_fail_mask = (
+                        np.array(
+                            [worst_boundary_misalignment >= MAX_ALLOWED_MISALIGNMENT_um],
+                            dtype=bool,
+                        )
+                    )
+                    critical_pad_misalignment = np.array(
+                        [worst_boundary_misalignment],
+                        dtype=np.float64,
+                    )
+                else:
+                    critical_pad_misalignment = _pad_misalignment_for_coords(
+                        pad_coords_um=overlay_critical_coords,
+                        die_center_um=die_interface.die_center,
+                        system_translation_x_um=system_translation_x_um,
+                        system_translation_y_um=system_translation_y_um,
+                        system_rotation_rad=system_rotation_rad,
+                        system_magnification_ppm=system_magnification_ppm,
+                        random_misalignment_mean_um=RANDOM_MISALIGNMENT_MEAN_um,
+                        random_misalignment_std_um=RANDOM_MISALIGNMENT_STD_um,
+                    )
+                    critical_overlay_fail_mask = (
+                        critical_pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um
+                    )
+            else:
+                critical_pad_misalignment = None
+                critical_overlay_fail_mask = None
             # print(f"Pad misalignment simulation time for stack {stack_ind}, interface {interface_name}: {time.perf_counter() - pad_misalignment_time_start:.2f} seconds.")
-            if approximate_set == 1:
-                # die fail criteria: any pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um
-                die_interface.pad_misalignment = die_interface.pad_misalignment.reshape(cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL)
-                if cfg.verbose and save_failure_maps:
-                    epoch_fail_map_per_interface_dict[interface_name]['overlay'] += (die_interface.pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um).astype(int)
-                    temp_overall_fail_map |= (die_interface.pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um)
-
-                critical_pad_misalignment = die_interface.pad_misalignment * die_critical_pad_bitmap
-                # Check if any critical pad misalignment is greater than the maximum allowed misalignment
-                if np.any(critical_pad_misalignment >= MAX_ALLOWED_MISALIGNMENT_um):
+            if run_overlay and approximate_set == 1 and overlay_corner_only:
+                if np.any(critical_overlay_fail_mask):
                     die_interface.survival = False
                     die_stack.survival = False
                     if cfg.verbose:
@@ -278,20 +558,49 @@ def overall_yield_simulator(
                         epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
                     if not cfg.verbose:
                         continue
+
+            elif run_overlay and approximate_set == 1:
+                # Check if any critical pad misalignment is greater than the maximum allowed misalignment
+                if np.any(critical_overlay_fail_mask):
+                    die_interface.survival = False
+                    die_stack.survival = False
+                    if overlay_fail_map_flat is not None:
+                        overlay_fail_map_flat[static_cache["overlay_critical_linear_idx"][critical_overlay_fail_mask]] = True
+                    if cfg.verbose:
+                        epoch_fail_vec_per_interface_dict[interface_name]['overlay'][stack_ind] = 1
+                        epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
+                    if not cfg.verbose:
+                        continue
                 # Check if too many redundant pad misalignment is greater than the maximum allowed misalignment
-                overlay_redundant_fail_mask = (
-                    (die_interface.pad_misalignment > MAX_ALLOWED_MISALIGNMENT_um)
-                    & die_redundant_pad_bitmap.astype(bool)
+                redundant_pad_misalignment = _pad_misalignment_for_coords(
+                    pad_coords_um=overlay_redundant_coords,
+                    die_center_um=die_interface.die_center,
+                    system_translation_x_um=system_translation_x_um,
+                    system_translation_y_um=system_translation_y_um,
+                    system_rotation_rad=system_rotation_rad,
+                    system_magnification_ppm=system_magnification_ppm,
+                    random_misalignment_mean_um=RANDOM_MISALIGNMENT_MEAN_um,
+                    random_misalignment_std_um=RANDOM_MISALIGNMENT_STD_um,
                 )
+                overlay_redundant_fail_mask = (
+                    redundant_pad_misalignment > MAX_ALLOWED_MISALIGNMENT_um
+                )
+                redundant_pad_fail_map_flat = redundant_pad_fail_map.reshape(-1)
                 new_overlay_redundant_fail_mask = (
                     overlay_redundant_fail_mask
-                    & (~redundant_pad_fail_map)
+                    & (~redundant_pad_fail_map_flat[overlay_redundant_linear_idx])
                 )
-                redundant_pad_fail_map[overlay_redundant_fail_mask] = True
+                redundant_pad_fail_map_flat[
+                    overlay_redundant_linear_idx[overlay_redundant_fail_mask]
+                ] = True
+                if overlay_fail_map_flat is not None:
+                    overlay_fail_map_flat[
+                        overlay_redundant_linear_idx[overlay_redundant_fail_mask]
+                    ] = True
                 if redundant_group_id_grid is not None:
                     _increment_redundant_group_counts(
                         new_overlay_redundant_fail_mask,
-                        redundant_group_id_grid,
+                        overlay_redundant_group_ids,
                         redundant_failed_counts,
                     )
                     if _group_limit_exceeded(
@@ -315,13 +624,50 @@ def overall_yield_simulator(
                                 epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
                             break
 
+                # Check if too many power/ground pads exceed the overlay limit.
+                # Power/ground pads are required pads, but tolerate a small
+                # failed fraction before the die is considered failed.
+                if power_ground_overlay_fail_count_th > 0:
+                    power_ground_pad_misalignment = _pad_misalignment_for_coords(
+                        pad_coords_um=overlay_power_ground_coords,
+                        die_center_um=die_interface.die_center,
+                        system_translation_x_um=system_translation_x_um,
+                        system_translation_y_um=system_translation_y_um,
+                        system_rotation_rad=system_rotation_rad,
+                        system_magnification_ppm=system_magnification_ppm,
+                        random_misalignment_mean_um=RANDOM_MISALIGNMENT_MEAN_um,
+                        random_misalignment_std_um=RANDOM_MISALIGNMENT_STD_um,
+                    )
+                    power_ground_overlay_fail_mask = (
+                        power_ground_pad_misalignment > MAX_ALLOWED_MISALIGNMENT_um
+                    )
+                    power_ground_overlay_fail_count = int(
+                        np.count_nonzero(power_ground_overlay_fail_mask)
+                    )
+                    if overlay_fail_map_flat is not None:
+                        overlay_fail_map_flat[
+                            overlay_power_ground_linear_idx[power_ground_overlay_fail_mask]
+                        ] = True
+                    if power_ground_overlay_fail_count >= power_ground_overlay_fail_count_th:
+                        die_interface.survival = False
+                        die_stack.survival = False
+                        if cfg.verbose:
+                            epoch_fail_vec_per_interface_dict[interface_name]['overlay'][stack_ind] = 1
+                            epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
+
+                if overlay_fail_map_flat is not None:
+                    overlay_fail_map = overlay_fail_map_flat.reshape(PAD_ARR_ROW, PAD_ARR_COL)
+                    epoch_fail_map_per_interface_dict[interface_name]['overlay'] += overlay_fail_map.astype(int)
+                    temp_overall_fail_map |= overlay_fail_map
+
                 # # Get the fail bump indices
                 # fail_bump_id = mapping_physical_to_bumpid[redundant_pad_fail_map == 1]
                 # # Switch to set for easier checking
                 # fail_bump_id_set = set(fail_bump_id.astype(int))
 
             # Delete the die.pad_misalignment to save memory
-            del die_interface.pad_misalignment
+            if hasattr(die_interface, "pad_misalignment"):
+                del die_interface.pad_misalignment
 
             if not die_stack.survival and not cfg.verbose:
                 continue
@@ -333,7 +679,10 @@ def overall_yield_simulator(
             ## Check the void overlap with the pad
             # Assuming wafer.voids is an array of shape (N, 3), where N is the number of voids. [x, y, r]
             # Critical pad bitmap is a 2D array of shape (PAD_ARR_ROW, PAD_ARR_COL) with 1s for critical pads and 0s for non-critical pads
-            voids = np.array(die_stack.interfaces.failure_params_dict[interface_name]['voids']) # shape (N, 3), N is the number of voids
+            if run_particle:
+                voids = np.array(die_stack.interfaces.failure_params_dict[interface_name]['voids']) # shape (N, 3), N is the number of voids
+            else:
+                voids = np.empty((0, 3), dtype=float)
             if voids.size > 0:
                 # Coordinates and dimensions of the die pad array box
                 pad_array_box_x = die_interface.pad_array_box[2][0]
@@ -459,12 +808,19 @@ def overall_yield_simulator(
             Check the Cu gap, a true Monte Carlo simulator
             '''
             # Check the Cu expansion
-            top_dish, bot_dish = Cu_gap_correlated_simulator(
-                cfg=cfg,
-                valid_pad_mask_flat=valid_pad_mask_flat,
-            )
+            top_dish = bot_dish = None
+            if run_mechanical or run_esd:
+                cu_gap_pad_mask_flat = (
+                    valid_pad_mask_flat
+                    if run_esd
+                    else mechanical_active_pad_mask_flat
+                )
+                top_dish, bot_dish = Cu_gap_correlated_simulator(
+                    cfg=cfg,
+                    valid_pad_mask_flat=cu_gap_pad_mask_flat,
+                )
 
-            if static_cache["use_mechanical_die_level_sampling"]:
+            if run_mechanical and static_cache["use_mechanical_die_level_sampling"]:
                 die_level_mechanical_yield = static_cache["die_level_mechanical_yield"]
                 if float(np.random.random()) > float(die_level_mechanical_yield):
                     die_interface.survival = False
@@ -474,7 +830,77 @@ def overall_yield_simulator(
                         epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
                     if not cfg.verbose:
                         continue
-            else:
+            elif run_mechanical and not run_esd:
+                Cu_gap_in_active_pads = top_dish + bot_dish
+                active_zeta_0 = -mechanical_active_dishing_bound_array[:, 1] * 2
+                active_zeta_1 = -mechanical_active_dishing_bound_array[:, 0] * 2
+                active_zeta_0 = np.clip(active_zeta_0, a_max=0, a_min=None)
+                active_zeta_1 = np.clip(active_zeta_1, a_max=0, a_min=None)
+                active_Cu_gap_fail_mask = (
+                    (Cu_gap_in_active_pads < active_zeta_0)
+                    | (Cu_gap_in_active_pads > active_zeta_1)
+                )
+
+                if cfg.verbose and save_failure_maps and np.any(active_Cu_gap_fail_mask):
+                    fail_linear_idx = mechanical_active_linear_idx[active_Cu_gap_fail_mask]
+                    fail_rows = fail_linear_idx // PAD_ARR_COL
+                    fail_cols = fail_linear_idx - fail_rows * PAD_ARR_COL
+                    epoch_fail_map_per_interface_dict[interface_name]['mechanical'][
+                        fail_rows,
+                        fail_cols,
+                    ] += 1
+                    temp_overall_fail_map[fail_rows, fail_cols] = 1
+
+                # Check critical pad Cu gap.
+                if np.any(active_Cu_gap_fail_mask & mechanical_active_critical_mask):
+                    die_interface.survival = False
+                    die_stack.survival = False
+                    if cfg.verbose:
+                        epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind] = 1
+                        epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
+                    if not cfg.verbose:
+                        continue
+
+                # Check redundant pad Cu gap.
+                active_redundant_fail_mask = (
+                    active_Cu_gap_fail_mask & mechanical_active_redundant_mask
+                )
+                if np.any(active_redundant_fail_mask):
+                    fail_linear_idx = mechanical_active_linear_idx[active_redundant_fail_mask]
+                    fail_rows = fail_linear_idx // PAD_ARR_COL
+                    fail_cols = fail_linear_idx - fail_rows * PAD_ARR_COL
+                    new_redundant_fail_mask = ~redundant_pad_fail_map[fail_rows, fail_cols]
+                    redundant_pad_fail_map[fail_rows, fail_cols] = True
+                    if redundant_group_id_grid is not None:
+                        group_ids = mechanical_active_group_ids[active_redundant_fail_mask]
+                        group_ids = group_ids[new_redundant_fail_mask]
+                        group_ids = group_ids[group_ids >= 0]
+                        if group_ids.size > 0:
+                            redundant_failed_counts += np.bincount(
+                                group_ids.astype(np.int64, copy=False),
+                                minlength=redundant_failed_counts.shape[0],
+                            ).astype(redundant_failed_counts.dtype, copy=False)
+                        if _group_limit_exceeded(
+                            redundant_failed_counts,
+                            redundant_tolerated_mechanical_failures,
+                        ):
+                            die_interface.survival = False
+                            die_stack.survival = False
+                            if cfg.verbose:
+                                epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind] = 1
+                                epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
+                    else:
+                        for redundant_net, physical_mask in redundant_net_to_1d_physical_mask.items():
+                            tolerated_mechanical_failures = criticality_info[redundant_net]['tolerated_mechanical_failures']
+                            num_fail_pad_in_net = np.sum(redundant_pad_fail_map.flatten()[physical_mask])
+                            if num_fail_pad_in_net > tolerated_mechanical_failures:
+                                die_interface.survival = False
+                                die_stack.survival = False
+                                if cfg.verbose:
+                                    epoch_fail_vec_per_interface_dict[interface_name]['mechanical'][stack_ind] = 1
+                                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
+                                break
+            elif run_mechanical:
                 Cu_gap_in_valid_pads = top_dish + bot_dish
                 Cu_gap_map = np.full((PAD_ARR_ROW, PAD_ARR_COL), np.nan)
                 Cu_gap_map[valid_pad_mask == 1] = Cu_gap_in_valid_pads
@@ -556,20 +982,23 @@ def overall_yield_simulator(
             Check the ESD failure
             '''
             # cfg carries per-interface ESD stack geometry from the 3Dblox graph.
-            esd_pad_idx, survive_bool = esd_failure_simulator(
-                                                    cfg=cfg,
-                                                    pad_coords_um=valid_die_pad_coords,
-                                                    pad_size_um=PAD_TOP_R_um * 2,
-                                                    top_die_w_um=die_interface.DIE_W_um,
-                                                    top_die_h_um=die_interface.DIE_L_um,
-                                                    top_dish_nm_ext=top_dish,
-                                                    bot_dish_nm_ext=bot_dish,
-                                                    tilt_x_mean_deg=TILT_X_MEAN_DEG,
-                                                    tilt_x_std_deg=TILT_X_STD_DEG,
-                                                    tilt_y_mean_deg=TILT_Y_MEAN_DEG,
-                                                    tilt_y_std_deg=TILT_Y_STD_DEG,
-                                                    dummy_pad_bitmap=pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat],
-                                                    )
+            if run_esd:
+                esd_pad_idx, survive_bool = esd_failure_simulator(
+                                                        cfg=cfg,
+                                                        pad_coords_um=valid_die_pad_coords,
+                                                        pad_size_um=PAD_TOP_R_um * 2,
+                                                        top_die_w_um=die_interface.DIE_W_um,
+                                                        top_die_h_um=die_interface.DIE_L_um,
+                                                        top_dish_nm_ext=top_dish,
+                                                        bot_dish_nm_ext=bot_dish,
+                                                        tilt_x_mean_deg=TILT_X_MEAN_DEG,
+                                                        tilt_x_std_deg=TILT_X_STD_DEG,
+                                                        tilt_y_mean_deg=TILT_Y_MEAN_DEG,
+                                                        tilt_y_std_deg=TILT_Y_STD_DEG,
+                                                        dummy_pad_bitmap=pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat],
+                                                        )
+            else:
+                esd_pad_idx, survive_bool = None, True
             if esd_pad_idx is not None and survive_bool == False:    # One pad will form the first contact and fail
                 # esd_pad_idx is indexed within the compressed valid-pad list, so map
                 # it back to the full pad-array linear index before decoding row/col.
@@ -632,6 +1061,10 @@ def overall_yield_simulator(
         '''
         if stack_warpage_fail_vector[stack_ind]:
             die_stack.survival = False
+            if input_args['verbose']:
+                for interface_name in cfg_dict:
+                    epoch_fail_vec_per_interface_dict[interface_name]['warpage'][stack_ind] = 1
+                    epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
 
         for interface_name, die_interface in die_stack.interfaces.interface_dict.items():
             if die_interface.survival:

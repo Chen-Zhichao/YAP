@@ -18,6 +18,7 @@ class Die:
         PAD_ARR_BOX,
         pad_yield_flag: bool,
         BASE_PAD_COORDS: np.ndarray = None,
+        OVL_ACTIVE_PAD_BOUNDARY_COORDS: np.ndarray = None,
     ):
         self.DIE_W_um = DIE_W_um
         self.DIE_L_um = DIE_L_um
@@ -27,6 +28,13 @@ class Die:
         self.PAD_BOT_R_um = PAD_BOT_R_um
         self.vertices_coords = self.get_vertices_coords(die_center, DIE_VERTEX_COORDS)
         self.pad_array_box = PAD_ARR_BOX + die_center
+        self.ovl_active_pad_boundary_coords = (
+            OVL_ACTIVE_PAD_BOUNDARY_COORDS + die_center
+            if OVL_ACTIVE_PAD_BOUNDARY_COORDS is not None
+            else None
+        )
+        # Backward-compatible name used by older overlay calculator code.
+        self.ovl_critical_pad_boundary_coords = self.ovl_active_pad_boundary_coords
         self.pad_coords = BASE_PAD_COORDS + die_center if pad_yield_flag == True else None
 
         self.survival = True
@@ -192,6 +200,32 @@ def die_interface_initialize(
     pad_yield_flag: bool = False,
 ):
     die_interface_list = []
+
+    def _boundary_coords_from_mask(pad_coords, mask):
+        if pad_coords is None or mask is None:
+            return None
+        coords = np.asarray(pad_coords, dtype=np.float64)
+        flat_mask = np.asarray(mask, dtype=bool).reshape(-1)
+        valid = (
+            flat_mask
+            & np.isfinite(coords[:, 0])
+            & np.isfinite(coords[:, 1])
+        )
+        if not np.any(valid):
+            return None
+        selected = coords[valid]
+        x_min, x_max = np.min(selected[:, 0]), np.max(selected[:, 0])
+        y_min, y_max = np.min(selected[:, 1]), np.max(selected[:, 1])
+        return np.array(
+            [
+                [x_min, y_max],
+                [x_max, y_max],
+                [x_min, y_min],
+                [x_max, y_min],
+            ],
+            dtype=np.float64,
+        )
+
     # Calculate the die center standard coordinates
     DIE_VERTEX_COORDS = np.array(
         [
@@ -237,6 +271,22 @@ def die_interface_initialize(
             print("Too many Cu pads... Will not generate the pad coordinates.")
             PAD_COORDS = None
 
+    overlay_active_pad_mask = (
+        np.asarray(pad_bitmap_collection.get("CRITICAL_PAD_BITMAP"), dtype=bool)
+        | np.asarray(pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP"), dtype=bool)
+        | np.asarray(
+            pad_bitmap_collection.get(
+                "POWER_GROUND_PAD_BITMAP",
+                np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=bool),
+            ),
+            dtype=bool,
+        )
+    )
+    OVL_ACTIVE_PAD_BOUNDARY_COORDS = _boundary_coords_from_mask(
+        PAD_COORDS,
+        overlay_active_pad_mask,
+    )
+
     for i in range(NUM_DIE_SAMPLES):
         die = Die(
             DIE_W_um=DIE_W_um,
@@ -249,6 +299,7 @@ def die_interface_initialize(
             PAD_ARR_BOX=PAD_ARR_BOX,
             pad_yield_flag=pad_yield_flag,
             BASE_PAD_COORDS=PAD_COORDS,
+            OVL_ACTIVE_PAD_BOUNDARY_COORDS=OVL_ACTIVE_PAD_BOUNDARY_COORDS,
         )
         die_interface_list.append(die)
     return die_interface_list, PAD_COORDS
