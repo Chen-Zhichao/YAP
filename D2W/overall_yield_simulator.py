@@ -9,9 +9,13 @@ import matplotlib.pyplot as plt
 import time
 import os
 from overlay_yield_simulator import die_pad_misalignment
-from Cu_gap_simulator import Cu_gap_correlated_simulator
+from Cu_gap_simulator import Cu_gap_simulator
 from debond import debond_dishing_intervals_from_coords #, post_bond_warpage_calculator
-from esd_yield_simulator import esd_failure_simulator
+from esd_yield_simulator import (
+    build_esd_tile_cache,
+    esd_failure_simulator,
+    esd_failure_simulator_batch,
+)
 from utils.util import atomic_save_npy, get_dishing_bound_cache_path
 
 try:
@@ -209,19 +213,33 @@ def _build_interface_static_cache(
         valid_linear_idx = None
         valid_die_pad_coords = None
         valid_pad_dishing_bound_array = None
+        esd_tile_cache = None
         if run_esd:
             valid_pad_mask_flat = valid_pad_mask.reshape(-1)
-            valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
-            valid_die_pad_coords = np.asarray(
-                base_pad_coords_dict[interface_name][valid_pad_mask_flat],
-                dtype=np.float32,
-            )
-            valid_pad_dishing_bound_array = _load_or_compute_dishing_bounds(
-                cfg=cfg,
-                input_args=input_args,
-                coords_um=valid_die_pad_coords,
-                mask_name="valid",
-            )
+            esd_active_pad_mask = valid_pad_mask & (~dummy_pad_bitmap)
+            esd_sim_method = str(getattr(cfg, "ESD_SIMULATION_METHOD", "auto")).strip().lower()
+            esd_tile_threshold_pads = int(getattr(cfg, "ESD_SIM_TILE_THRESHOLD_PADS", 100_000))
+            if (
+                esd_sim_method == "tile"
+                or (
+                    esd_sim_method == "auto"
+                    and int(np.count_nonzero(esd_active_pad_mask)) >= esd_tile_threshold_pads
+                )
+            ):
+                esd_tile_cache = build_esd_tile_cache(cfg, esd_active_pad_mask)
+            else:
+                valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
+                valid_die_pad_coords = np.asarray(
+                    base_pad_coords_dict[interface_name][valid_pad_mask_flat],
+                    dtype=np.float32,
+                )
+                if run_mechanical:
+                    valid_pad_dishing_bound_array = _load_or_compute_dishing_bounds(
+                        cfg=cfg,
+                        input_args=input_args,
+                        coords_um=valid_die_pad_coords,
+                        mask_name="valid",
+                    )
 
         mechanical_active_pad_mask = critical_pad_bitmap | redundant_pad_bitmap
         mechanical_active_pad_mask_flat = mechanical_active_pad_mask.reshape(-1)
@@ -262,6 +280,7 @@ def _build_interface_static_cache(
             "valid_linear_idx": valid_linear_idx,
             "valid_die_pad_coords": valid_die_pad_coords,
             "valid_pad_dishing_bound_array": valid_pad_dishing_bound_array,
+            "esd_tile_cache": esd_tile_cache,
             "use_mechanical_die_level_sampling": use_mechanical_die_level_sampling,
             "die_level_mechanical_yield": die_level_mechanical_yield,
             "overlay_critical_linear_idx": overlay_critical_linear_idx,
@@ -337,6 +356,25 @@ def overall_yield_simulator(
     else:
         stack_warpage_fail_vector = np.zeros((NUM_STACKS,), dtype=bool)
 
+    esd_batch_result_dict = {}
+    if run_esd:
+        for interface_name, cfg in cfg_dict.items():
+            esd_tile_cache = interface_static_cache.get(interface_name, {}).get("esd_tile_cache")
+            if esd_tile_cache is None:
+                continue
+            esd_batch_result_dict[interface_name] = esd_failure_simulator_batch(
+                cfg=cfg,
+                num_samples=NUM_STACKS,
+                pad_size_um=float(cfg.PAD_TOP_R_um) * 2.0,
+                top_die_w_um=float(cfg.DIE_W_um),
+                top_die_h_um=float(cfg.DIE_L_um),
+                tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
+                tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
+                tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
+                tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
+                esd_tile_cache=esd_tile_cache,
+            )
+
 
     for stack_ind, die_stack in enumerate(die_stack_list):
         for interface_ind, (interface_name, die_interface) in enumerate(die_stack.interfaces.interface_dict.items()):
@@ -377,12 +415,14 @@ def overall_yield_simulator(
                 valid_linear_idx = static_cache["valid_linear_idx"]
                 valid_die_pad_coords = static_cache["valid_die_pad_coords"]
                 valid_pad_dishing_bound_array = static_cache["valid_pad_dishing_bound_array"]
+                esd_tile_cache = static_cache["esd_tile_cache"]
             else:
                 valid_pad_mask = None
                 valid_pad_mask_flat = None
                 valid_linear_idx = None
                 valid_die_pad_coords = None
                 valid_pad_dishing_bound_array = None
+                esd_tile_cache = None
             if run_mechanical:
                 mechanical_active_pad_mask = static_cache["mechanical_active_pad_mask"]
                 mechanical_active_pad_mask_flat = static_cache["mechanical_active_pad_mask_flat"]
@@ -809,13 +849,13 @@ def overall_yield_simulator(
             '''
             # Check the Cu expansion
             top_dish = bot_dish = None
-            if run_mechanical or run_esd:
-                cu_gap_pad_mask_flat = (
-                    valid_pad_mask_flat
-                    if run_esd
-                    else mechanical_active_pad_mask_flat
-                )
-                top_dish, bot_dish = Cu_gap_correlated_simulator(
+            use_esd_tile_simulator = run_esd and esd_tile_cache is not None
+            if run_mechanical or (run_esd and not use_esd_tile_simulator):
+                if run_esd and not use_esd_tile_simulator:
+                    cu_gap_pad_mask_flat = valid_pad_mask_flat
+                else:
+                    cu_gap_pad_mask_flat = mechanical_active_pad_mask_flat
+                top_dish, bot_dish = Cu_gap_simulator(
                     cfg=cfg,
                     valid_pad_mask_flat=cu_gap_pad_mask_flat,
                 )
@@ -830,7 +870,7 @@ def overall_yield_simulator(
                         epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind] = 1
                     if not cfg.verbose:
                         continue
-            elif run_mechanical and not run_esd:
+            elif run_mechanical and (not run_esd or use_esd_tile_simulator):
                 Cu_gap_in_active_pads = top_dish + bot_dish
                 active_zeta_0 = -mechanical_active_dishing_bound_array[:, 1] * 2
                 active_zeta_1 = -mechanical_active_dishing_bound_array[:, 0] * 2
@@ -983,26 +1023,61 @@ def overall_yield_simulator(
             '''
             # cfg carries per-interface ESD stack geometry from the 3Dblox graph.
             if run_esd:
-                esd_pad_idx, survive_bool = esd_failure_simulator(
-                                                        cfg=cfg,
-                                                        pad_coords_um=valid_die_pad_coords,
-                                                        pad_size_um=PAD_TOP_R_um * 2,
-                                                        top_die_w_um=die_interface.DIE_W_um,
-                                                        top_die_h_um=die_interface.DIE_L_um,
-                                                        top_dish_nm_ext=top_dish,
-                                                        bot_dish_nm_ext=bot_dish,
-                                                        tilt_x_mean_deg=TILT_X_MEAN_DEG,
-                                                        tilt_x_std_deg=TILT_X_STD_DEG,
-                                                        tilt_y_mean_deg=TILT_Y_MEAN_DEG,
-                                                        tilt_y_std_deg=TILT_Y_STD_DEG,
-                                                        dummy_pad_bitmap=pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat],
-                                                        )
+                esd_batch_result = esd_batch_result_dict.get(interface_name)
+                if use_esd_tile_simulator and esd_batch_result is not None:
+                    esd_pad_idx = int(esd_batch_result[0][stack_ind])
+                    survive_bool = bool(esd_batch_result[1][stack_ind])
+                elif use_esd_tile_simulator:
+                    esd_pad_coords_um = np.empty((0, 2), dtype=np.float32)
+                    esd_top_dish = np.empty((0,), dtype=np.float32)
+                    esd_bot_dish = np.empty((0,), dtype=np.float32)
+                    esd_dummy_bitmap = np.empty((0,), dtype=bool)
+                    esd_pad_idx, survive_bool = esd_failure_simulator(
+                                                            cfg=cfg,
+                                                            pad_coords_um=esd_pad_coords_um,
+                                                            pad_size_um=PAD_TOP_R_um * 2,
+                                                            top_die_w_um=die_interface.DIE_W_um,
+                                                            top_die_h_um=die_interface.DIE_L_um,
+                                                            top_dish_nm_ext=esd_top_dish,
+                                                            bot_dish_nm_ext=esd_bot_dish,
+                                                            tilt_x_mean_deg=TILT_X_MEAN_DEG,
+                                                            tilt_x_std_deg=TILT_X_STD_DEG,
+                                                            tilt_y_mean_deg=TILT_Y_MEAN_DEG,
+                                                            tilt_y_std_deg=TILT_Y_STD_DEG,
+                                                            dummy_pad_bitmap=esd_dummy_bitmap,
+                                                            esd_tile_cache=esd_tile_cache,
+                                                            return_full_linear_idx=use_esd_tile_simulator,
+                                                            )
+                else:
+                    esd_pad_coords_um = valid_die_pad_coords
+                    esd_top_dish = top_dish
+                    esd_bot_dish = bot_dish
+                    esd_dummy_bitmap = pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat]
+                    esd_pad_idx, survive_bool = esd_failure_simulator(
+                                                            cfg=cfg,
+                                                            pad_coords_um=esd_pad_coords_um,
+                                                            pad_size_um=PAD_TOP_R_um * 2,
+                                                            top_die_w_um=die_interface.DIE_W_um,
+                                                            top_die_h_um=die_interface.DIE_L_um,
+                                                            top_dish_nm_ext=esd_top_dish,
+                                                            bot_dish_nm_ext=esd_bot_dish,
+                                                            tilt_x_mean_deg=TILT_X_MEAN_DEG,
+                                                            tilt_x_std_deg=TILT_X_STD_DEG,
+                                                            tilt_y_mean_deg=TILT_Y_MEAN_DEG,
+                                                            tilt_y_std_deg=TILT_Y_STD_DEG,
+                                                            dummy_pad_bitmap=esd_dummy_bitmap,
+                                                            esd_tile_cache=esd_tile_cache,
+                                                            return_full_linear_idx=use_esd_tile_simulator,
+                                                            )
             else:
                 esd_pad_idx, survive_bool = None, True
             if esd_pad_idx is not None and survive_bool == False:    # One pad will form the first contact and fail
                 # esd_pad_idx is indexed within the compressed valid-pad list, so map
                 # it back to the full pad-array linear index before decoding row/col.
-                full_linear_idx = int(valid_linear_idx[int(esd_pad_idx)])
+                if use_esd_tile_simulator:
+                    full_linear_idx = int(esd_pad_idx)
+                else:
+                    full_linear_idx = int(valid_linear_idx[int(esd_pad_idx)])
                 r_idx, c_idx = full_linear_idx // PAD_ARR_COL, full_linear_idx % PAD_ARR_COL
                 if cfg.verbose and save_failure_maps:
                     epoch_fail_map_per_interface_dict[interface_name]['ESD'][r_idx, c_idx] += 1

@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 from joblib import dump, load
 import yaml
 
-from Cu_gap_simulator import Cu_gap_correlated_simulator
+from Cu_gap_simulator import Cu_gap_simulator
 from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
 from Cu_expansion_yield_calculator import stack_stress_yield_calculator
@@ -105,14 +105,9 @@ def _corner_worst_overlay_misalignment_um(
 def _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection):
     dish_keys = (
         "TOP_DISH_MEAN_nm",
-        "TOP_DISH_STD_L_nm",
-        "TOP_DISH_STD_T_nm",
-        "TOP_DISH_STD_E_nm",
+        "TOP_DISH_STD_nm",
         "BOT_DISH_MEAN_nm",
-        "BOT_DISH_STD_L_nm",
-        "BOT_DISH_STD_T_nm",
-        "BOT_DISH_STD_E_nm",
-        "TL_um",
+        "BOT_DISH_STD_nm",
     )
     cfg_part = tuple(
         (key, round(float(getattr(cfg, key, 0.0)), 12))
@@ -178,6 +173,7 @@ def overall_yield_simulator(
     run_esd = 'ESD' in active_mechanisms
     overlay_only_fast_path = active_mechanisms == {'overlay'}
     mechanical_only_fast_path = active_mechanisms == {'mechanical'}
+    esd_only_fast_path = active_mechanisms == {'ESD'}
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
     epoch_fail_vec_per_interface_dict = {}    # This dict stores failure reason (each mechanism) for all die samples in this epoch
@@ -271,6 +267,68 @@ def overall_yield_simulator(
                 waf_interface.die_list,
                 tolerance_um=None if esd_center_tol_um is None else float(esd_center_tol_um),
             )
+
+            if esd_only_fast_path:
+                if selected_esd_die_ind is None:
+                    _print_status(
+                        "ESD-only fast path for stack {}/{} interface {}/{}: "
+                        "no center die selected.".format(
+                            epoch * NUM_STACKS + stack_ind + 1,
+                            cfg.NUM_WAFER_STACKS,
+                            interface_ind + 1,
+                            len(waf_stack.interfaces.interface_dict),
+                        )
+                    )
+                    continue
+
+                die_ind = int(selected_esd_die_ind)
+                die = waf_interface.die_list[die_ind]
+                die_pad_coords = waf_interface.base_pad_coords + die.die_center
+                valid_die_pad_coords = die_pad_coords[valid_pad_mask_flat]
+                top_dish, bot_dish = Cu_gap_simulator(
+                    cfg=cfg,
+                    valid_pad_mask_flat=valid_pad_mask_flat,
+                )
+                first_contact_pad_idx, survive_bool = esd_failure_simulator(
+                    cfg=cfg,
+                    pad_coords_um=valid_die_pad_coords,
+                    pad_size_um=PAD_TOP_R_um * 2,
+                    top_die_w_um=die.DIE_W_um,
+                    top_die_h_um=die.DIE_L_um,
+                    wafer_radius_um=WAF_R_um,
+                    top_dish_nm_ext=top_dish,
+                    bot_dish_nm_ext=bot_dish,
+                    dummy_pad_bitmap=valid_dummy_pad_bitmap,
+                )
+
+                failed = False
+                if first_contact_pad_idx is not None and survive_bool == False:
+                    full_linear_idx = int(valid_linear_idx[int(first_contact_pad_idx)])
+                    r_idx = full_linear_idx // PAD_ARR_COL
+                    c_idx = full_linear_idx % PAD_ARR_COL
+                    if cfg.verbose:
+                        epoch_fail_map_per_interface_dict[interface_name]['ESD'][r_idx, c_idx] += 1
+                        epoch_fail_map_per_interface_dict[interface_name]['overall'][r_idx, c_idx] += 1
+                    if die_esd_critical_pad_bitmap[r_idx, c_idx] == 1:
+                        failed = True
+                        waf_stack.die_stack_survival[die_ind] = False
+                        waf_interface.die_list[die_ind].survival = False
+                        if cfg.verbose:
+                            epoch_fail_vec_per_interface_dict[interface_name]['ESD'][stack_ind, die_ind] = 1
+                            epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_ind, die_ind] = 1
+
+                _print_status(
+                    "ESD-only fast path for stack {}/{} interface {}/{}: "
+                    "{} center die {}.".format(
+                        epoch * NUM_STACKS + stack_ind + 1,
+                        cfg.NUM_WAFER_STACKS,
+                        interface_ind + 1,
+                        len(waf_stack.interfaces.interface_dict),
+                        interface_name,
+                        "failed" if failed else "survived",
+                    )
+                )
+                continue
 
             if mechanical_only_fast_path:
                 cache_key = _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection)
@@ -590,8 +648,13 @@ def overall_yield_simulator(
                 '''
                 # Check the Cu expansion
                 top_dish = bot_dish = None
-                if run_mechanical or run_esd:
-                    top_dish, bot_dish = Cu_gap_correlated_simulator(
+                needs_esd_for_this_die = (
+                    run_esd
+                    and selected_esd_die_ind is not None
+                    and die_ind == selected_esd_die_ind
+                )
+                if run_mechanical or needs_esd_for_this_die:
+                    top_dish, bot_dish = Cu_gap_simulator(
                         cfg=cfg,
                         valid_pad_mask_flat=valid_pad_mask_flat,
                     )
@@ -688,7 +751,7 @@ def overall_yield_simulator(
                 '''
                 Check the ESD failure
                 '''
-                if run_esd and selected_esd_die_ind is not None and die_ind == selected_esd_die_ind:
+                if needs_esd_for_this_die:
                     first_contact_pad_idx, survive_bool = esd_failure_simulator(
                                                     cfg=cfg,
                                                     pad_coords_um=valid_die_pad_coords,

@@ -6,9 +6,8 @@ import hashlib
 from typing import Tuple
 
 import numpy as np
-from numpy.polynomial.hermite import hermgauss
 from numpy.polynomial.legendre import leggauss
-from scipy.special import log_ndtr
+from scipy.special import log_ndtr, ndtri
 
 EPS0_F_PER_M = 8.8541878128e-12
 
@@ -73,16 +72,7 @@ def _cfg_str(cfg, keys, default):
 
 def _dish_std_nm_from_cfg(cfg, side: str) -> float:
     side = str(side).upper()
-    scalar = _cfg_first(cfg, [f"{side}_DISH_STD_nm"], None)
-    if not _cfg_missing(scalar):
-        return float(scalar)
-
-    components = [
-        _cfg_float(cfg, [f"{side}_DISH_STD_L_nm"], 0.0),
-        _cfg_float(cfg, [f"{side}_DISH_STD_T_nm"], 0.0),
-        _cfg_float(cfg, [f"{side}_DISH_STD_E_nm"], 0.0),
-    ]
-    return float(math.sqrt(sum(max(value, 0.0) ** 2 for value in components)))
+    return _cfg_float(cfg, [f"{side}_DISH_STD_nm"], 0.0)
 
 
 def _cfg_length_um(cfg, um_keys, m_keys, default_um):
@@ -273,6 +263,59 @@ def _legendre_quadrature_interval(q: int, low: float, high: float) -> Tuple[np.n
     g = 0.5 * (x + 1.0) * (high - low) + low
     wg = 0.5 * (high - low) * w
     return g.astype(np.float64), wg.astype(np.float64)
+
+
+def _tilt_polar_quadrature_cases(
+    *,
+    tilt_x_mean_deg: float,
+    tilt_x_std_deg: float,
+    tilt_y_mean_deg: float,
+    tilt_y_std_deg: float,
+    radial_q: int,
+    angle_q: int,
+) -> list[tuple[float, float, float]]:
+    """
+    Return quadrature cases for a 2D independent Gaussian tilt distribution.
+
+    The old tensor Gauss-Hermite rule placed a high-weight node exactly at
+    zero tilt, which is a poor fit for first-touch ESD because the minimum-gap
+    pad selection changes sharply around zero. This rule integrates the
+    standard-normal radius through its CDF and averages uniformly over angle,
+    so no finite-weight sample is pinned at exactly zero radius.
+    """
+    tilt_x_mean_deg = float(tilt_x_mean_deg)
+    tilt_x_std_deg = max(float(tilt_x_std_deg), 0.0)
+    tilt_y_mean_deg = float(tilt_y_mean_deg)
+    tilt_y_std_deg = max(float(tilt_y_std_deg), 0.0)
+    radial_q = max(1, int(radial_q))
+    angle_q = max(1, int(angle_q))
+
+    if tilt_x_std_deg <= 0.0 and tilt_y_std_deg <= 0.0:
+        return [(tilt_x_mean_deg, tilt_y_mean_deg, 1.0)]
+
+    u_nodes_raw, u_weights_raw = leggauss(radial_q)
+    u_nodes = 0.5 * (u_nodes_raw + 1.0)
+    u_weights = 0.5 * u_weights_raw
+    u_nodes = np.clip(u_nodes, np.finfo(np.float64).tiny, 1.0 - np.finfo(np.float64).eps)
+    radii = np.sqrt(-2.0 * np.log1p(-u_nodes))
+
+    cases = []
+    angle_weight = 1.0 / float(angle_q)
+    for radius, radial_weight in zip(radii, u_weights):
+        for angle_idx in range(angle_q):
+            phi = 2.0 * math.pi * (float(angle_idx) + 0.5) * angle_weight
+            theta_x_deg = tilt_x_mean_deg + tilt_x_std_deg * float(radius) * math.cos(phi)
+            theta_y_deg = tilt_y_mean_deg + tilt_y_std_deg * float(radius) * math.sin(phi)
+            cases.append((theta_x_deg, theta_y_deg, float(radial_weight) * angle_weight))
+
+    weight_sum = sum(weight for _, _, weight in cases)
+    if weight_sum > 0.0:
+        inv_weight_sum = 1.0 / float(weight_sum)
+        cases = [
+            (theta_x_deg, theta_y_deg, weight * inv_weight_sum)
+            for theta_x_deg, theta_y_deg, weight in cases
+        ]
+    return cases
 
 
 def _deterministic_contact_limit_um(
@@ -479,16 +522,13 @@ def pad_esd_yield_map_generator(
     else:
         z_top_um = float(z_top_um)
 
-    v_min_v = float(cfg.V_MIN_V)
-    v_max_v = float(cfg.V_MAX_V)
     weibull_k = float(cfg.WEIBULL_K)
     weibull_lambda = float(cfg.WEIBULL_LAMBDA)
     cutoff_min_a = float(cfg.CUTOFF_MIN_A)
 
     quadrature_points = int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48))
-    outer_qx = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5))
-    outer_qy = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5))
-    voltage_q = int(getattr(cfg, "ESD_ANALYTICAL_VOLTAGE_Q", 5))
+    tilt_radial_q = int(getattr(cfg, "ESD_ANALYTICAL_TILT_RADIAL_Q", 4))
+    tilt_angle_q = int(getattr(cfg, "ESD_ANALYTICAL_TILT_ANGLE_Q", 8))
     tail_sigma = float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0))
     chunk_size = int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000))
     fill_residual_uniformly = bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True))
@@ -513,78 +553,70 @@ def pad_esd_yield_map_generator(
     if sigma_h_um <= 0.0:
         raise ValueError("Combined dishing sigma is zero. Analytical ESD yield requires positive variation.")
 
-    x_nodes, x_weights = hermgauss(outer_qx)
-    y_nodes, y_weights = hermgauss(outer_qy)
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, float(v_min_v), float(v_max_v))
-    voltage_norm = float(v_max_v) - float(v_min_v)
-    if voltage_norm <= 0.0:
-        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
+    v_chg = _cfg_float(cfg, ["V_CDM"], 5.0)
+    arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
+    p_fail_avg = _compute_p_fail_for_die(
+        top_die_w_um,
+        top_die_h_um,
+        float(v_chg),
+        cfg=cfg,
+        geff_um=arc_distance_um,
+        weibull_k=weibull_k,
+        weibull_lambda=weibull_lambda,
+        cutoff_min_a=cutoff_min_a,
+    )
 
-    p_fail_avg = 0.0
-    for v_chg, v_weight in zip(v_nodes, v_weights):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        p_fail_v = _compute_p_fail_for_die(
-            top_die_w_um,
-            top_die_h_um,
-            float(v_chg),
-            cfg=cfg,
-            geff_um=arc_distance_um,
-            weibull_k=weibull_k,
-            weibull_lambda=weibull_lambda,
-            cutoff_min_a=cutoff_min_a,
-        )
-        # print(f"Voltage {float(v_chg):.4f} V has die-level failure probability {p_fail_v:.6e} and arc distance {arc_distance_um:.2f} um")
-        p_fail_avg += (float(v_weight) / voltage_norm) * float(p_fail_v)
-
-    total_cases = int(outer_qx) * int(outer_qy)
+    tilt_cases = _tilt_polar_quadrature_cases(
+        tilt_x_mean_deg=tilt_x_mean_deg,
+        tilt_x_std_deg=tilt_x_std_deg,
+        tilt_y_mean_deg=tilt_y_mean_deg,
+        tilt_y_std_deg=tilt_y_std_deg,
+        radial_q=tilt_radial_q,
+        angle_q=tilt_angle_q,
+    )
+    total_cases = len(tilt_cases)
     case_id = 0
     first_touch_prob = np.zeros((active_pad_count,), dtype=np.float64)
     total_outer_weight = 0.0
 
-    for xa, wa in zip(x_nodes, x_weights):
-        theta_x_deg = float(tilt_x_mean_deg) + math.sqrt(2.0) * float(tilt_x_std_deg) * float(xa)
+    for theta_x_deg, theta_y_deg, outer_coeff in tilt_cases:
+        contact_limit_um = _deterministic_contact_limit_um(
+            pad_coords_um=pad_coords_um,
+            pad_size_um=pad_size_um,
+            tilt_x_deg=theta_x_deg,
+            tilt_y_deg=theta_y_deg,
+            z_top_um=z_top_um,
+        )
+        candidate_idx = _select_candidate_pad_indices(
+            contact_limit_um=contact_limit_um,
+            sigma_h_um=sigma_h_um,
+            candidate_sigma_window=candidate_sigma_window,
+            candidate_min_pads=candidate_min_pads,
+            candidate_disable_fraction=candidate_disable_fraction,
+        )
+        prob_case_local = _fixed_tilt_probability_map(
+            contact_limit_um=contact_limit_um[candidate_idx],
+            mu_h_um=mu_h_um,
+            sigma_h_um=sigma_h_um,
+            quadrature_points=quadrature_points,
+            tail_sigma=tail_sigma,
+            chunk_size=chunk_size,
+            fill_residual_uniformly=fill_residual_uniformly,
+        )
+        prob_case = np.zeros((active_pad_count,), dtype=np.float64)
+        prob_case[candidate_idx] = prob_case_local
+        first_touch_prob += float(outer_coeff) * prob_case
+        total_outer_weight += float(outer_coeff)
+        case_id += 1
 
-        for yb, wb in zip(y_nodes, y_weights):
-            theta_y_deg = float(tilt_y_mean_deg) + math.sqrt(2.0) * float(tilt_y_std_deg) * float(yb)
-            outer_coeff = float(wa * wb / math.pi)
-
-            contact_limit_um = _deterministic_contact_limit_um(
-                pad_coords_um=pad_coords_um,
-                pad_size_um=pad_size_um,
-                tilt_x_deg=theta_x_deg,
-                tilt_y_deg=theta_y_deg,
-                z_top_um=z_top_um,
+        if verbose:
+            print(
+                f"[ESD analytical] {case_id}/{total_cases} | "
+                f"theta_x={theta_x_deg:.3e} deg | "
+                f"theta_y={theta_y_deg:.3e} deg",
+                end="\r",
+                flush=True,
             )
-            candidate_idx = _select_candidate_pad_indices(
-                contact_limit_um=contact_limit_um,
-                sigma_h_um=sigma_h_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
-            )
-            prob_case_local = _fixed_tilt_probability_map(
-                contact_limit_um=contact_limit_um[candidate_idx],
-                mu_h_um=mu_h_um,
-                sigma_h_um=sigma_h_um,
-                quadrature_points=quadrature_points,
-                tail_sigma=tail_sigma,
-                chunk_size=chunk_size,
-                fill_residual_uniformly=fill_residual_uniformly,
-            )
-            prob_case = np.zeros((active_pad_count,), dtype=np.float64)
-            prob_case[candidate_idx] = prob_case_local
-            first_touch_prob += outer_coeff * prob_case
-            total_outer_weight += outer_coeff
-            case_id += 1
-
-            if verbose:
-                print(
-                    f"[ESD analytical] {case_id}/{total_cases} | "
-                    f"theta_x={theta_x_deg:.3e} deg | "
-                    f"theta_y={theta_y_deg:.3e} deg",
-                    end="\r",
-                    flush=True,
-                )
 
     if total_outer_weight > 0.0:
         first_touch_prob /= total_outer_weight
@@ -613,22 +645,13 @@ def _d2w_voltage_failure_average(
     top_die_w_um: float,
     top_die_h_um: float,
 ) -> float:
-    v_min_v = float(cfg.V_MIN_V)
-    v_max_v = float(cfg.V_MAX_V)
-    voltage_q = int(getattr(cfg, "ESD_ANALYTICAL_VOLTAGE_Q", 5))
-    voltage_norm = v_max_v - v_min_v
-    if voltage_norm <= 0.0:
-        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
-
     weibull_k = float(cfg.WEIBULL_K)
     weibull_lambda = float(cfg.WEIBULL_LAMBDA)
     cutoff_min_a = float(cfg.CUTOFF_MIN_A)
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
-
-    p_fail_avg = 0.0
-    for v_chg, v_weight in zip(v_nodes, v_weights):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        p_fail_v = _compute_p_fail_for_die(
+    v_chg = _cfg_float(cfg, ["V_CDM"], 5.0)
+    arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
+    return float(
+        _compute_p_fail_for_die(
             top_die_w_um,
             top_die_h_um,
             float(v_chg),
@@ -638,9 +661,7 @@ def _d2w_voltage_failure_average(
             weibull_lambda=weibull_lambda,
             cutoff_min_a=cutoff_min_a,
         )
-        p_fail_avg += (float(v_weight) / voltage_norm) * float(p_fail_v)
-
-    return float(p_fail_avg)
+    )
 
 
 def _d2w_first_touch_cache_key(
@@ -672,16 +693,183 @@ def _d2w_first_touch_cache_key(
         _cache_float(bot_dish_mean_nm),
         _cache_float(bot_dish_std_nm),
         _cache_float(z_top_um),
-        int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48)),
-        int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5)),
-        int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5)),
-        _cache_float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0)),
-        int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000)),
-        bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True)),
-        _cache_float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW", 8.0)),
-        int(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_MIN_PADS", 4096)),
-        _cache_float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION", 0.8)),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_SAMPLES", 1000)),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_BATCH_SIZE", 16)),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_SEED", 12345)),
     )
+
+
+def _d2w_first_touch_grid_cache_key(
+    *,
+    cfg,
+    active_bitmap: np.ndarray,
+    esd_critical_bitmap: np.ndarray,
+    pad_size_um: float,
+    tilt_x_mean_deg: float,
+    tilt_x_std_deg: float,
+    tilt_y_mean_deg: float,
+    tilt_y_std_deg: float,
+    top_dish_mean_nm: float,
+    top_dish_std_nm: float,
+    bot_dish_mean_nm: float,
+    bot_dish_std_nm: float,
+    z_top_um: float,
+) -> tuple:
+    return (
+        _array_digest(np.asarray(active_bitmap, dtype=bool)),
+        _array_digest(np.asarray(esd_critical_bitmap, dtype=bool)),
+        _cache_float(pad_size_um),
+        _cache_float(tilt_x_mean_deg),
+        _cache_float(tilt_x_std_deg),
+        _cache_float(tilt_y_mean_deg),
+        _cache_float(tilt_y_std_deg),
+        _cache_float(top_dish_mean_nm),
+        _cache_float(top_dish_std_nm),
+        _cache_float(bot_dish_mean_nm),
+        _cache_float(bot_dish_std_nm),
+        _cache_float(z_top_um),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_SAMPLES", 1000)),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_BATCH_SIZE", 128)),
+        int(getattr(cfg, "ESD_FIRST_TOUCH_SEED", 12345)),
+        _cache_float(getattr(cfg, "ESD_FIRST_TOUCH_TILE_PITCH_um", 100.0)),
+    )
+
+
+def _d2w_critical_first_touch_probability_grid_sampled(
+    *,
+    cfg,
+    active_bitmap: np.ndarray,
+    esd_critical_bitmap: np.ndarray,
+    pad_size_um: float,
+    tilt_x_mean_deg: float,
+    tilt_x_std_deg: float,
+    tilt_y_mean_deg: float,
+    tilt_y_std_deg: float,
+    top_dish_mean_nm: float,
+    top_dish_std_nm: float,
+    bot_dish_mean_nm: float,
+    bot_dish_std_nm: float,
+    z_top_um: float,
+) -> float:
+    """
+    Scalable first-touch estimator for very large pad arrays.
+
+    Pads are aggregated into spatial tiles. For each tile, the random dishing
+    contribution is represented by the maximum of n independent Gaussian pad
+    heights in that tile. This preserves the extreme-value nature of first
+    contact while reducing the cost from O(samples * pads) to
+    O(samples * tiles).
+    """
+    active_bitmap = np.asarray(active_bitmap, dtype=bool)
+    esd_critical_bitmap = np.asarray(esd_critical_bitmap, dtype=bool)
+    if active_bitmap.shape != esd_critical_bitmap.shape:
+        raise ValueError("active_bitmap and esd_critical_bitmap must have the same shape.")
+
+    active_count = int(np.count_nonzero(active_bitmap))
+    if active_count <= 0:
+        raise ValueError("No non-dummy pads are available for ESD first-touch calculation.")
+    critical_count = int(np.count_nonzero(active_bitmap & esd_critical_bitmap))
+    if critical_count <= 0:
+        return 0.0
+    if critical_count == active_count:
+        return 1.0
+
+    rows, cols = active_bitmap.shape
+    pitch_r_um = float(cfg.PITCH_r_um)
+    pitch_c_um = float(cfg.PITCH_c_um)
+    tile_pitch_um = max(float(getattr(cfg, "ESD_FIRST_TOUCH_TILE_PITCH_um", 100.0)), min(pitch_r_um, pitch_c_um))
+    tile_rows = max(1, int(round(tile_pitch_um / max(pitch_r_um, 1.0e-12))))
+    tile_cols = max(1, int(round(tile_pitch_um / max(pitch_c_um, 1.0e-12))))
+
+    tile_x = []
+    tile_y = []
+    tile_active_count = []
+    tile_critical_fraction = []
+    x0_um = -0.5 * float(cols - 1) * pitch_c_um
+    y0_um = 0.5 * float(rows - 1) * pitch_r_um
+
+    for row_start in range(0, rows, tile_rows):
+        row_end = min(row_start + tile_rows, rows)
+        row_center = 0.5 * float(row_start + row_end - 1)
+        y_um = y0_um - row_center * pitch_r_um
+        for col_start in range(0, cols, tile_cols):
+            col_end = min(col_start + tile_cols, cols)
+            active_tile = active_bitmap[row_start:row_end, col_start:col_end]
+            n_active = int(np.count_nonzero(active_tile))
+            if n_active <= 0:
+                continue
+            critical_tile = esd_critical_bitmap[row_start:row_end, col_start:col_end] & active_tile
+            n_critical = int(np.count_nonzero(critical_tile))
+            col_center = 0.5 * float(col_start + col_end - 1)
+            tile_x.append(x0_um + col_center * pitch_c_um)
+            tile_y.append(y_um)
+            tile_active_count.append(n_active)
+            tile_critical_fraction.append(float(n_critical) / float(n_active))
+
+    if not tile_active_count:
+        return 0.0
+
+    tile_x = np.asarray(tile_x, dtype=np.float32)
+    tile_y = np.asarray(tile_y, dtype=np.float32)
+    tile_active_count = np.asarray(tile_active_count, dtype=np.float32)
+    tile_critical_fraction = np.asarray(tile_critical_fraction, dtype=np.float32)
+    tile_count = tile_active_count.size
+
+    mu_h_um = np.float32((float(top_dish_mean_nm) + float(bot_dish_mean_nm)) * 1e-3)
+    sigma_h_um = np.float32(
+        math.sqrt(max(float(top_dish_std_nm), 0.0) ** 2 + max(float(bot_dish_std_nm), 0.0) ** 2) * 1e-3
+    )
+    sample_count = max(1, int(getattr(cfg, "ESD_FIRST_TOUCH_SAMPLES", 1000)))
+    batch_size = max(1, int(getattr(cfg, "ESD_FIRST_TOUCH_BATCH_SIZE", 128)))
+    seed = int(getattr(cfg, "ESD_FIRST_TOUCH_SEED", 12345))
+    rng = np.random.default_rng(seed)
+
+    pad_size_half_um = np.float32(0.5 * float(pad_size_um))
+    z_top_um = np.float32(float(z_top_um))
+    critical_probability_sum = 0.0
+    simulated = 0
+    while simulated < sample_count:
+        this_batch = min(batch_size, sample_count - simulated)
+        theta_x_samples = rng.normal(
+            float(tilt_x_mean_deg),
+            max(float(tilt_x_std_deg), 0.0),
+            size=this_batch,
+        )
+        theta_y_samples = rng.normal(
+            float(tilt_y_mean_deg),
+            max(float(tilt_y_std_deg), 0.0),
+            size=this_batch,
+        )
+
+        a_samples = np.empty((this_batch,), dtype=np.float32)
+        b_samples = np.empty((this_batch,), dtype=np.float32)
+        for sample_idx, (theta_x_deg, theta_y_deg) in enumerate(zip(theta_x_samples, theta_y_samples)):
+            a, b, _ = _z_linear_coeffs(float(theta_x_deg), float(theta_y_deg))
+            a_samples[sample_idx] = np.float32(a)
+            b_samples[sample_idx] = np.float32(b)
+
+        corner_drop_um = pad_size_half_um * (np.abs(a_samples) + np.abs(b_samples))
+        deterministic_gap = (
+            z_top_um
+            + a_samples[:, None] * tile_x[None, :]
+            + b_samples[:, None] * tile_y[None, :]
+            - corner_drop_um[:, None]
+        )
+
+        if sigma_h_um > 0.0:
+            u = rng.random((this_batch, tile_count), dtype=np.float32)
+            u = np.clip(u, np.finfo(np.float32).tiny, 1.0 - np.finfo(np.float32).eps)
+            max_quantile = np.exp(np.log(u).astype(np.float32) / tile_active_count[None, :])
+            max_quantile = np.clip(max_quantile, np.finfo(np.float32).tiny, 1.0 - np.finfo(np.float32).eps)
+            tile_max_height = mu_h_um + sigma_h_um * ndtri(max_quantile).astype(np.float32)
+        else:
+            tile_max_height = np.full((this_batch, tile_count), float(mu_h_um), dtype=np.float32)
+
+        winner_tile = np.argmin(deterministic_gap - tile_max_height, axis=1)
+        critical_probability_sum += float(np.sum(tile_critical_fraction[winner_tile]))
+        simulated += this_batch
+
+    return float(np.clip(critical_probability_sum / float(sample_count), 0.0, 1.0))
 
 
 def _d2w_critical_first_touch_probability(
@@ -700,19 +888,6 @@ def _d2w_critical_first_touch_probability(
     bot_dish_std_nm: float,
     z_top_um: float,
 ) -> float:
-    quadrature_points = int(getattr(cfg, "ESD_ANALYTICAL_INNER_Q", 48))
-    outer_qx = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QX", 5))
-    outer_qy = int(getattr(cfg, "ESD_ANALYTICAL_OUTER_QY", 5))
-    tail_sigma = float(getattr(cfg, "ESD_ANALYTICAL_TAIL_SIGMA", 8.0))
-    chunk_size = int(getattr(cfg, "ESD_ANALYTICAL_CHUNK_SIZE", 100000))
-    fill_residual_uniformly = bool(getattr(cfg, "ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY", True))
-    candidate_sigma_window = float(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_SIGMA_WINDOW", 8.0))
-    candidate_min_pads = int(getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_MIN_PADS", 4096))
-    candidate_disable_fraction = float(
-        getattr(cfg, "ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION", 0.8)
-    )
-    verbose = bool(getattr(cfg, "verbose", False))
-
     pad_coords_um = np.asarray(pad_coords_um, dtype=np.float64)
     esd_critical_pad_mask = np.asarray(esd_critical_pad_mask, dtype=bool).reshape(-1)
     if pad_coords_um.ndim != 2 or pad_coords_um.shape[1] != 2:
@@ -727,69 +902,81 @@ def _d2w_critical_first_touch_probability(
 
     mu_h_um = (float(top_dish_mean_nm) + float(bot_dish_mean_nm)) * 1e-3
     sigma_h_um = math.sqrt(max(float(top_dish_std_nm), 0.0) ** 2 + max(float(bot_dish_std_nm), 0.0) ** 2) * 1e-3
-    if sigma_h_um <= 0.0:
-        raise ValueError("Combined dishing sigma is zero. Analytical ESD yield requires positive variation.")
 
-    x_nodes, x_weights = hermgauss(outer_qx)
-    y_nodes, y_weights = hermgauss(outer_qy)
+    sample_count = max(1, int(getattr(cfg, "ESD_FIRST_TOUCH_SAMPLES", 1000)))
+    batch_size = max(1, int(getattr(cfg, "ESD_FIRST_TOUCH_BATCH_SIZE", 16)))
+    seed = int(getattr(cfg, "ESD_FIRST_TOUCH_SEED", 12345))
+    verbose = bool(getattr(cfg, "verbose", False))
 
-    total_cases = int(outer_qx) * int(outer_qy)
-    case_id = 0
-    critical_first_touch_prob = 0.0
-    total_outer_weight = 0.0
+    rng = np.random.default_rng(seed)
+    x_um = np.asarray(pad_coords_um[:, 0], dtype=np.float32)
+    y_um = np.asarray(pad_coords_um[:, 1], dtype=np.float32)
+    critical_mask = np.asarray(esd_critical_pad_mask, dtype=bool)
+    pad_size_half_um = np.float32(0.5 * float(pad_size_um))
+    z_top_um = np.float32(float(z_top_um))
+    mu_h_um = np.float32(mu_h_um)
+    sigma_h_um = np.float32(max(float(sigma_h_um), 0.0))
 
-    for xa, wa in zip(x_nodes, x_weights):
-        theta_x_deg = float(tilt_x_mean_deg) + math.sqrt(2.0) * float(tilt_x_std_deg) * float(xa)
+    critical_hits = 0
+    simulated = 0
+    while simulated < sample_count:
+        this_batch = min(batch_size, sample_count - simulated)
+        theta_x_samples = rng.normal(
+            float(tilt_x_mean_deg),
+            max(float(tilt_x_std_deg), 0.0),
+            size=this_batch,
+        )
+        theta_y_samples = rng.normal(
+            float(tilt_y_mean_deg),
+            max(float(tilt_y_std_deg), 0.0),
+            size=this_batch,
+        )
 
-        for yb, wb in zip(y_nodes, y_weights):
-            theta_y_deg = float(tilt_y_mean_deg) + math.sqrt(2.0) * float(tilt_y_std_deg) * float(yb)
-            outer_coeff = float(wa * wb / math.pi)
+        a_samples = np.empty((this_batch,), dtype=np.float32)
+        b_samples = np.empty((this_batch,), dtype=np.float32)
+        for sample_idx, (theta_x_deg, theta_y_deg) in enumerate(
+            zip(theta_x_samples, theta_y_samples)
+        ):
+            a, b, _ = _z_linear_coeffs(float(theta_x_deg), float(theta_y_deg))
+            a_samples[sample_idx] = np.float32(a)
+            b_samples[sample_idx] = np.float32(b)
 
-            contact_limit_um = _deterministic_contact_limit_um(
-                pad_coords_um=pad_coords_um,
-                pad_size_um=float(pad_size_um),
-                tilt_x_deg=theta_x_deg,
-                tilt_y_deg=theta_y_deg,
-                z_top_um=float(z_top_um),
+        corner_drop_um = pad_size_half_um * (
+            np.abs(a_samples) + np.abs(b_samples)
+        )
+        deterministic_gap = (
+            z_top_um
+            + a_samples[:, None] * x_um[None, :]
+            + b_samples[:, None] * y_um[None, :]
+            - corner_drop_um[:, None]
+        )
+        if sigma_h_um > 0.0:
+            dish_height = rng.normal(
+                float(mu_h_um),
+                float(sigma_h_um),
+                size=(this_batch, pad_count),
+            ).astype(np.float32)
+        else:
+            dish_height = np.full(
+                (this_batch, pad_count),
+                float(mu_h_um),
+                dtype=np.float32,
             )
-            candidate_idx = _select_candidate_pad_indices(
-                contact_limit_um=contact_limit_um,
-                sigma_h_um=sigma_h_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
+        first_touch_idx = np.argmin(deterministic_gap - dish_height, axis=1)
+        critical_hits += int(np.count_nonzero(critical_mask[first_touch_idx]))
+        simulated += this_batch
+
+        if verbose:
+            print(
+                f"[ESD sampled first-touch] {simulated}/{sample_count}",
+                end="\r",
+                flush=True,
             )
-            critical_first_touch_prob_case = _fixed_tilt_critical_probability(
-                contact_limit_um=contact_limit_um[candidate_idx],
-                critical_mask=esd_critical_pad_mask[candidate_idx],
-                mu_h_um=mu_h_um,
-                sigma_h_um=sigma_h_um,
-                quadrature_points=quadrature_points,
-                tail_sigma=tail_sigma,
-                chunk_size=chunk_size,
-                fill_residual_uniformly=fill_residual_uniformly,
-            )
-
-            critical_first_touch_prob += outer_coeff * critical_first_touch_prob_case
-            total_outer_weight += outer_coeff
-            case_id += 1
-
-            if verbose:
-                print(
-                    f"[ESD analytical first-touch] {case_id}/{total_cases} | "
-                    f"theta_x={theta_x_deg:.3e} deg | "
-                    f"theta_y={theta_y_deg:.3e} deg",
-                    end="\r",
-                    flush=True,
-                )
-
-    if total_outer_weight > 0.0:
-        critical_first_touch_prob /= total_outer_weight
 
     if verbose:
         print()
 
-    return float(np.clip(critical_first_touch_prob, 0.0, 1.0))
+    return float(critical_hits / float(sample_count))
 
 
 def die_esd_yield_calculator(
@@ -894,34 +1081,38 @@ def stack_esd_yield_calculator(
         pad_coords = getattr(interface, "pad_coords", None)
         if pad_coords is None:
             pad_coords = die_stack.interfaces.base_pad_coords_dict.get(interface_name)
-        pad_coords = np.asarray(pad_coords, dtype=np.float64)
-        if pad_coords.ndim != 2 or pad_coords.shape[1] != 2:
-            raise ValueError(f"{interface_name}: interface.pad_coords must have shape (n_pads, 2).")
-
-        pad_count = pad_coords.shape[0]
         esd_critical_bitmap = pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"]
-        esd_critical_mask = np.asarray(
+        esd_critical_bitmap_2d = np.asarray(
             esd_critical_bitmap,
             dtype=bool,
-        ).reshape(-1)
-        dummy_mask = np.asarray(
-            pad_bitmap_collection.get("DUMMY_PAD_BITMAP", np.zeros_like(esd_critical_mask)),
+        )
+        dummy_bitmap_2d = np.asarray(
+            pad_bitmap_collection.get("DUMMY_PAD_BITMAP", np.zeros_like(esd_critical_bitmap_2d)),
             dtype=bool,
-        ).reshape(-1)
+        )
+        critical_bitmap_2d = np.asarray(
+            pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros_like(esd_critical_bitmap_2d)),
+            dtype=bool,
+        )
+        redundant_bitmap_2d = np.asarray(
+            pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros_like(esd_critical_bitmap_2d)),
+            dtype=bool,
+        )
+        power_ground_bitmap_2d = np.asarray(
+            pad_bitmap_collection.get("POWER_GROUND_PAD_BITMAP", np.zeros_like(esd_critical_bitmap_2d)),
+            dtype=bool,
+        )
+        active_bitmap_2d = (
+            critical_bitmap_2d
+            | redundant_bitmap_2d
+            | power_ground_bitmap_2d
+            | esd_critical_bitmap_2d
+        ) & (~dummy_bitmap_2d)
 
-        if esd_critical_mask.shape[0] != pad_count or dummy_mask.shape[0] != pad_count:
-            raise ValueError(
-                f"{interface_name}: pad bitmap size does not match pad coordinate count."
-            )
-
-        finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
-        active_mask = finite_coord_mask & ~dummy_mask
-        if not np.any(esd_critical_mask & active_mask):
+        if not np.any(esd_critical_bitmap_2d & active_bitmap_2d):
             die_stack.die_yield_per_interface_dict[interface_name]["ESD"] = 1.0
             continue
 
-        active_pad_coords = pad_coords[active_mask]
-        active_esd_critical_mask = esd_critical_mask[active_mask]
         pad_size_um = float(cfg.PAD_TOP_R_um) * 2.0
         top_dish_mean_nm = _cfg_float(cfg, ["TOP_DISH_MEAN_nm"], 0.0)
         top_dish_std_nm = _dish_std_nm_from_cfg(cfg, "TOP")
@@ -929,23 +1120,62 @@ def stack_esd_yield_calculator(
         bot_dish_std_nm = _dish_std_nm_from_cfg(cfg, "BOT")
         z_top_um = _cfg_float(cfg, ["ESD_Z_TOP_UM"], 0.1)
 
-        first_touch_key = _d2w_first_touch_cache_key(
-            cfg=cfg,
-            pad_coords_um=active_pad_coords,
-            esd_critical_pad_mask=active_esd_critical_mask,
-            pad_size_um=pad_size_um,
-            tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
-            tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
-            tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
-            tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
-            top_dish_mean_nm=top_dish_mean_nm,
-            top_dish_std_nm=top_dish_std_nm,
-            bot_dish_mean_nm=bot_dish_mean_nm,
-            bot_dish_std_nm=bot_dish_std_nm,
-            z_top_um=z_top_um,
+        active_pad_count = int(np.count_nonzero(active_bitmap_2d))
+        large_pad_threshold = int(getattr(cfg, "ESD_FIRST_TOUCH_GRID_THRESHOLD_PADS", 100_000))
+        use_grid_first_touch = (
+            pad_coords is None
+            or active_pad_count >= large_pad_threshold
+            or str(getattr(cfg, "ESD_FIRST_TOUCH_METHOD", "auto")).strip().lower() == "grid"
         )
-        if first_touch_key not in first_touch_cache:
-            first_touch_cache[first_touch_key] = _d2w_critical_first_touch_probability(
+
+        if use_grid_first_touch:
+            first_touch_key = _d2w_first_touch_grid_cache_key(
+                cfg=cfg,
+                active_bitmap=active_bitmap_2d,
+                esd_critical_bitmap=esd_critical_bitmap_2d,
+                pad_size_um=pad_size_um,
+                tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
+                tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
+                tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
+                tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
+                top_dish_mean_nm=top_dish_mean_nm,
+                top_dish_std_nm=top_dish_std_nm,
+                bot_dish_mean_nm=bot_dish_mean_nm,
+                bot_dish_std_nm=bot_dish_std_nm,
+                z_top_um=z_top_um,
+            )
+            if first_touch_key not in first_touch_cache:
+                first_touch_cache[first_touch_key] = _d2w_critical_first_touch_probability_grid_sampled(
+                    cfg=cfg,
+                    active_bitmap=active_bitmap_2d,
+                    esd_critical_bitmap=esd_critical_bitmap_2d,
+                    pad_size_um=pad_size_um,
+                    tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
+                    tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
+                    tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
+                    tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
+                    top_dish_mean_nm=top_dish_mean_nm,
+                    top_dish_std_nm=top_dish_std_nm,
+                    bot_dish_mean_nm=bot_dish_mean_nm,
+                    bot_dish_std_nm=bot_dish_std_nm,
+                    z_top_um=z_top_um,
+                )
+        else:
+            pad_coords = np.asarray(pad_coords, dtype=np.float64)
+            if pad_coords.ndim != 2 or pad_coords.shape[1] != 2:
+                raise ValueError(f"{interface_name}: interface.pad_coords must have shape (n_pads, 2).")
+            pad_count = pad_coords.shape[0]
+            esd_critical_mask = esd_critical_bitmap_2d.reshape(-1)
+            dummy_mask = dummy_bitmap_2d.reshape(-1)
+            if esd_critical_mask.shape[0] != pad_count or dummy_mask.shape[0] != pad_count:
+                raise ValueError(
+                    f"{interface_name}: pad bitmap size does not match pad coordinate count."
+                )
+            finite_coord_mask = np.isfinite(pad_coords[:, 0]) & np.isfinite(pad_coords[:, 1])
+            active_mask = finite_coord_mask & active_bitmap_2d.reshape(-1)
+            active_pad_coords = pad_coords[active_mask]
+            active_esd_critical_mask = esd_critical_mask[active_mask]
+            first_touch_key = _d2w_first_touch_cache_key(
                 cfg=cfg,
                 pad_coords_um=active_pad_coords,
                 esd_critical_pad_mask=active_esd_critical_mask,
@@ -960,6 +1190,22 @@ def stack_esd_yield_calculator(
                 bot_dish_std_nm=bot_dish_std_nm,
                 z_top_um=z_top_um,
             )
+            if first_touch_key not in first_touch_cache:
+                first_touch_cache[first_touch_key] = _d2w_critical_first_touch_probability(
+                    cfg=cfg,
+                    pad_coords_um=active_pad_coords,
+                    esd_critical_pad_mask=active_esd_critical_mask,
+                    pad_size_um=pad_size_um,
+                    tilt_x_mean_deg=float(cfg.TILT_X_MEAN_DEG),
+                    tilt_x_std_deg=float(cfg.TILT_X_STD_DEG),
+                    tilt_y_mean_deg=float(cfg.TILT_Y_MEAN_DEG),
+                    tilt_y_std_deg=float(cfg.TILT_Y_STD_DEG),
+                    top_dish_mean_nm=top_dish_mean_nm,
+                    top_dish_std_nm=top_dish_std_nm,
+                    bot_dish_mean_nm=bot_dish_mean_nm,
+                    bot_dish_std_nm=bot_dish_std_nm,
+                    z_top_um=z_top_um,
+                )
 
         p_fail_avg = _d2w_voltage_failure_average(
             cfg=cfg,

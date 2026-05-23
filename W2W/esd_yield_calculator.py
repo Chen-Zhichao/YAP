@@ -69,16 +69,7 @@ def _cfg_bool(cfg, keys, default=False) -> bool:
 
 def _dish_std_nm_from_cfg(cfg, side: str) -> float:
     side = str(side).upper()
-    scalar = _cfg_first(cfg, [f"{side}_DISH_STD_nm"], None)
-    if not _cfg_missing(scalar):
-        return float(scalar)
-
-    components = [
-        _cfg_float(cfg, [f"{side}_DISH_STD_L_nm"], 0.0),
-        _cfg_float(cfg, [f"{side}_DISH_STD_T_nm"], 0.0),
-        _cfg_float(cfg, [f"{side}_DISH_STD_E_nm"], 0.0),
-    ]
-    return float(math.sqrt(sum(max(value, 0.0) ** 2 for value in components)))
+    return _cfg_float(cfg, [f"{side}_DISH_STD_nm"], 0.0)
 
 
 def _cfg_length_um(cfg, um_keys, m_keys, default_um):
@@ -392,6 +383,7 @@ def _fixed_w2w_probability_map_with_arcing(
     chunk_size: int,
     fill_residual_uniformly: bool,
 ) -> np.ndarray:
+    del arc_distance_um
     contact_limit_um = np.asarray(contact_limit_um, dtype=np.float64).reshape(-1)
     pad_count = contact_limit_um.size
     if pad_count <= 0:
@@ -399,42 +391,29 @@ def _fixed_w2w_probability_map_with_arcing(
     if sigma_h_um <= 0.0:
         raise ValueError("Combined dishing sigma must be positive for analytical ESD yield calculation.")
 
-    mean_gap_um = contact_limit_um - float(arc_distance_um) - float(mu_h_um)
+    mean_gap_um = contact_limit_um - float(mu_h_um)
     low = float(np.min(mean_gap_um) - float(tail_sigma) * float(sigma_h_um))
-    high = float(np.max(contact_limit_um))
+    high = float(np.max(mean_gap_um) + float(tail_sigma) * float(sigma_h_um))
     if high <= low:
         high = float(np.max(mean_gap_um) + float(tail_sigma) * float(sigma_h_um))
 
     g_nodes, g_weights = _legendre_quadrature_interval(int(quadrature_points), low, high)
     prob = np.zeros((pad_count,), dtype=np.float64)
-    inactive_log_prob = float(log_ndtr((float(-arc_distance_um) - float(mu_h_um)) / float(sigma_h_um)))
     log_norm = -math.log(float(sigma_h_um)) - 0.5 * math.log(2.0 * math.pi)
     chunk_size = max(1, int(chunk_size))
 
     for g, w in zip(g_nodes, g_weights):
-        valid_mask = g <= contact_limit_um
-        if not np.any(valid_mask):
-            continue
-
-        log_survival = np.where(
-            valid_mask,
-            log_ndtr((mean_gap_um - float(g)) / float(sigma_h_um)),
-            inactive_log_prob,
-        )
+        log_survival = log_ndtr((mean_gap_um - float(g)) / float(sigma_h_um))
         total_log_survival = float(np.sum(log_survival))
         logw = math.log(float(w))
 
         for start in range(0, pad_count, chunk_size):
             end = min(start + chunk_size, pad_count)
-            local_valid = valid_mask[start:end]
-            if not np.any(local_valid):
-                continue
-
             local_mean = mean_gap_um[start:end]
             t = (float(g) - local_mean) / float(sigma_h_um)
             logf = -0.5 * t * t + log_norm
             log_integrand = logw + logf + total_log_survival - log_survival[start:end]
-            prob[start:end][local_valid] += np.exp(log_integrand[local_valid])
+            prob[start:end] += np.exp(log_integrand)
 
     prob_sum = float(np.sum(prob))
     if prob_sum <= 0.0:
@@ -651,14 +630,12 @@ def die_esd_yield_calculator(
     else:
         z_top_um = float(z_top_um)
 
-    v_min_v = _cfg_float(cfg, ["V_MIN_V"], 0.0)
-    v_max_v = _cfg_float(cfg, ["V_MAX_V"], 5.0)
+    v_cdm = _cfg_float(cfg, ["V_CDM"], 5.0)
     weibull_k = _cfg_float(cfg, ["WEIBULL_K"], 4.44985)
     weibull_lambda = _cfg_float(cfg, ["WEIBULL_LAMBDA"], 0.0621816)
     cutoff_min_a = _cfg_float(cfg, ["CUTOFF_MIN_A"], 0.0)
 
     quadrature_points = int(_cfg_float(cfg, ["ESD_ANALYTICAL_INNER_Q"], 48))
-    voltage_q = int(_cfg_float(cfg, ["ESD_ANALYTICAL_VOLTAGE_Q"], 5))
     warpage_q = int(_cfg_float(cfg, ["ESD_W2W_WARPAGE_Q", "W2W_ESD_WARPAGE_Q"], 3))
     tail_sigma = _cfg_float(cfg, ["ESD_ANALYTICAL_TAIL_SIGMA"], 8.0)
     chunk_size = int(_cfg_float(cfg, ["ESD_ANALYTICAL_CHUNK_SIZE"], 100000))
@@ -684,11 +661,6 @@ def die_esd_yield_calculator(
         warpage_q,
     )
 
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
-    voltage_norm = v_max_v - v_min_v
-    if voltage_norm <= 0.0:
-        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
-
     warpage_cases = []
     total_w_weight = 0.0
     for warpage_um, warpage_weight in zip(warpage_nodes, warpage_weights):
@@ -710,62 +682,50 @@ def die_esd_yield_calculator(
     if total_w_weight <= 0.0:
         raise ValueError("W2W ESD warpage quadrature weights sum to zero.")
 
-    die_failure_probability = 0.0
-    total_cases = int(len(v_nodes) * len(warpage_cases))
+    total_cases = int(len(warpage_cases))
     case_id = 0
 
-    for v_chg, v_weight in zip(v_nodes, v_weights):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        p_fail_v = _compute_p_fail_for_die(
-            top_die_w_um,
-            top_die_h_um,
-            float(v_chg),
-            cfg=cfg,
-            geff_um=arc_distance_um,
-            weibull_k=weibull_k,
-            weibull_lambda=weibull_lambda,
-            cutoff_min_a=cutoff_min_a,
+    p_fail = _compute_p_fail_for_die(
+        top_die_w_um,
+        top_die_h_um,
+        float(v_cdm),
+        cfg=cfg,
+        geff_um=_arc_distance_um_from_voltage(float(v_cdm), cfg=cfg),
+        weibull_k=weibull_k,
+        weibull_lambda=weibull_lambda,
+        cutoff_min_a=cutoff_min_a,
+    )
+    critical_first_arcing_prob = 0.0
+    for warpage_case in warpage_cases:
+        candidate_idx = _select_candidate_pad_indices(
+            contact_limit_um=warpage_case["contact_limit_um"],
+            sigma_h_um=sigma_h_um,
+            candidate_sigma_window=candidate_sigma_window,
+            candidate_min_pads=candidate_min_pads,
+            candidate_disable_fraction=candidate_disable_fraction,
         )
-
-        critical_first_arcing_prob_v = 0.0
-        for warpage_case in warpage_cases:
-            candidate_idx = _select_arcing_candidate_pad_indices(
-                contact_limit_um=warpage_case["contact_limit_um"],
-                sigma_h_um=sigma_h_um,
-                arc_distance_um=arc_distance_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
-            )
-            critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
-                contact_limit_um=warpage_case["contact_limit_um"][candidate_idx],
-                critical_mask=warpage_case["critical_mask"][candidate_idx],
-                mu_h_um=mu_h_um,
-                sigma_h_um=sigma_h_um,
-                arc_distance_um=arc_distance_um,
-                quadrature_points=quadrature_points,
-                tail_sigma=tail_sigma,
-                chunk_size=chunk_size,
-                fill_residual_uniformly=fill_residual_uniformly,
-            )
-            critical_first_arcing_prob_v += warpage_case["weight"] * float(critical_first_arcing_prob)
-            case_id += 1
-
-            if verbose:
-                print(
-                    f"[W2W ESD analytical] {case_id}/{total_cases} | "
-                    f"V={float(v_chg):.4f} V | w={warpage_case['warpage_um']:.4f} um",
-                    end="\r",
-                    flush=True,
-                )
-
-        critical_first_arcing_prob_v /= total_w_weight
-
-        die_failure_probability += (
-            float(v_weight) / voltage_norm
-            * float(p_fail_v)
-            * float(np.clip(critical_first_arcing_prob_v, 0.0, 1.0))
+        critical_first_arcing_prob += warpage_case["weight"] * _fixed_w2w_critical_probability_with_arcing(
+            contact_limit_um=warpage_case["contact_limit_um"][candidate_idx],
+            critical_mask=warpage_case["critical_mask"][candidate_idx],
+            mu_h_um=mu_h_um,
+            sigma_h_um=sigma_h_um,
+            arc_distance_um=0.0,
+            quadrature_points=quadrature_points,
+            tail_sigma=tail_sigma,
+            chunk_size=chunk_size,
+            fill_residual_uniformly=fill_residual_uniformly,
         )
+        case_id += 1
+        if verbose:
+            print(
+                f"[W2W ESD analytical] {case_id}/{total_cases} | "
+                f"V_CDM={float(v_cdm):.4f} V | w={warpage_case['warpage_um']:.4f} um",
+                end="\r",
+                flush=True,
+            )
+
+    critical_first_arcing_prob /= total_w_weight
+    die_failure_probability = float(p_fail) * float(np.clip(critical_first_arcing_prob, 0.0, 1.0))
 
     if verbose:
         print()
@@ -820,27 +780,21 @@ def pad_esd_yield_map_generator(
     active_coords = pad_coords_um[active_mask]
     active_critical = critical_mask[active_mask]
 
-    v_min_v = _cfg_float(cfg, ["V_MIN_V"], 0.0)
-    v_max_v = _cfg_float(cfg, ["V_MAX_V"], 5.0)
-    voltage_q = int(_cfg_float(cfg, ["ESD_ANALYTICAL_VOLTAGE_Q"], 5))
     weibull_k = _cfg_float(cfg, ["WEIBULL_K"], 4.44985)
     weibull_lambda = _cfg_float(cfg, ["WEIBULL_LAMBDA"], 0.0621816)
     cutoff_min_a = _cfg_float(cfg, ["CUTOFF_MIN_A"], 0.0)
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
-    voltage_norm = v_max_v - v_min_v
-    p_fail_avg = 0.0
-    for v_chg, v_weight in zip(v_nodes, v_weights):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        p_fail_avg += (float(v_weight) / voltage_norm) * _compute_p_fail_for_die(
-            top_die_w_um,
-            top_die_h_um,
-            float(v_chg),
-            cfg=cfg,
-            geff_um=arc_distance_um,
-            weibull_k=weibull_k,
-            weibull_lambda=weibull_lambda,
-            cutoff_min_a=cutoff_min_a,
-        )
+    v_chg = _cfg_float(cfg, ["V_CDM"], 5.0)
+    arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
+    p_fail_avg = _compute_p_fail_for_die(
+        top_die_w_um,
+        top_die_h_um,
+        float(v_chg),
+        cfg=cfg,
+        geff_um=arc_distance_um,
+        weibull_k=weibull_k,
+        weibull_lambda=weibull_lambda,
+        cutoff_min_a=cutoff_min_a,
+    )
 
     die_yield = die_esd_yield_calculator(
         cfg=cfg,
@@ -863,14 +817,8 @@ def pad_esd_yield_map_generator(
 
 
 def _w2w_voltage_quadrature(cfg) -> tuple[np.ndarray, np.ndarray, float]:
-    v_min_v = _cfg_float(cfg, ["V_MIN_V"], 0.0)
-    v_max_v = _cfg_float(cfg, ["V_MAX_V"], 5.0)
-    voltage_q = int(_cfg_float(cfg, ["ESD_ANALYTICAL_VOLTAGE_Q"], 5))
-    voltage_norm = v_max_v - v_min_v
-    if voltage_norm <= 0.0:
-        raise ValueError("cfg.V_MAX_V must be greater than cfg.V_MIN_V.")
-    v_nodes, v_weights = _legendre_quadrature_interval(voltage_q, v_min_v, v_max_v)
-    return v_nodes, v_weights, float(voltage_norm)
+    v_cdm = _cfg_float(cfg, ["V_CDM"], 5.0)
+    return np.array([float(v_cdm)], dtype=np.float64), np.array([1.0], dtype=np.float64), 1.0
 
 
 def _w2w_voltage_failure_probabilities(
@@ -927,10 +875,7 @@ def _w2w_first_arcing_cache_key(
         _cache_float(warpage_std_um),
         _cache_float(z_top_um),
         int(_cfg_float(cfg, ["ESD_ANALYTICAL_INNER_Q"], 48)),
-        int(_cfg_float(cfg, ["ESD_ANALYTICAL_VOLTAGE_Q"], 5)),
         int(_cfg_float(cfg, ["ESD_W2W_WARPAGE_Q", "W2W_ESD_WARPAGE_Q"], 3)),
-        _cache_float(_cfg_float(cfg, ["V_MIN_V"], 0.0)),
-        _cache_float(_cfg_float(cfg, ["V_MAX_V"], 5.0)),
         _cache_float(_cfg_float(cfg, ["ESD_ANALYTICAL_TAIL_SIGMA"], 8.0)),
         int(_cfg_float(cfg, ["ESD_ANALYTICAL_CHUNK_SIZE"], 100000)),
         _cfg_bool(cfg, ["ESD_ANALYTICAL_FILL_RESIDUAL_UNIFORMLY"], True),
@@ -938,12 +883,6 @@ def _w2w_first_arcing_cache_key(
         int(_cfg_float(cfg, ["ESD_ANALYTICAL_CANDIDATE_MIN_PADS"], 4096)),
         _cache_float(_cfg_float(cfg, ["ESD_ANALYTICAL_CANDIDATE_DISABLE_FRACTION"], 0.8)),
         _cfg_bool(cfg, ["ESD_W2W_USE_EXACT_SPHERE", "W2W_ESD_USE_EXACT_SPHERE"], True),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_PLATEAU_V"], 337.0)),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_SMALL_GAP_SLOPE_V_PER_UM"], 97.0)),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_PLATEAU_UPPER_GAP_UM"], 7.0)),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_LARGE_GAP_LINEAR_COEFF"], 2.48)),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_LARGE_GAP_SQRT_COEFF"], 58.0)),
-        _cache_float(_cfg_float(cfg, ["ESD_ARC_LARGE_GAP_OFFSET_V"], 170.0)),
     )
 
 
@@ -1019,46 +958,43 @@ def _w2w_critical_first_arcing_probabilities_by_voltage(
 
     v_nodes, v_weights, voltage_norm = _w2w_voltage_quadrature(cfg)
     critical_probs = np.zeros((len(v_nodes),), dtype=np.float64)
-    total_cases = int(len(v_nodes) * len(warpage_cases))
+    total_cases = int(len(warpage_cases))
     case_id = 0
-    for v_idx, v_chg in enumerate(v_nodes):
-        arc_distance_um = _arc_distance_um_from_voltage(float(v_chg), cfg=cfg)
-        critical_first_arcing_prob_v = 0.0
-        for warpage_case in warpage_cases:
-            candidate_idx = _select_arcing_candidate_pad_indices(
-                contact_limit_um=warpage_case["contact_limit_um"],
-                sigma_h_um=sigma_h_um,
-                arc_distance_um=arc_distance_um,
-                candidate_sigma_window=candidate_sigma_window,
-                candidate_min_pads=candidate_min_pads,
-                candidate_disable_fraction=candidate_disable_fraction,
-            )
-            critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
-                contact_limit_um=warpage_case["contact_limit_um"][candidate_idx],
-                critical_mask=warpage_case["critical_mask"][candidate_idx],
-                mu_h_um=mu_h_um,
-                sigma_h_um=sigma_h_um,
-                arc_distance_um=arc_distance_um,
-                quadrature_points=quadrature_points,
-                tail_sigma=tail_sigma,
-                chunk_size=chunk_size,
-                fill_residual_uniformly=fill_residual_uniformly,
-            )
-            critical_first_arcing_prob_v += warpage_case["weight"] * float(critical_first_arcing_prob)
-            case_id += 1
-            if verbose:
-                print(
-                    f"[W2W ESD first-arcing] {case_id}/{total_cases} | "
-                    f"V={float(v_chg):.4f} V | w={warpage_case['warpage_um']:.4f} um",
-                    end="\r",
-                    flush=True,
-                )
-
-        critical_probs[v_idx] = np.clip(
-            critical_first_arcing_prob_v / total_w_weight,
-            0.0,
-            1.0,
+    critical_first_arcing_prob_v = 0.0
+    for warpage_case in warpage_cases:
+        candidate_idx = _select_candidate_pad_indices(
+            contact_limit_um=warpage_case["contact_limit_um"],
+            sigma_h_um=sigma_h_um,
+            candidate_sigma_window=candidate_sigma_window,
+            candidate_min_pads=candidate_min_pads,
+            candidate_disable_fraction=candidate_disable_fraction,
         )
+        critical_first_arcing_prob = _fixed_w2w_critical_probability_with_arcing(
+            contact_limit_um=warpage_case["contact_limit_um"][candidate_idx],
+            critical_mask=warpage_case["critical_mask"][candidate_idx],
+            mu_h_um=mu_h_um,
+            sigma_h_um=sigma_h_um,
+            arc_distance_um=0.0,
+            quadrature_points=quadrature_points,
+            tail_sigma=tail_sigma,
+            chunk_size=chunk_size,
+            fill_residual_uniformly=fill_residual_uniformly,
+        )
+        critical_first_arcing_prob_v += warpage_case["weight"] * float(critical_first_arcing_prob)
+        case_id += 1
+        if verbose:
+            print(
+                f"[W2W ESD first-arcing] {case_id}/{total_cases} | "
+                f"w={warpage_case['warpage_um']:.4f} um",
+                end="\r",
+                flush=True,
+            )
+
+    critical_probs[:] = np.clip(
+        critical_first_arcing_prob_v / total_w_weight,
+        0.0,
+        1.0,
+    )
 
     if verbose:
         print()

@@ -87,14 +87,9 @@ d2w_simulation:
   # === Cu Dishing Parameters ===
   CU_RECESS_PAD_FAIL_RATIO: 0.0        # Ratio of pads with Cu recess > threshold to consider die as failed
   TOP_DISH_MEAN_nm: -4.0                  # Top pad height mean (nm)
-  TOP_DISH_STD_L_nm: 0.35               # Top pad height long-range std across dies/stacks (nm)
-  TOP_DISH_STD_T_nm: 0.27               # Top pad height std within-die across blocks (nm)
-  TOP_DISH_STD_E_nm: 0.22               # Top pad height short-range std across pads (nm)
+  TOP_DISH_STD_nm: 0.493761                  # One-level Cu dishing std (nm)
   BOT_DISH_MEAN_nm: -4.0                  # Bottom pad height mean (nm)
-  BOT_DISH_STD_L_nm: 0.35               # Bottom pad height long-range std across dies/stacks (nm)
-  BOT_DISH_STD_T_nm: 0.27               # Bottom pad height std within-die across blocks (nm)
-  BOT_DISH_STD_E_nm: 0.22               # Bottom pad height short-range std across pads (nm)
-  TL_um: 200                            # Transition length (block size) for dish std decomposition (µm)
+  BOT_DISH_STD_nm: 0.493761                  # One-level Cu dishing std (nm)
   k_et: 0.053                           # Top Cu expansion coefficient (nm/K)
   k_eb: 0.053                           # Bottom Cu expansion coefficient (nm/K)
   T_R: 25                               # Room temperature (°C)
@@ -146,8 +141,7 @@ d2w_simulation:
   TILT_Y_MEAN_DEG: 0.000
   TILT_Y_STD_DEG: 1e-5
 
-  V_MIN_V: 0.0
-  V_MAX_V: 5.0
+  V_CDM: 5.0
   ESD_Z_TOP_UM: 0.1                     # Nominal top-die z gap used by ESD first-touch geometry (um)
   ESD_ARC_SMALL_GAP_SLOPE_V_PER_UM: 97.0
   ESD_ARC_PLATEAU_V: 337.0
@@ -275,14 +269,9 @@ d2w_modeling:
   # === Cu Expansion / Dishing Parameters ===
   CU_RECESS_PAD_FAIL_RATIO: 0.0        # Ratio of pads with Cu recess > threshold to consider die as failed
   TOP_DISH_MEAN_nm: -4.0                  # Top pad height mean (nm)
-  TOP_DISH_STD_L_nm: 0.35               # Top pad height long-range std across dies/stacks (nm)
-  TOP_DISH_STD_T_nm: 0.27               # Top pad height std within-die across blocks (nm)
-  TOP_DISH_STD_E_nm: 0.22               # Top pad height short-range std across pads (nm)
+  TOP_DISH_STD_nm: 0.493761                  # One-level Cu dishing std (nm)
   BOT_DISH_MEAN_nm: -4.0                  # Bottom pad height mean (nm)
-  BOT_DISH_STD_L_nm: 0.35               # Bottom pad height long-range std across dies/stacks (nm)
-  BOT_DISH_STD_T_nm: 0.27               # Bottom pad height std within-die across blocks (nm)
-  BOT_DISH_STD_E_nm: 0.22               # Bottom pad height short-range std across pads (nm)
-  TL_um: 200                            # Transition length (block size) for dish std decomposition (µm)
+  BOT_DISH_STD_nm: 0.493761                  # One-level Cu dishing std (nm)
   k_et: 0.053                           # Top Cu expansion coef (nm/K)
   k_eb: 0.053                           # Bottom Cu expansion coef (nm/K)
   T_R: 25                               # Room temperature (°C)
@@ -334,8 +323,7 @@ d2w_modeling:
   TILT_Y_MEAN_DEG: 0.000
   TILT_Y_STD_DEG: 1e-5
 
-  V_MIN_V: 0.0
-  V_MAX_V: 5.0
+  V_CDM: 5.0
   ESD_Z_TOP_UM: 0.1                     # Nominal top-die z gap used by ESD first-touch geometry (um)
   ESD_ARC_SMALL_GAP_SLOPE_V_PER_UM: 97.0
   ESD_ARC_PLATEAU_V: 337.0

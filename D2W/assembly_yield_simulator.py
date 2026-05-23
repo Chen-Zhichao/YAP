@@ -61,15 +61,19 @@ def Assembly_Yield_Simulator(
 ):
     NUM_DIE_STACKS = cfg_skeleton.NUM_DIE_STACKS
     SIM_BATCH_SIZE = cfg_skeleton.SIM_BATCH_SIZE
-    num_sim_epoch = NUM_DIE_STACKS // SIM_BATCH_SIZE
     failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
     active_mechanisms = _active_failure_mechanisms(input_args)
+    if active_mechanisms == {'ESD'}:
+        esd_batch_size = int(getattr(cfg_skeleton, 'ESD_SIM_BATCH_SIZE', 1000))
+        SIM_BATCH_SIZE = min(NUM_DIE_STACKS, max(int(SIM_BATCH_SIZE), esd_batch_size))
+    num_sim_epoch = int(np.ceil(NUM_DIE_STACKS / SIM_BATCH_SIZE))
     epoch_yield_list = []
-    epoch_interface_yield_list_dict = {interface_name: [] for interface_name in cfg_dict}
+    interface_survival_sum_dict = {interface_name: 0.0 for interface_name in cfg_dict}
     skip_verbose_root_artifacts = bool(input_args.get('skip_verbose_root_artifacts', False))
     save_failure_maps = bool(input_args.get('save_failure_maps', False))
     file_suffix = input_args.get('output_file_tag', '')
     stack_cfg_dict = cfg_dict if stack_cfg_dict is None else stack_cfg_dict
+    overlay_boundary_flag = 'overlay' in active_mechanisms
 
     # Initialize a temporary die stack once to extract the reference pad coordinates.
     temp_die_stack_list, base_pad_coords_dict = die_stack_list_initialize(
@@ -78,6 +82,7 @@ def Assembly_Yield_Simulator(
         num_stack_samples=1,
         base_pad_coords_flag=True,
         mode='simulation',
+        overlay_boundary_flag=overlay_boundary_flag,
     )
     del temp_die_stack_list
 
@@ -93,14 +98,17 @@ def Assembly_Yield_Simulator(
                     fail_map_per_interface_dict[interface_name][failure_mechanism] = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))
                 fail_vec_per_interface_dict[interface_name][failure_mechanism] = np.zeros(NUM_DIE_STACKS)
 
+    simulated_stack_count = 0
     for epoch in range(num_sim_epoch):
+        current_batch_size = min(SIM_BATCH_SIZE, NUM_DIE_STACKS - simulated_stack_count)
         start_time = time.perf_counter()
         # Initialize the die list (Extract the base pad coordinates seperately for later use, so that a lot of memory can be saved)
         die_stack_list = die_stack_list_initialize(
             cfg_dict=cfg_dict,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
-            num_stack_samples=SIM_BATCH_SIZE,
+            num_stack_samples=current_batch_size,
             mode='simulation',
+            overlay_boundary_flag=overlay_boundary_flag,
         )
 
         # Generate overlay misalignment component samples for each bonding interface in each stack
@@ -124,7 +132,7 @@ def Assembly_Yield_Simulator(
 
         # Calculate the overall yield
         epoch_input_args = dict(input_args)
-        epoch_input_args['global_stack_offset'] = epoch * SIM_BATCH_SIZE
+        epoch_input_args['global_stack_offset'] = simulated_stack_count
         epoch_input_args['simulation_epoch'] = epoch
 
         yield_list, epoch_interface_yield_dict, epoch_fail_map_per_interface_dict, epoch_fail_vec_per_interface_dict = overall_yield_simulator(
@@ -135,9 +143,9 @@ def Assembly_Yield_Simulator(
             base_pad_coords_dict=base_pad_coords_dict,
             stack_cfg_dict=stack_cfg_dict,
         )
-        epoch_yield_list.append(yield_list)
+        epoch_yield_list.extend(yield_list)
         for interface_name, interface_yield in epoch_interface_yield_dict.items():
-            epoch_interface_yield_list_dict[interface_name].append(interface_yield)
+            interface_survival_sum_dict[interface_name] += float(interface_yield) * current_batch_size
 
         # Aggregate the fail maps/vectors
         if input_args['verbose']:
@@ -147,10 +155,11 @@ def Assembly_Yield_Simulator(
                         fail_map_per_interface_dict[interface_name][failure_mechanism]   \
                             += epoch_fail_map_per_interface_dict[interface_name][failure_mechanism]
                 for failure_mechanism in failure_mechanism_list:
-                    fail_vec_per_interface_dict[interface_name][failure_mechanism][epoch*SIM_BATCH_SIZE:(epoch+1)*SIM_BATCH_SIZE]  \
+                    fail_vec_per_interface_dict[interface_name][failure_mechanism][simulated_stack_count:simulated_stack_count+current_batch_size]  \
                         = epoch_fail_vec_per_interface_dict[interface_name][failure_mechanism]
 
-        print(f"Simulation progress: {(epoch+1) * SIM_BATCH_SIZE} / {NUM_DIE_STACKS} die stacks simulated. \
+        simulated_stack_count += current_batch_size
+        print(f"Simulation progress: {simulated_stack_count} / {NUM_DIE_STACKS} die stacks simulated. \
               Epoch yield: {np.mean(yield_list):.4f}. Time taken: {time.perf_counter() - start_time:.2f} seconds.", end='\r')
 
         del die_stack_list
@@ -158,8 +167,8 @@ def Assembly_Yield_Simulator(
     print("\n>>> Simulation Completed. Wrapping up results...")
     assembly_yield = np.mean(epoch_yield_list)
     per_interface_assembly_yield_dict = {
-        interface_name: float(np.mean(interface_yield_list))
-        for interface_name, interface_yield_list in epoch_interface_yield_list_dict.items()
+        interface_name: float(interface_survival_sum / NUM_DIE_STACKS)
+        for interface_name, interface_survival_sum in interface_survival_sum_dict.items()
     }
 
     output_root = os.path.join(next(iter(cfg_dict.values())).OUTPUT_DIR, input_args['ds_name'])
@@ -182,7 +191,7 @@ def Assembly_Yield_Simulator(
             if save_failure_maps:
                 for failure_mechanism in failure_mechanism_list:
                     fail_map_per_interface_dict[interface_name][failure_mechanism]   \
-                            /= (num_sim_epoch * SIM_BATCH_SIZE)
+                            /= NUM_DIE_STACKS
             # Report the failure reasons statistics
             print("{} die stack failures due to overlay misalignment.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overlay']))))
             print("{} die stack failures due to particle defects.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['particle']))))

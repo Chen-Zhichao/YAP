@@ -207,17 +207,10 @@ def cu_recess_die_yield_spatial(
 
 
 def _dish_sigma_components_nm(cfg):
-    top_L = _cfg_float(cfg, "TOP_DISH_STD_L_nm", 0.0)
-    top_T = _cfg_float(cfg, "TOP_DISH_STD_T_nm", 0.0)
-    top_E = _cfg_float(cfg, "TOP_DISH_STD_E_nm", 0.0)
-    bot_L = _cfg_float(cfg, "BOT_DISH_STD_L_nm", 0.0)
-    bot_T = _cfg_float(cfg, "BOT_DISH_STD_T_nm", 0.0)
-    bot_E = _cfg_float(cfg, "BOT_DISH_STD_E_nm", 0.0)
-
-    sigma_L = np.sqrt(top_L**2 + bot_L**2)
-    sigma_T = np.sqrt(top_T**2 + bot_T**2)
-    sigma_eps = np.sqrt(top_E**2 + bot_E**2)
-    return float(sigma_L), float(sigma_T), float(sigma_eps)
+    top_std = _cfg_float(cfg, "TOP_DISH_STD_nm", 0.0)
+    bot_std = _cfg_float(cfg, "BOT_DISH_STD_nm", 0.0)
+    sigma_eps = np.sqrt(top_std**2 + bot_std**2)
+    return 0.0, 0.0, float(sigma_eps)
 
 
 def _independent_all_pass_yield(pass_probs):
@@ -328,20 +321,7 @@ def stack_cu_expansion_yield_calculator(*, cfg_dict, die_stack):
         lower_cu_height_limits_critical_pads = np.clip(lower_cu_height_limits_critical_pads, a_max=0, a_min=None)
         upper_cu_height_limits_critical_pads = np.clip(upper_cu_height_limits_critical_pads, a_max=0, a_min=None)  # Clip to ensure upper Cu height limits are <= 0
 
-        block_size_r = max(
-            1,
-            int(round(_cfg_float(cfg, "TL_um", 200.0) / cfg.PITCH_r_um)),
-        )
-        block_size_c = max(
-            1,
-            int(round(_cfg_float(cfg, "TL_um", 200.0) / cfg.PITCH_c_um)),
-        )
-        block_idx_critical = block_indices_from_flat_indices(
-            critical_flat_idx,
-            cfg.PAD_ARR_COL,
-            block_size_r,
-            block_size_c,
-        )
+        block_idx_critical = np.zeros(critical_flat_idx.size, dtype=np.int32)
         sigma_L, sigma_T, sigma_eps = _dish_sigma_components_nm(cfg)
 
         critical_pad_group_yield = cu_recess_die_yield_spatial(

@@ -198,6 +198,7 @@ def die_interface_initialize(
     PAD_BOT_R_um: float,
     pad_bitmap_collection,
     pad_yield_flag: bool = False,
+    overlay_boundary_flag: bool = True,
 ):
     die_interface_list = []
 
@@ -271,21 +272,24 @@ def die_interface_initialize(
             print("Too many Cu pads... Will not generate the pad coordinates.")
             PAD_COORDS = None
 
-    overlay_active_pad_mask = (
-        np.asarray(pad_bitmap_collection.get("CRITICAL_PAD_BITMAP"), dtype=bool)
-        | np.asarray(pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP"), dtype=bool)
-        | np.asarray(
-            pad_bitmap_collection.get(
-                "POWER_GROUND_PAD_BITMAP",
-                np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=bool),
-            ),
-            dtype=bool,
+    if overlay_boundary_flag:
+        overlay_active_pad_mask = (
+            np.asarray(pad_bitmap_collection.get("CRITICAL_PAD_BITMAP"), dtype=bool)
+            | np.asarray(pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP"), dtype=bool)
+            | np.asarray(
+                pad_bitmap_collection.get(
+                    "POWER_GROUND_PAD_BITMAP",
+                    np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=bool),
+                ),
+                dtype=bool,
+            )
         )
-    )
-    OVL_ACTIVE_PAD_BOUNDARY_COORDS = _boundary_coords_from_mask(
-        PAD_COORDS,
-        overlay_active_pad_mask,
-    )
+        OVL_ACTIVE_PAD_BOUNDARY_COORDS = _boundary_coords_from_mask(
+            PAD_COORDS,
+            overlay_active_pad_mask,
+        )
+    else:
+        OVL_ACTIVE_PAD_BOUNDARY_COORDS = None
 
     for i in range(NUM_DIE_SAMPLES):
         die = Die(
@@ -330,7 +334,11 @@ class Bonding_Interfaces:
             # Particle-induced void failure parameters for each bonding interface in each stack
             self.failure_params_dict[interface_name]['voids'] = None  # each entry is an array of voids [x, y, r_um]
 
-    def add_interfaces(self, base_pad_coords_flag: bool = False):
+    def add_interfaces(
+        self,
+        base_pad_coords_flag: bool = False,
+        overlay_boundary_flag: bool = True,
+    ):
         """
         Initialize bonding interfaces for a single die stack.
         """
@@ -349,6 +357,7 @@ class Bonding_Interfaces:
                 PAD_BOT_R_um              = cfg.PAD_BOT_R_um,
                 pad_bitmap_collection     = self.pad_bitmap_collection_dict[interface_name],
                 pad_yield_flag            = cfg.pad_yield_flag,
+                overlay_boundary_flag     = overlay_boundary_flag,
             )
             self.interface_dict[interface_name] = interface_list[0]
             if base_pad_coords_flag:
@@ -363,6 +372,7 @@ class DieStack:
         pad_bitmap_collection_dict: dict,
         mode = None,
         base_pad_coords_flag: bool = False,
+        overlay_boundary_flag: bool = True,
     ):
         """
         Die Stack object for hybrid bonding yield model.
@@ -376,7 +386,10 @@ class DieStack:
             cfg_dict=cfg_dict,
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
         )
-        self.interfaces.add_interfaces(base_pad_coords_flag=base_pad_coords_flag)
+        self.interfaces.add_interfaces(
+            base_pad_coords_flag=base_pad_coords_flag,
+            overlay_boundary_flag=overlay_boundary_flag,
+        )
 
         if 'simulation' in mode:    # For yield simulation
             self.survival = True
@@ -441,6 +454,7 @@ def die_stack_list_initialize(
     num_stack_samples: int,
     base_pad_coords_flag: bool = False,
     mode: str = 'simulation',
+    overlay_boundary_flag: bool = True,
 ):
     """
     Inputs:
@@ -457,6 +471,7 @@ def die_stack_list_initialize(
             pad_bitmap_collection_dict=pad_bitmap_collection_dict,
             mode=mode,
             base_pad_coords_flag=base_pad_coords_flag,
+            overlay_boundary_flag=overlay_boundary_flag,
         )
         die_stack_list.append(die_stack)
     if base_pad_coords_flag:

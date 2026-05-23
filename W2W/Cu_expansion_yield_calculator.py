@@ -41,14 +41,9 @@ def _mechanical_model_cache_key(cfg, pad_bitmap_collection):
 
     for key in (
         "TOP_DISH_MEAN_nm",
-        "TOP_DISH_STD_L_nm",
-        "TOP_DISH_STD_T_nm",
-        "TOP_DISH_STD_E_nm",
+        "TOP_DISH_STD_nm",
         "BOT_DISH_MEAN_nm",
-        "BOT_DISH_STD_L_nm",
-        "BOT_DISH_STD_T_nm",
-        "BOT_DISH_STD_E_nm",
-        "TL_um",
+        "BOT_DISH_STD_nm",
         "PITCH_r_um",
         "PITCH_c_um",
         "PAD_ARR_ROW",
@@ -523,8 +518,8 @@ def _redundant_group_yield_spatial(
 #         valid_pad_mask = valid_pad_mask_dict[interface_name]
 
 #         # Extract the necessary parameters for Cu expansion yield calculation
-#         TOP_DISH_MEAN_nm, TOP_DISH_STD_nm = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_L_nm
-#         BOT_DISH_MEAN_nm, BOT_DISH_STD_nm = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_L_nm
+#         TOP_DISH_MEAN_nm, TOP_DISH_STD_nm = cfg.TOP_DISH_MEAN_nm, cfg.TOP_DISH_STD_nm
+#         BOT_DISH_MEAN_nm, BOT_DISH_STD_nm = cfg.BOT_DISH_MEAN_nm, cfg.BOT_DISH_STD_nm
 #         CRITICAL_PAD_MASK = pad_bitmap_collection['CRITICAL_PAD_BITMAP'].flatten()
 #         redundant_net_to_1d_physical_mask = pad_bitmap_collection['redundant_net_to_1d_physical_mask']
 
@@ -611,21 +606,17 @@ def stack_stress_yield_calculator(
         # --- Config ---
         PAD_ARR_ROW, PAD_ARR_COL = cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL
         TOP_DISH_MEAN_nm  = cfg.TOP_DISH_MEAN_nm
-        TOP_DISH_STD_L_nm = cfg.TOP_DISH_STD_L_nm
-        TOP_DISH_STD_T_nm = cfg.TOP_DISH_STD_T_nm
-        TOP_DISH_STD_E_nm = cfg.TOP_DISH_STD_E_nm
+        TOP_DISH_STD_nm = cfg.TOP_DISH_STD_nm
         BOT_DISH_MEAN_nm  = cfg.BOT_DISH_MEAN_nm
-        BOT_DISH_STD_L_nm = cfg.BOT_DISH_STD_L_nm
-        BOT_DISH_STD_T_nm = cfg.BOT_DISH_STD_T_nm
-        BOT_DISH_STD_E_nm = cfg.BOT_DISH_STD_E_nm
+        BOT_DISH_STD_nm = cfg.BOT_DISH_STD_nm
 
-        block_size_r = max(1, int(round(float(cfg.TL_um) / float(cfg.PITCH_r_um))))
-        block_size_c = max(1, int(round(float(cfg.TL_um) / float(cfg.PITCH_c_um))))
+        block_size_r = max(1, int(PAD_ARR_ROW))
+        block_size_c = max(1, int(PAD_ARR_COL))
 
         mu        = TOP_DISH_MEAN_nm + BOT_DISH_MEAN_nm
-        sigma_L   = np.sqrt(TOP_DISH_STD_L_nm**2 + BOT_DISH_STD_L_nm**2)
-        sigma_T   = np.sqrt(TOP_DISH_STD_T_nm**2 + BOT_DISH_STD_T_nm**2)
-        sigma_eps = np.sqrt(TOP_DISH_STD_E_nm**2 + BOT_DISH_STD_E_nm**2)
+        sigma_L   = 0.0
+        sigma_T   = 0.0
+        sigma_eps = np.sqrt(TOP_DISH_STD_nm**2 + BOT_DISH_STD_nm**2)
 
         stress_yield_array = np.full(interface.num_dies, np.nan, dtype=np.float64)
         if cache_key in _MECHANICAL_MODEL_CACHE:
@@ -674,12 +665,7 @@ def stack_stress_yield_calculator(
                 f"pads with invalid coordinates, e.g. flat indices {bad.tolist()}."
             )
         critical_pos = np.searchsorted(selected_flat_idx, critical_flat_idx)
-        critical_block_idx = block_indices_from_flat_indices(
-            critical_flat_idx,
-            PAD_ARR_COL,
-            block_size_r,
-            block_size_c,
-        )
+        critical_block_idx = np.zeros(critical_flat_idx.size, dtype=np.int32)
 
         pad_dishing_bound_array = debond_dishing_intervals_from_coords(
             cfg,

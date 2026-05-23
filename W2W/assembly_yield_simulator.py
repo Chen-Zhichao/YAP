@@ -14,6 +14,10 @@ from defect_yield_simulator import defect_yield_simulator
 from overall_yield_simulator import overall_yield_simulator
 from utils.util import result_wrapper
 from warpage_yield_simulator import sample_w2w_warpage_process
+from esd_yield_simulator import (
+    choose_center_die_index,
+    esd_failure_batch_simulator,
+)
 
 
 _CLEAR_LINE = "\033[K"
@@ -67,6 +71,7 @@ def Assembly_Yield_Simulator(
     run_particle = 'particle' in active_mechanisms
     run_warpage = 'warpage' in active_mechanisms
     warpage_only_fast_path = active_mechanisms == {'warpage'}
+    esd_only_fast_path = active_mechanisms == {'ESD'}
     epoch_yield_list = []
 
     if warpage_only_fast_path:
@@ -125,6 +130,129 @@ def Assembly_Yield_Simulator(
                 fail_map_per_interface_dict[interface_name][failure_mechanism] = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))
                 fail_vec_per_interface_dict[interface_name][failure_mechanism] = np.zeros((NUM_WAFER_STACKS, num_dies_per_wafer))
         del temp_waf_stack_list
+
+    if esd_only_fast_path:
+        start_time = time.time()
+        template_waf_stack_list = wafer_stack_list_initialize(
+            cfg_dict                    =       cfg_dict,
+            pad_bitmap_collection_dict  =       pad_bitmap_collection_dict,
+            num_stack_samples           =       1,
+            mode                        =       input_args['mode'],
+        )
+        template_waf_stack = template_waf_stack_list[0]
+        num_dies_per_wafer = template_waf_stack.num_dies_per_wafer
+
+        if not input_args['verbose']:
+            fail_map_per_interface_dict = None
+            fail_vec_per_interface_dict = None
+
+        interface_static = {}
+        for interface_name, waf_interface in template_waf_stack.interfaces.interface_dict.items():
+            cfg = cfg_dict[interface_name]
+            pad_bitmap_collection = pad_bitmap_collection_dict[interface_name]
+            empty_bitmap = np.zeros_like(
+                pad_bitmap_collection['CRITICAL_PAD_BITMAP'],
+                dtype=bool,
+            )
+            valid_pad_mask = (
+                (pad_bitmap_collection['CRITICAL_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['REDUNDANT_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection['DUMMY_PAD_BITMAP'] == 1)
+                | (pad_bitmap_collection.get('POWER_GROUND_PAD_BITMAP', empty_bitmap) == 1)
+            )
+            valid_pad_mask_flat = valid_pad_mask.flatten()
+            valid_linear_idx = np.flatnonzero(valid_pad_mask_flat)
+            interface_static[interface_name] = {
+                "cfg": cfg,
+                "waf_interface": waf_interface,
+                "valid_pad_mask_flat": valid_pad_mask_flat,
+                "valid_linear_idx": valid_linear_idx,
+                "valid_dummy_pad_bitmap": pad_bitmap_collection['DUMMY_PAD_BITMAP'].flatten()[valid_pad_mask_flat],
+                "die_esd_critical_pad_bitmap": pad_bitmap_collection["ESD_CRITICAL_PAD_BITMAP"],
+                "selected_esd_die_ind": choose_center_die_index(
+                    waf_interface.die_list,
+                    tolerance_um=(
+                        None
+                        if getattr(cfg, "ESD_CENTER_TOL_UM", None) is None
+                        else float(getattr(cfg, "ESD_CENTER_TOL_UM"))
+                    ),
+                ),
+            }
+
+        die_stack_survival = np.ones((NUM_WAFER_STACKS, num_dies_per_wafer), dtype=bool)
+        for interface_name, static in interface_static.items():
+            cfg = static["cfg"]
+            waf_interface = static["waf_interface"]
+            die_ind = static["selected_esd_die_ind"]
+            if die_ind is None:
+                continue
+
+            die = waf_interface.die_list[int(die_ind)]
+            valid_pad_mask_flat = static["valid_pad_mask_flat"]
+            valid_linear_idx = static["valid_linear_idx"]
+            valid_die_pad_coords = (
+                waf_interface.base_pad_coords + die.die_center
+            )[valid_pad_mask_flat]
+            first_contact_pad_idx, survive_bool = esd_failure_batch_simulator(
+                cfg=cfg,
+                pad_coords_um=valid_die_pad_coords,
+                pad_size_um=cfg.PAD_TOP_R_um * 2,
+                top_die_w_um=die.DIE_W_um,
+                top_die_h_um=die.DIE_L_um,
+                wafer_radius_um=cfg.WAF_R_um,
+                num_samples=NUM_WAFER_STACKS,
+                dummy_pad_bitmap=static["valid_dummy_pad_bitmap"],
+            )
+            failed_by_discharge = ~np.asarray(survive_bool, dtype=bool)
+            for stack_idx in np.flatnonzero(failed_by_discharge):
+                if (not input_args['verbose']) and (not die_stack_survival[int(stack_idx), int(die_ind)]):
+                    continue
+                full_linear_idx = int(valid_linear_idx[int(first_contact_pad_idx[int(stack_idx)])])
+                r_idx = full_linear_idx // int(cfg.PAD_ARR_COL)
+                c_idx = full_linear_idx % int(cfg.PAD_ARR_COL)
+                if input_args['verbose']:
+                    fail_map_per_interface_dict[interface_name]['ESD'][r_idx, c_idx] += 1
+                    fail_map_per_interface_dict[interface_name]['overall'][r_idx, c_idx] += 1
+                if static["die_esd_critical_pad_bitmap"][r_idx, c_idx] == 1:
+                    die_stack_survival[int(stack_idx), int(die_ind)] = False
+                    if input_args['verbose']:
+                        fail_vec_per_interface_dict[interface_name]['ESD'][int(stack_idx), int(die_ind)] = 1
+                        fail_vec_per_interface_dict[interface_name]['overall'][int(stack_idx), int(die_ind)] = 1
+
+            _print_progress(
+                f"ESD-only interface {interface_name}: "
+                f"{int(np.count_nonzero(failed_by_discharge))}/{NUM_WAFER_STACKS} "
+                f"discharges failed. Time taken: {time.time() - start_time:.2f} seconds."
+            )
+
+        epoch_yield_list = np.mean(die_stack_survival, axis=1).astype(float).tolist()
+
+        print(f"\r{_CLEAR_LINE}\nSimulation for all epochs completed.")
+        assembly_yield = float(np.mean(epoch_yield_list)) if epoch_yield_list else 0.0
+        for interface_name, cfg in cfg_dict.items():
+            if input_args['verbose']:
+                for failure_mechanism in failure_mechanism_list:
+                    fail_map_per_interface_dict[interface_name][failure_mechanism] /= (
+                        NUM_WAFER_STACKS * num_dies_per_wafer
+                    )
+                print("{} die stack failures due to overlay misalignment.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overlay']))))
+                print("{} die stack failures due to particle defects.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['particle']))))
+                print("{} die stack failures due to mechanical issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['mechanical']))))
+                print("{} die stack failures due to ESD issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['ESD']))))
+                print("{} die stack failures due to warpage issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['warpage']))))
+                print("{} die stack failures in total.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overall']))))
+                np.savez(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_map_per_interface_dict.npz', **fail_map_per_interface_dict)
+                print("Failure heat maps saved to {}.".format(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_map_per_interface_dict.npz'))
+                np.savez(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_vec_per_interface_dict.npz', **fail_vec_per_interface_dict)
+                print("Failure vectors for all die samples saved to {}.".format(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_vec_per_interface_dict.npz'))
+
+            result_wrapper(
+                mode = input_args['mode'],
+                cfg = cfg,
+                fail_map_per_interface_dict = fail_map_per_interface_dict if input_args['verbose'] else None,
+            )
+        del template_waf_stack_list
+        return assembly_yield, epoch_yield_list
     
     # Iterate over simulation epochs
     for epoch in range(num_sim_epoch):

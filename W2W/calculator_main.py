@@ -9,6 +9,19 @@ import argparse
 from assembly_yield_calculator import Assembly_Yield_Calculator
 
 
+def _resolve_module_output_dir(output_dir: str) -> str:
+    output_dir = os.fspath(output_dir)
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_dir)
+    output_dir = os.path.normpath(output_dir)
+    return output_dir + os.sep
+
+
+def _anchor_output_dirs_to_module(cfg_dict: dict) -> None:
+    for cfg in cfg_dict.values():
+        cfg.OUTPUT_DIR = _resolve_module_output_dir(cfg.OUTPUT_DIR)
+
+
 def parse_args():
     p = argparse.ArgumentParser(description="Simulate assembly yield for W2W hybrid bonding")
     p.add_argument("--config", "-c", required=True, help="Path to skeleton config YAML file")
@@ -54,6 +67,8 @@ def main():
                                 debug=args.debug)
     cfg_loading_time = time.time()
     print(f"Config loading and processing finished in {cfg_loading_time - start_time:.2f} seconds.")
+
+    _anchor_output_dirs_to_module(cfg_dict)
 
     # Plotting flag
     for cfg in cfg_dict.values():

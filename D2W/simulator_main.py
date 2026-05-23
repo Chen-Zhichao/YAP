@@ -36,6 +36,19 @@ def _build_output_file_tag(config_path: str, criticality_profile: str) -> str:
     return f"__{tag}" if tag else ""
 
 
+def _resolve_module_output_dir(output_dir: str) -> str:
+    output_dir = os.fspath(output_dir)
+    if not os.path.isabs(output_dir):
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_dir)
+    output_dir = os.path.normpath(output_dir)
+    return output_dir + os.sep
+
+
+def _anchor_output_dirs_to_module(cfg_dict: dict) -> None:
+    for cfg in cfg_dict.values():
+        cfg.OUTPUT_DIR = _resolve_module_output_dir(cfg.OUTPUT_DIR)
+
+
 def _resolve_design_root_and_layout_dir(ds_dir: str) -> tuple[str, str]:
     layout_dir = ds_dir.rstrip("/")
     design_root = layout_dir
@@ -229,6 +242,8 @@ def main():
             )
         cfg_loading_time = time.perf_counter() - start_time
         print(f"Config loading and processing finished in {cfg_loading_time:.2f} seconds.")
+
+        _anchor_output_dirs_to_module(cfg_dict)
 
         # Plotting flag
         for cfg in cfg_dict.values():
