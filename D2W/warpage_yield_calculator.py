@@ -31,7 +31,37 @@ def curvature_to_bow_um(kappa, L_m):
     return 0.5 * kappa * L_m**2 * 1e6
 
 
-def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
+def _infer_bonded_die_count(layer_df):
+    """
+    Infer the number of bonded die/wafer bodies represented by layer_df.
+
+    The exp01 D2D verification represents each die as two consecutive
+    sublayers, Si plus interface, with the same initial bow.  The production
+    D2W stack model usually has one effective layer per chiplet.  This helper
+    keeps both conventions usable without requiring a new public argument.
+    """
+    row_count = int(len(layer_df))
+    if row_count == 0:
+        return 0
+    if row_count % 2 != 0 or "W0_um" not in layer_df.columns:
+        return row_count
+
+    w0 = layer_df["W0_um"].to_numpy(dtype=float)
+    paired = True
+    for idx in range(0, row_count, 2):
+        if not math.isclose(float(w0[idx]), float(w0[idx + 1]), rel_tol=0.0, abs_tol=1.0e-9):
+            paired = False
+            break
+    return row_count // 2 if paired else row_count
+
+
+def _is_paired_d2d_layer_table(layer_df):
+    """Return True for D2D tables represented as repeated substrate/interface pairs."""
+    row_count = int(len(layer_df))
+    return row_count > 0 and _infer_bonded_die_count(layer_df) * 2 == row_count
+
+
+def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
     """
     Compute multilayer total stack bow using the model from
     total_stack_warpage_16die.ipynb.
@@ -69,23 +99,67 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
 
     a = h_cumsum - 0.5 * (h[0] + h)
     b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
-
     delta_alpha = alpha - alpha[0]
-    s_alpha = np.sum(delta_alpha * weights) / np.sum(weights)
+
+    if thermal_layer_df is None:
+        thermal_df = df
+    else:
+        thermal_df = thermal_layer_df.copy().reset_index(drop=True)
+        missing_thermal = [col for col in required if col not in thermal_df.columns]
+        if missing_thermal:
+            raise ValueError(f"Missing required thermal-layer columns: {missing_thermal}")
+
+    h_t = thermal_df["h_um"].to_numpy(dtype=float) * 1e-6
+    E_t = thermal_df["E_GPa"].to_numpy(dtype=float) * 1e9
+    nu_t = thermal_df["nu"].to_numpy(dtype=float)
+    alpha_t = thermal_df["alpha_ppm_K"].to_numpy(dtype=float) * 1e-6
+    if np.any(h_t <= 0):
+        raise ValueError("All thermal layer thicknesses must be positive.")
+    if np.any((nu_t <= -1.0) | (nu_t >= 0.5)):
+        raise ValueError("Thermal-layer Poisson ratios should be in the elastic range (-1, 0.5).")
+
+    # The Suhir/Kim axial compatibility terms use E/(1-nu).  For the thermal
+    # curvature moment measured as an edge bow of a 3D plate, the finite-element
+    # comparison follows the plane-stress plate modulus E/(1-nu^2) more closely.
+    E_thermal = E_t / (1.0 - nu_t**2)
+    thermal_weights = E_thermal * h_t
+    h_t_cumsum = np.cumsum(h_t)
+    a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
+    delta_alpha_t = alpha_t - alpha_t[0]
+    s_alpha = np.sum(delta_alpha_t * thermal_weights) / np.sum(thermal_weights)
     s_a = np.sum(a * weights) / np.sum(weights)
     s_b = np.sum(b * weights) / np.sum(weights)
 
     D = E_biaxial * h**3 / 12.0
-    M_T = np.sum((a / lam) * (delta_alpha - s_alpha) * DeltaT_K)
+    # D2D batch stacks in exp01 are represented as repeated Si/interface layer
+    # pairs. They are flattened and tied at anneal temperature, then the
+    # flattening constraints are released while cooling. With the positive bow
+    # convention used here, that release sequence puts the CTE-gradient moment
+    # on the opposite branch from the raw free-strain expression. Keep the
+    # original branch for ordinary one-layer-per-chiplet D2W inputs.
+    thermal_branch_sign = -1.0 if _is_paired_d2d_layer_table(df) else 1.0
+    thermal_strain_t = thermal_branch_sign * (delta_alpha_t - s_alpha) * DeltaT_K
+    thermal_strain = thermal_branch_sign * (delta_alpha - s_alpha) * DeltaT_K
+    M_T = np.sum(a_t * thermal_weights * thermal_strain_t)
     M_b = np.sum((a / lam) * (b - s_b))
     K_a = np.sum((a / lam) * (a - s_a))
     K_D = np.sum(D)
     M_D0 = np.sum(D * kappa0)
 
-    kappa = (M_D0 + M_T + M_b) / (K_D + K_a)
+    denominator = K_D + K_a
+    W_nonthermal_um = curvature_to_bow_um((M_D0 + M_b) / denominator, L_m)
+    W_thermal_um = curvature_to_bow_um(M_T / denominator, L_m)
+    inferred_die_count = _infer_bonded_die_count(df)
+    thermal_moment_scale = 1.0
+
+    kappa = (M_D0 + M_T + M_b) / denominator
     W_um = curvature_to_bow_um(kappa, L_m)
 
-    strain_term = (delta_alpha - s_alpha) * DeltaT_K - (a - s_a) * kappa + (b - s_b)
+    strain_term = (
+        thermal_strain
+        - (a - s_a) * kappa
+        + (b - s_b)
+    )
     F = weights * strain_term
     sigma = E_biaxial * strain_term
 
@@ -95,9 +169,15 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
         "abs_W_um": float(abs(W_um)),
         "DeltaT_K": float(DeltaT_K),
         "L_m": float(L_m),
+        "inferred_die_count": int(inferred_die_count),
+        "thermal_moment_scale": float(thermal_moment_scale),
+        "thermal_branch_sign": float(thermal_branch_sign),
+        "nonthermal_W_um": float(W_nonthermal_um),
+        "thermal_W_um": float(W_thermal_um),
     }
     layer_out = df.copy()
     layer_out["E_biaxial_GPa"] = E_biaxial / 1e9
+    layer_out["E_thermal_plate_GPa"] = E / (1.0 - nu**2) / 1e9
     layer_out["kappa0_1_per_m"] = kappa0
     layer_out["F_N_per_m"] = F
     layer_out["sigma_MPa"] = sigma / 1e6

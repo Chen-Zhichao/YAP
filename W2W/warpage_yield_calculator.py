@@ -24,8 +24,35 @@ from omegaconf import OmegaConf
 
 try:
     from utils.util import w2w_area_scaled_layer_volumes
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     from W2W.utils.util import w2w_area_scaled_layer_volumes
+
+
+# The current W2W MAPDL verification compacts the completed lower stack into
+# its released spherical bow before the next bonding/anneal step.  Under that
+# compacted-state assumption, carrying an additional scalar residual-curvature
+# memory double-counts history.  Keep the parameter available for future
+# stress-history models, but default the production recurrence to bow transfer
+# only.
+DEFAULT_RESIDUAL_CURVATURE_CARRY = 0.0
+DEFAULT_RESIDUAL_CURVATURE_MEMORY_DECAY = 0.50
+DEFAULT_THERMAL_RESIDUAL_MOMENT_CARRY = 0.90
+DEFAULT_THERMAL_RESIDUAL_MOMENT_MEMORY_DECAY = 0.90
+DEFAULT_THERMAL_RESIDUAL_MOMENT_TERMINAL_POWER = 2.00
+
+
+def _w2w_incremental_thermal_delta_t(delta_t):
+    """
+    Convert a nominal cooldown DeltaT into the incremental W2W thermal step.
+
+    `compute_total_stack_warpage` is a single bonding/release formula whose
+    DeltaT convention matches a batch stack assembled stress-free at anneal and
+    then cooled to room.  In W2W, however, the already completed lower stack is
+    carried from its released room-temperature state into the next anneal before
+    cooling again.  The incremental thermal mismatch seen by that carried state
+    therefore has the opposite sign from the batch cooldown input.
+    """
+    return -float(delta_t)
 
 
 def _instance_from_3dbx_endpoint(endpoint) -> str:
@@ -136,7 +163,7 @@ def curvature_to_bow_um(kappa, L_m):
     return 0.5 * kappa * L_m**2 * 1e6
 
 
-def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
+def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
     """
     Compute multilayer total stack bow for one anneal/release event.
 
@@ -173,14 +200,39 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
 
     a = h_cumsum - 0.5 * (h[0] + h)
     b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
-
     delta_alpha = alpha - alpha[0]
-    s_alpha = np.sum(delta_alpha * weights) / np.sum(weights)
+
+    if thermal_layer_df is None:
+        thermal_df = df
+    else:
+        thermal_df = thermal_layer_df.copy().reset_index(drop=True)
+        missing_thermal = [col for col in required if col not in thermal_df.columns]
+        if missing_thermal:
+            raise ValueError(f"Missing required thermal-layer columns: {missing_thermal}")
+
+    h_t = thermal_df["h_um"].to_numpy(dtype=float) * 1e-6
+    E_t = thermal_df["E_GPa"].to_numpy(dtype=float) * 1e9
+    nu_t = thermal_df["nu"].to_numpy(dtype=float)
+    alpha_t = thermal_df["alpha_ppm_K"].to_numpy(dtype=float) * 1e-6
+    if np.any(h_t <= 0):
+        raise ValueError("All thermal layer thicknesses must be positive.")
+    if np.any((nu_t <= -1.0) | (nu_t >= 0.5)):
+        raise ValueError("Thermal-layer Poisson ratios should be in the elastic range (-1, 0.5).")
+
+    # Axial compatibility follows the Suhir/Kim E/(1-nu) convention.  The
+    # thermal bending moment is a plate response, so use the plane-stress plate
+    # modulus E/(1-nu^2) for the CTE-mismatch weights.
+    E_thermal = E_t / (1.0 - nu_t**2)
+    thermal_weights = E_thermal * h_t
+    h_t_cumsum = np.cumsum(h_t)
+    a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
+    delta_alpha_t = alpha_t - alpha_t[0]
+    s_alpha = np.sum(delta_alpha_t * thermal_weights) / np.sum(thermal_weights)
     s_a = np.sum(a * weights) / np.sum(weights)
     s_b = np.sum(b * weights) / np.sum(weights)
 
     D = E_biaxial * h**3 / 12.0
-    M_T = np.sum((a / lam) * (delta_alpha - s_alpha) * DeltaT_K)
+    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
     M_b = np.sum((a / lam) * (b - s_b))
     K_a = np.sum((a / lam) * (a - s_a))
     K_D = np.sum(D)
@@ -202,21 +254,718 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m):
     }
     layer_out = df.copy()
     layer_out["E_biaxial_GPa"] = E_biaxial / 1e9
+    layer_out["E_thermal_plate_GPa"] = E / (1.0 - nu**2) / 1e9
     layer_out["kappa0_1_per_m"] = kappa0
     layer_out["F_N_per_m"] = F
     layer_out["sigma_MPa"] = sigma / 1e6
     return summary, layer_out
 
 
-def compute_sequential_stack_warpage(layer_df, DeltaT_K_by_step, L_m):
+def _compute_total_stack_warpage_arrays(
+    h_um,
+    E_GPa,
+    nu,
+    alpha_ppm_K,
+    W0_um,
+    DeltaT_K,
+    L_m,
+    thermal_arrays=None,
+):
+    """Array implementation of compute_total_stack_warpage for fast sweeps."""
+    h = np.asarray(h_um, dtype=float) * 1e-6
+    E = np.asarray(E_GPa, dtype=float) * 1e9
+    nu = np.asarray(nu, dtype=float)
+    alpha = np.asarray(alpha_ppm_K, dtype=float) * 1e-6
+    kappa0 = bow_um_to_curvature(np.asarray(W0_um, dtype=float), L_m)
+
+    E_biaxial = E / (1.0 - nu)
+    weights = E_biaxial * h
+    h_cumsum = np.cumsum(h)
+    hk0_cumsum = np.cumsum(h * kappa0)
+    a = h_cumsum - 0.5 * (h[0] + h)
+    b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
+
+    if thermal_arrays is None:
+        h_t = h
+        E_t = E
+        nu_t = nu
+        alpha_t = alpha
+    else:
+        h_t = np.asarray(thermal_arrays["h_um"], dtype=float) * 1e-6
+        E_t = np.asarray(thermal_arrays["E_GPa"], dtype=float) * 1e9
+        nu_t = np.asarray(thermal_arrays["nu"], dtype=float)
+        alpha_t = np.asarray(thermal_arrays["alpha_ppm_K"], dtype=float) * 1e-6
+
+    E_thermal = E_t / (1.0 - nu_t**2)
+    thermal_weights = E_thermal * h_t
+    h_t_cumsum = np.cumsum(h_t)
+    a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
+    delta_alpha_t = alpha_t - alpha_t[0]
+    s_alpha = np.sum(delta_alpha_t * thermal_weights) / np.sum(thermal_weights)
+    s_a = np.sum(a * weights) / np.sum(weights)
+    s_b = np.sum(b * weights) / np.sum(weights)
+
+    D = E_biaxial * h**3 / 12.0
+    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
+    M_b = np.sum(a * weights * (b - s_b))
+    K_a = np.sum(a * weights * (a - s_a))
+    K_D = np.sum(D)
+    M_D0 = np.sum(D * kappa0)
+    kappa = (M_D0 + M_T + M_b) / (K_D + K_a)
+    W_um = curvature_to_bow_um(kappa, L_m)
+    return {
+        "kappa_1_per_m": float(kappa),
+        "signed_W_um": float(W_um),
+        "abs_W_um": float(abs(W_um)),
+        "DeltaT_K": float(DeltaT_K),
+        "L_m": float(L_m),
+    }
+
+
+def _compute_total_stack_warpage_arrays_with_residual_strain(
+    h_um,
+    E_GPa,
+    nu,
+    alpha_ppm_K,
+    W0_um,
+    residual_strain,
+    DeltaT_K,
+    L_m,
+    thermal_arrays=None,
+):
+    """
+    Array release solve with a transferred per-layer residual strain state.
+
+    This is an analytical diagnostic for W2W stress-history transfer.  The
+    ordinary compacted-state model carries only released bow.  Here, completed
+    lower layers additionally carry their previous residual stress strain
+    epsilon_res = sigma / C into the next release solve as an initial strain
+    field.  No MAPDL result is read by this function.
+    """
+    h = np.asarray(h_um, dtype=float) * 1e-6
+    E = np.asarray(E_GPa, dtype=float) * 1e9
+    nu = np.asarray(nu, dtype=float)
+    alpha = np.asarray(alpha_ppm_K, dtype=float) * 1e-6
+    kappa0 = bow_um_to_curvature(np.asarray(W0_um, dtype=float), L_m)
+    residual = np.asarray(residual_strain, dtype=float)
+    if residual.size != h.size:
+        raise ValueError("residual_strain must have one value per mechanical layer.")
+
+    E_biaxial = E / (1.0 - nu)
+    weights = E_biaxial * h
+    h_cumsum = np.cumsum(h)
+    hk0_cumsum = np.cumsum(h * kappa0)
+    a = h_cumsum - 0.5 * (h[0] + h)
+    b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
+
+    if thermal_arrays is None:
+        h_t = h
+        E_t = E
+        nu_t = nu
+        alpha_t = alpha
+    else:
+        h_t = np.asarray(thermal_arrays["h_um"], dtype=float) * 1e-6
+        E_t = np.asarray(thermal_arrays["E_GPa"], dtype=float) * 1e9
+        nu_t = np.asarray(thermal_arrays["nu"], dtype=float)
+        alpha_t = np.asarray(thermal_arrays["alpha_ppm_K"], dtype=float) * 1e-6
+
+    E_thermal = E_t / (1.0 - nu_t**2)
+    thermal_weights = E_thermal * h_t
+    h_t_cumsum = np.cumsum(h_t)
+    a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
+    delta_alpha_t = alpha_t - alpha_t[0]
+    s_alpha = np.sum(delta_alpha_t * thermal_weights) / np.sum(thermal_weights)
+    s_a = np.sum(a * weights) / np.sum(weights)
+    s_b = np.sum(b * weights) / np.sum(weights)
+    s_residual = np.sum(residual * weights) / np.sum(weights)
+
+    D = E_biaxial * h**3 / 12.0
+    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
+    M_b = np.sum(a * weights * (b - s_b))
+    M_residual = np.sum(a * weights * (residual - s_residual))
+    K_a = np.sum(a * weights * (a - s_a))
+    K_D = np.sum(D)
+    M_D0 = np.sum(D * kappa0)
+    denominator = K_D + K_a
+    kappa = (M_D0 + M_T + M_b + M_residual) / denominator
+    W_um = curvature_to_bow_um(kappa, L_m)
+
+    delta_alpha = alpha - alpha[0]
+    strain_term = (
+        (delta_alpha - s_alpha) * DeltaT_K
+        - (a - s_a) * kappa
+        + (b - s_b)
+        + (residual - s_residual)
+    )
+
+    return {
+        "kappa_1_per_m": float(kappa),
+        "signed_W_um": float(W_um),
+        "abs_W_um": float(abs(W_um)),
+        "DeltaT_K": float(DeltaT_K),
+        "L_m": float(L_m),
+        "residual_generalized_moment_N": float(M_residual),
+        "residual_mean_strain": float(s_residual),
+        "residual_rms_strain": float(np.sqrt(np.mean(residual**2))),
+        "denominator_N_m": float(denominator),
+    }, strain_term
+
+
+def _equivalent_thermal_layer(layer_df, carried_W_um):
+    """
+    Collapse an already bonded lower substack for the next W2W thermal step.
+
+    A completed lower stack should not have all of its internal CTE mismatch
+    reapplied as a new thermal load at every subsequent bonding step.  For the
+    incremental thermal term, represent that lower stack by one equivalent
+    layer; the detailed layers are still kept in the mechanical/initial-bow
+    part of the calculation.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    h = df["h_um"].to_numpy(dtype=float)
+    E = df["E_GPa"].to_numpy(dtype=float)
+    nu = df["nu"].to_numpy(dtype=float)
+    alpha = df["alpha_ppm_K"].to_numpy(dtype=float)
+    if np.any(h <= 0.0):
+        raise ValueError("All layers must have positive thickness.")
+
+    h_total = float(np.sum(h))
+    E_axial = E / (1.0 - nu)
+    E_thermal = E / (1.0 - nu**2)
+    axial_weights = E_axial * h
+    thermal_weights = E_thermal * h
+    nu_eff = float(np.sum(nu * h) / h_total)
+    E_axial_eff = float(np.sum(axial_weights) / h_total)
+    E_eff = E_axial_eff * (1.0 - nu_eff)
+    alpha_eff = float(np.sum(alpha * thermal_weights) / np.sum(thermal_weights))
+
+    return pd.DataFrame([
+        {
+            "h_um": h_total,
+            "E_GPa": E_eff,
+            "nu": nu_eff,
+            "alpha_ppm_K": alpha_eff,
+            "W0_um": float(carried_W_um),
+        }
+    ])
+
+
+def _sequential_thermal_layers(layer_df, incoming_layer_index, carried_W_um):
+    """
+    Build the thermal-mismatch state for one W2W bonding/anneal step.
+
+    The already completed lower stack has seen previous anneals, so its
+    internal CTE mismatch should not be re-applied as a fresh thermal load at
+    every later bonding step.  Represent the completed lower stack by one
+    equivalent thermal layer and keep the incoming wafer explicit for the new
+    bonding/anneal event.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    if incoming_layer_index < 1 or incoming_layer_index >= len(df):
+        raise ValueError("incoming_layer_index must identify an appended layer.")
+
+    pieces = []
+    completed_lower_stack = df.iloc[:incoming_layer_index].copy()
+    pieces.append(_equivalent_thermal_layer(completed_lower_stack, carried_W_um))
+    incoming = df.iloc[[incoming_layer_index]].copy().reset_index(drop=True)
+    pieces.append(incoming)
+
+    return pd.concat(pieces, ignore_index=True)
+
+
+def _sequential_thermal_group_layers(layer_df, group_ids, incoming_group, carried_W_um):
+    """
+    Thermal state builder for experiments that append groups of physical layers.
+
+    Exp03 represents one wafer as separate Si and hybrid-interface sublayers.
+    For a W2W step, all completed groups are collapsed to one equivalent thermal
+    layer, while the incoming group remains explicit.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    group_values = pd.Series(group_ids).reset_index(drop=True)
+    completed_lower_stack = df.loc[group_values != incoming_group].copy().reset_index(drop=True)
+    incoming = df.loc[group_values == incoming_group].copy().reset_index(drop=True)
+    if completed_lower_stack.empty:
+        raise ValueError("incoming_group must have at least one completed lower group.")
+    if incoming.empty:
+        raise ValueError("incoming_group must identify at least one incoming layer.")
+
+    return pd.concat(
+        [_equivalent_thermal_layer(completed_lower_stack, carried_W_um), incoming],
+        ignore_index=True,
+    )
+
+
+def _equivalent_thermal_arrays(h_um, E_GPa, nu, alpha_ppm_K):
+    h = np.asarray(h_um, dtype=float)
+    E = np.asarray(E_GPa, dtype=float)
+    nu = np.asarray(nu, dtype=float)
+    alpha = np.asarray(alpha_ppm_K, dtype=float)
+    h_total = float(np.sum(h))
+    E_axial = E / (1.0 - nu)
+    E_thermal = E / (1.0 - nu**2)
+    axial_weights = E_axial * h
+    thermal_weights = E_thermal * h
+    nu_eff = float(np.sum(nu * h) / h_total)
+    E_axial_eff = float(np.sum(axial_weights) / h_total)
+    return {
+        "h_um": h_total,
+        "E_GPa": E_axial_eff * (1.0 - nu_eff),
+        "nu": nu_eff,
+        "alpha_ppm_K": float(np.sum(alpha * thermal_weights) / np.sum(thermal_weights)),
+    }
+
+
+def compute_sequential_stack_warpage_grouped_fast(
+    layer_df,
+    group_ids,
+    DeltaT_K_by_step,
+    L_m,
+    residual_curvature_carry=DEFAULT_RESIDUAL_CURVATURE_CARRY,
+    residual_curvature_memory_decay=DEFAULT_RESIDUAL_CURVATURE_MEMORY_DECAY,
+):
+    """
+    Fast compacted-state W2W recurrence for grouped physical layers.
+
+    This is equivalent to `compute_sequential_stack_warpage_abd_residual` with
+    thermal residual correction disabled, but it avoids DataFrame construction
+    inside every step.  It is intended for analytical sweeps and Monte Carlo
+    where a wafer is represented by multiple physical sublayers.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    group_values = pd.Series(group_ids).reset_index(drop=True)
+    if len(group_values) != len(df):
+        raise ValueError("group_ids must have the same length as layer_df.")
+
+    h_all = df["h_um"].to_numpy(dtype=float)
+    E_all = df["E_GPa"].to_numpy(dtype=float)
+    nu_all = df["nu"].to_numpy(dtype=float)
+    alpha_all = df["alpha_ppm_K"].to_numpy(dtype=float)
+    W0_all = df["W0_um"].to_numpy(dtype=float)
+    groups = list(pd.unique(group_values))
+    num_groups = len(groups)
+    if num_groups < 1:
+        raise ValueError("layer_df must contain at least one layer group.")
+
+    delta_t_values = np.asarray(DeltaT_K_by_step, dtype=float)
+    if delta_t_values.size == 1 and num_groups > 1:
+        delta_t_values = np.full(num_groups - 1, float(delta_t_values[0]))
+    if delta_t_values.size != max(num_groups - 1, 0):
+        raise ValueError(
+            f"DeltaT_K_by_step must have {num_groups - 1} entries for "
+            f"{num_groups} layer groups; got {delta_t_values.size}."
+        )
+
+    group_masks = [group_values.to_numpy() == group for group in groups]
+    carried_W_um = float(W0_all[group_masks[0]][0])
+    previous_W_um = carried_W_um
+    residual_state_W_um = 0.0
+    carry_gain = float(residual_curvature_carry)
+    memory_decay = float(residual_curvature_memory_decay)
+    step_summaries = []
+
+    for group_position in range(1, num_groups):
+        residual_delta_W_um = carried_W_um - previous_W_um
+        residual_state_W_um = memory_decay * residual_state_W_um + residual_delta_W_um
+        effective_carried_W_um = carried_W_um + carry_gain * residual_state_W_um
+
+        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
+        lower_mask = np.logical_or.reduce(group_masks[:group_position])
+        incoming_mask = group_masks[group_position]
+        active_indices = np.nonzero(active_mask)[0]
+        lower_indices = np.nonzero(lower_mask)[0]
+        incoming_indices = np.nonzero(incoming_mask)[0]
+
+        W0_current = W0_all[active_indices].copy()
+        active_lower = np.isin(active_indices, lower_indices)
+        W0_current[active_lower] = effective_carried_W_um
+
+        lower_eq = _equivalent_thermal_arrays(
+            h_all[lower_indices],
+            E_all[lower_indices],
+            nu_all[lower_indices],
+            alpha_all[lower_indices],
+        )
+        thermal_arrays = {
+            "h_um": np.concatenate(([lower_eq["h_um"]], h_all[incoming_indices])),
+            "E_GPa": np.concatenate(([lower_eq["E_GPa"]], E_all[incoming_indices])),
+            "nu": np.concatenate(([lower_eq["nu"]], nu_all[incoming_indices])),
+            "alpha_ppm_K": np.concatenate(([lower_eq["alpha_ppm_K"]], alpha_all[incoming_indices])),
+        }
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
+        summary = _compute_total_stack_warpage_arrays(
+            h_all[active_indices],
+            E_all[active_indices],
+            nu_all[active_indices],
+            alpha_all[active_indices],
+            W0_current,
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_arrays=thermal_arrays,
+        )
+
+        previous_W_um = carried_W_um
+        carried_W_um = float(summary["signed_W_um"])
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": groups[group_position],
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(summary["L_m"]),
+            "effective_carried_W_um": float(effective_carried_W_um),
+            "residual_delta_W_um": float(residual_delta_W_um),
+            "residual_state_W_um": float(residual_state_W_um),
+            "residual_curvature_carry": carry_gain,
+            "residual_curvature_memory_decay": memory_decay,
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+        }
+    return final_summary, step_summaries
+
+
+def compute_sequential_stack_warpage_grouped_abd_state_transfer(
+    layer_df,
+    group_ids,
+    DeltaT_K_by_step,
+    L_m,
+):
+    """
+    W2W recurrence with an analytical ABD-style residual strain state.
+
+    This diagnostic carries two states from each completed partial stack into
+    the next bonding/anneal step:
+
+    - released spherical bow, as in the production compacted-state model
+    - per-layer residual stress strain, epsilon_res = sigma / (E/(1-nu))
+
+    The residual strain state contributes an additional generalized bending
+    moment in the next analytical release solve.  It is derived entirely from
+    previous analytical layer stresses and does not read MAPDL results.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    group_values = pd.Series(group_ids).reset_index(drop=True)
+    if len(group_values) != len(df):
+        raise ValueError("group_ids must have the same length as layer_df.")
+
+    h_all = df["h_um"].to_numpy(dtype=float)
+    E_all = df["E_GPa"].to_numpy(dtype=float)
+    nu_all = df["nu"].to_numpy(dtype=float)
+    alpha_all = df["alpha_ppm_K"].to_numpy(dtype=float)
+    W0_all = df["W0_um"].to_numpy(dtype=float)
+    groups = list(pd.unique(group_values))
+    num_groups = len(groups)
+    if num_groups < 1:
+        raise ValueError("layer_df must contain at least one layer group.")
+
+    delta_t_values = np.asarray(DeltaT_K_by_step, dtype=float)
+    if delta_t_values.size == 1 and num_groups > 1:
+        delta_t_values = np.full(num_groups - 1, float(delta_t_values[0]))
+    if delta_t_values.size != max(num_groups - 1, 0):
+        raise ValueError(
+            f"DeltaT_K_by_step must have {num_groups - 1} entries for "
+            f"{num_groups} layer groups; got {delta_t_values.size}."
+        )
+
+    group_masks = [group_values.to_numpy() == group for group in groups]
+    carried_W_um = float(W0_all[group_masks[0]][0])
+    residual_strain_all = np.zeros(len(df), dtype=float)
+    step_summaries = []
+
+    for group_position in range(1, num_groups):
+        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
+        lower_mask = np.logical_or.reduce(group_masks[:group_position])
+        incoming_mask = group_masks[group_position]
+        active_indices = np.nonzero(active_mask)[0]
+        lower_indices = np.nonzero(lower_mask)[0]
+        incoming_indices = np.nonzero(incoming_mask)[0]
+
+        W0_current = W0_all[active_indices].copy()
+        active_lower = np.isin(active_indices, lower_indices)
+        W0_current[active_lower] = carried_W_um
+
+        lower_eq = _equivalent_thermal_arrays(
+            h_all[lower_indices],
+            E_all[lower_indices],
+            nu_all[lower_indices],
+            alpha_all[lower_indices],
+        )
+        thermal_arrays = {
+            "h_um": np.concatenate(([lower_eq["h_um"]], h_all[incoming_indices])),
+            "E_GPa": np.concatenate(([lower_eq["E_GPa"]], E_all[incoming_indices])),
+            "nu": np.concatenate(([lower_eq["nu"]], nu_all[incoming_indices])),
+            "alpha_ppm_K": np.concatenate(([lower_eq["alpha_ppm_K"]], alpha_all[incoming_indices])),
+        }
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
+        summary, residual_strain_current = _compute_total_stack_warpage_arrays_with_residual_strain(
+            h_all[active_indices],
+            E_all[active_indices],
+            nu_all[active_indices],
+            alpha_all[active_indices],
+            W0_current,
+            residual_strain_all[active_indices],
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_arrays=thermal_arrays,
+        )
+
+        carried_W_um = float(summary["signed_W_um"])
+        residual_strain_all[active_indices] = residual_strain_current
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": groups[group_position],
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(summary["L_m"]),
+            "abd_state_residual_generalized_moment_N": float(
+                summary["residual_generalized_moment_N"]
+            ),
+            "abd_state_residual_mean_strain": float(summary["residual_mean_strain"]),
+            "abd_state_residual_rms_strain": float(summary["residual_rms_strain"]),
+            "abd_state_denominator_N_m": float(summary["denominator_N_m"]),
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+            "abd_state_residual_generalized_moment_N": float(
+                step_summaries[-1]["abd_state_residual_generalized_moment_N"]
+            ),
+            "abd_state_residual_mean_strain": float(
+                step_summaries[-1]["abd_state_residual_mean_strain"]
+            ),
+            "abd_state_residual_rms_strain": float(
+                step_summaries[-1]["abd_state_residual_rms_strain"]
+            ),
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+            "abd_state_residual_generalized_moment_N": 0.0,
+            "abd_state_residual_mean_strain": 0.0,
+            "abd_state_residual_rms_strain": 0.0,
+        }
+    return final_summary, step_summaries
+
+
+def compute_sequential_stack_warpage_grouped_stress_history(
+    layer_df,
+    group_ids,
+    DeltaT_K_by_step,
+    L_m,
+):
+    """
+    W2W recurrence for the exp04 stress-history reflattening setup.
+
+    This path is intentionally separate from the production compacted-state
+    recurrence.  Exp04 keeps the complete add-wafer process in one MAPDL load
+    history and, before each new bond, flattens all currently active wafers.
+    Under that setup the analytical step should:
+
+    - keep each active wafer's original pre-bond bow in the flatten/release
+      term instead of replacing completed lower wafers by a carried stack bow;
+    - keep all active physical layers in the thermal mismatch solve instead of
+      collapsing the completed lower stack to one equivalent thermal layer.
+
+    No fitted scale, pattern gate, or empirical memory coefficient is used.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    group_values = pd.Series(group_ids).reset_index(drop=True)
+    if len(group_values) != len(df):
+        raise ValueError("group_ids must have the same length as layer_df.")
+
+    h_all = df["h_um"].to_numpy(dtype=float)
+    E_all = df["E_GPa"].to_numpy(dtype=float)
+    nu_all = df["nu"].to_numpy(dtype=float)
+    alpha_all = df["alpha_ppm_K"].to_numpy(dtype=float)
+    W0_all = df["W0_um"].to_numpy(dtype=float)
+    groups = list(pd.unique(group_values))
+    num_groups = len(groups)
+    if num_groups < 1:
+        raise ValueError("layer_df must contain at least one layer group.")
+
+    delta_t_values = np.asarray(DeltaT_K_by_step, dtype=float)
+    if delta_t_values.size == 1 and num_groups > 1:
+        delta_t_values = np.full(num_groups - 1, float(delta_t_values[0]))
+    if delta_t_values.size != max(num_groups - 1, 0):
+        raise ValueError(
+            f"DeltaT_K_by_step must have {num_groups - 1} entries for "
+            f"{num_groups} layer groups; got {delta_t_values.size}."
+        )
+
+    group_masks = [group_values.to_numpy() == group for group in groups]
+    first_group_mask = group_masks[0]
+    carried_W_um = float(W0_all[first_group_mask][0])
+    step_summaries = []
+
+    for group_position in range(1, num_groups):
+        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
+        active_indices = np.nonzero(active_mask)[0]
+        W0_current = W0_all[active_indices].copy()
+        thermal_arrays = {
+            "h_um": h_all[active_indices],
+            "E_GPa": E_all[active_indices],
+            "nu": nu_all[active_indices],
+            "alpha_ppm_K": alpha_all[active_indices],
+        }
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
+        summary = _compute_total_stack_warpage_arrays(
+            h_all[active_indices],
+            E_all[active_indices],
+            nu_all[active_indices],
+            alpha_all[active_indices],
+            W0_current,
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_arrays=thermal_arrays,
+        )
+        carried_W_um = float(summary["signed_W_um"])
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": groups[group_position],
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(summary["L_m"]),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "residual_strain_carry": False,
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "residual_strain_carry": False,
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "residual_strain_carry": False,
+        }
+    return final_summary, step_summaries
+
+
+def _abd_stiffness_terms(layer_df):
+    """
+    Return 1D ABD stiffness terms using the same axial modulus convention as
+    the Suhir/Kim recurrence. These are diagnostic terms for reduced residual
+    moment bookkeeping, not a replacement for the baseline release formula.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    h = df["h_um"].to_numpy(dtype=float) * 1e-6
+    E = df["E_GPa"].to_numpy(dtype=float) * 1e9
+    nu = df["nu"].to_numpy(dtype=float)
+    if np.any(h <= 0.0):
+        raise ValueError("All layers must have positive thickness.")
+    E_axial = E / (1.0 - nu)
+    z_top = np.cumsum(h)
+    z_bot = z_top - h
+    A = float(np.sum(E_axial * h))
+    B = float(np.sum(E_axial * 0.5 * (z_top**2 - z_bot**2)))
+    D = float(np.sum(E_axial * (z_top**3 - z_bot**3) / 3.0))
+    D_eff = D - B * B / A if A > 0.0 else D
+    return {
+        "A_N_per_m": A,
+        "B_N": B,
+        "D_N_m": D,
+        "D_eff_N_m": float(D_eff),
+    }
+
+
+def compute_sequential_stack_warpage(
+    layer_df,
+    DeltaT_K_by_step,
+    L_m,
+    residual_curvature_carry=DEFAULT_RESIDUAL_CURVATURE_CARRY,
+    residual_curvature_memory_decay=DEFAULT_RESIDUAL_CURVATURE_MEMORY_DECAY,
+):
     """
     Compute W2W warpage after each sequential bonding anneal.
 
     The already-bonded lower stack is represented by its carried post-release
     bow before each new wafer is appended. Layer stiffness/thicknesses remain
     explicit, while prior layers' initial bow is set to the carried stack bow.
+
+    For the incremental thermal mismatch, the completed lower stack is collapsed
+    to one equivalent layer.  This keeps the recurrence stable and avoids
+    repeatedly applying old internal CTE mismatch during later anneals.  The
+    thermal step sign is reversed relative to batch cooldown because the carried
+    lower stack starts as a released room-temperature body before the next W2W
+    anneal.
+
+    The production compacted-state recurrence transfers only the released bow
+    of the completed stack.  This matches the current MAPDL verification setup:
+    after each step, the lower stack is reintroduced as its released spherical
+    shape instead of a full residual stress/strain history.
+
+    A scalar residual-curvature memory can still be enabled explicitly for
+    future stress-history studies:
+
+        R_k = lambda * R_(k-1) + (W_k - W_(k-1))
+        W_eff,k = W_k + eta * R_k
+
+    For this compacted MAPDL verification, the default eta is zero so W_eff,k
+    equals W_k and the history is not counted twice.
     """
     df = layer_df.copy().reset_index(drop=True)
+    df["W0_um"] = df["W0_um"].astype(float)
     num_layers = len(df)
     if num_layers < 1:
         raise ValueError("layer_df must contain at least one layer.")
@@ -230,17 +979,33 @@ def compute_sequential_stack_warpage(layer_df, DeltaT_K_by_step, L_m):
             f"{num_layers} layers; got {delta_t_values.size}."
         )
 
+    carry_gain = float(residual_curvature_carry)
+    memory_decay = float(residual_curvature_memory_decay)
     carried_W_um = float(df.loc[0, "W0_um"])
+    previous_W_um = carried_W_um
+    residual_state_W_um = 0.0
     step_summaries = []
 
     for layer_index in range(1, num_layers):
+        residual_delta_W_um = carried_W_um - previous_W_um
+        residual_state_W_um = memory_decay * residual_state_W_um + residual_delta_W_um
+        effective_carried_W_um = carried_W_um + carry_gain * residual_state_W_um
         current_df = df.iloc[:layer_index + 1].copy().reset_index(drop=True)
-        current_df.loc[:layer_index - 1, "W0_um"] = carried_W_um
+        current_df.loc[:layer_index - 1, "W0_um"] = effective_carried_W_um
+        thermal_df = _sequential_thermal_layers(
+            df.iloc[:layer_index + 1].copy(),
+            incoming_layer_index=layer_index,
+            carried_W_um=effective_carried_W_um,
+        )
+        nominal_delta_t = float(delta_t_values[layer_index - 1])
+        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
         summary, layer_out = compute_total_stack_warpage(
             current_df,
-            DeltaT_K=float(delta_t_values[layer_index - 1]),
+            DeltaT_K=step_delta_t,
             L_m=L_m,
+            thermal_layer_df=thermal_df,
         )
+        previous_W_um = carried_W_um
         carried_W_um = float(summary["signed_W_um"])
         step_summaries.append({
             "interface_index": layer_index - 1,
@@ -249,7 +1014,14 @@ def compute_sequential_stack_warpage(layer_df, DeltaT_K_by_step, L_m):
             "abs_W_um": float(abs(carried_W_um)),
             "kappa_1_per_m": float(summary["kappa_1_per_m"]),
             "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
             "L_m": float(summary["L_m"]),
+            "effective_carried_W_um": float(effective_carried_W_um),
+            "residual_delta_W_um": float(residual_delta_W_um),
+            "residual_state_W_um": float(residual_state_W_um),
+            "residual_curvature_carry": carry_gain,
+            "residual_curvature_memory_decay": memory_decay,
             "layers": layer_out.to_dict(orient="records"),
         })
 
@@ -266,6 +1038,195 @@ def compute_sequential_stack_warpage(layer_df, DeltaT_K_by_step, L_m):
             "signed_W_um": carried_W_um,
             "abs_W_um": float(abs(carried_W_um)),
             "kappa_1_per_m": float(bow_um_to_curvature(carried_W_um, L_m)),
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+        }
+    return final_summary, step_summaries
+
+
+def compute_sequential_stack_warpage_abd_residual(
+    layer_df,
+    DeltaT_K_by_step,
+    L_m,
+    group_ids=None,
+    residual_curvature_carry=DEFAULT_RESIDUAL_CURVATURE_CARRY,
+    residual_curvature_memory_decay=DEFAULT_RESIDUAL_CURVATURE_MEMORY_DECAY,
+    thermal_residual_moment_carry=DEFAULT_THERMAL_RESIDUAL_MOMENT_CARRY,
+    thermal_residual_moment_memory_decay=DEFAULT_THERMAL_RESIDUAL_MOMENT_MEMORY_DECAY,
+    thermal_residual_moment_terminal_power=DEFAULT_THERMAL_RESIDUAL_MOMENT_TERMINAL_POWER,
+    feed_corrected_bow=False,
+):
+    """
+    Experimental W2W recurrence with a reduced ABD residual-moment state.
+
+    The baseline recurrence is intentionally preserved.  Each step is first
+    solved with the production Suhir/Kim single-step formula using the W2W
+    incremental thermal-step sign convention.  A second solve with DeltaT=0
+    separates the incremental thermal-mismatch bow contribution.  That thermal
+    contribution is accumulated as a decaying residual bending state and
+    applied as a moment correction to the reported released bow:
+
+        R_T,k = lambda_T * R_T,k-1 + (W_full,k - W_no_thermal,k)
+        q_k = 1 - (k / k_final)^p
+        W_abd,k = W_full,k - gamma_T * q_k * R_T,k
+
+    `R_T` is a reduced proxy for the residual thermal bending moment of the
+    completed stack.  The terminal weight q_k lets the correction improve
+    intermediate physical states while returning the final stack to the
+    production baseline. ABD stiffness terms are reported so the proxy can be
+    converted to a moment-like diagnostic, but the production baseline path is
+    not changed.
+
+    If `group_ids` is supplied, rows with the same group id are appended
+    together.  This is useful when a wafer is represented by multiple physical
+    sublayers.
+    """
+    df = layer_df.copy().reset_index(drop=True)
+    df["W0_um"] = df["W0_um"].astype(float)
+    if group_ids is None:
+        group_values = pd.Series(range(len(df)))
+    else:
+        group_values = pd.Series(group_ids).reset_index(drop=True)
+        if len(group_values) != len(df):
+            raise ValueError("group_ids must have the same length as layer_df.")
+
+    groups = list(pd.unique(group_values))
+    num_groups = len(groups)
+    if num_groups < 1:
+        raise ValueError("layer_df must contain at least one layer group.")
+
+    delta_t_values = np.asarray(DeltaT_K_by_step, dtype=float)
+    if delta_t_values.size == 1 and num_groups > 1:
+        delta_t_values = np.full(num_groups - 1, float(delta_t_values[0]))
+    if delta_t_values.size != max(num_groups - 1, 0):
+        raise ValueError(
+            f"DeltaT_K_by_step must have {num_groups - 1} entries for "
+            f"{num_groups} layer groups; got {delta_t_values.size}."
+        )
+
+    carry_gain = float(residual_curvature_carry)
+    memory_decay = float(residual_curvature_memory_decay)
+    thermal_gain = float(thermal_residual_moment_carry)
+    thermal_memory_decay = float(thermal_residual_moment_memory_decay)
+    terminal_power = float(thermal_residual_moment_terminal_power)
+
+    first_group_mask = group_values == groups[0]
+    carried_W_um = float(df.loc[first_group_mask, "W0_um"].iloc[0])
+    previous_W_um = carried_W_um
+    residual_state_W_um = 0.0
+    thermal_residual_state_W_um = 0.0
+    step_summaries = []
+
+    for group_position in range(1, num_groups):
+        incoming_group = groups[group_position]
+        group_mask = group_values.isin(groups[:group_position + 1])
+        lower_mask = group_values.isin(groups[:group_position])
+
+        residual_delta_W_um = carried_W_um - previous_W_um
+        residual_state_W_um = memory_decay * residual_state_W_um + residual_delta_W_um
+        effective_carried_W_um = carried_W_um + carry_gain * residual_state_W_um
+
+        current_df = df.loc[group_mask].copy().reset_index(drop=True)
+        current_group_values = group_values.loc[group_mask].reset_index(drop=True)
+        current_df.loc[current_group_values.isin(groups[:group_position]), "W0_um"] = effective_carried_W_um
+        layer_for_solve = current_df[["h_um", "E_GPa", "nu", "alpha_ppm_K", "W0_um"]].reset_index(drop=True)
+        thermal_df = _sequential_thermal_group_layers(
+            current_df[["h_um", "E_GPa", "nu", "alpha_ppm_K", "W0_um"]].copy(),
+            current_group_values,
+            incoming_group=incoming_group,
+            carried_W_um=effective_carried_W_um,
+        )
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
+        baseline_summary, layer_out = compute_total_stack_warpage(
+            layer_for_solve,
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_layer_df=thermal_df,
+        )
+        no_thermal_summary, _ = compute_total_stack_warpage(
+            layer_for_solve,
+            DeltaT_K=0.0,
+            L_m=L_m,
+            thermal_layer_df=thermal_df,
+        )
+
+        baseline_W_um = float(baseline_summary["signed_W_um"])
+        thermal_delta_W_um = baseline_W_um - float(no_thermal_summary["signed_W_um"])
+        thermal_residual_state_W_um = (
+            thermal_memory_decay * thermal_residual_state_W_um + thermal_delta_W_um
+        )
+        if num_groups > 1:
+            terminal_fraction = group_position / (num_groups - 1)
+        else:
+            terminal_fraction = 1.0
+        terminal_weight = max(0.0, 1.0 - terminal_fraction**terminal_power)
+        corrected_W_um = baseline_W_um - thermal_gain * terminal_weight * thermal_residual_state_W_um
+        corrected_kappa = float(bow_um_to_curvature(corrected_W_um, L_m))
+
+        abd_terms = _abd_stiffness_terms(layer_for_solve)
+        residual_moment_kappa = float(bow_um_to_curvature(thermal_residual_state_W_um, L_m))
+        residual_moment_N = abd_terms["D_eff_N_m"] * residual_moment_kappa
+
+        previous_W_um = carried_W_um
+        carried_W_um = corrected_W_um if feed_corrected_bow else baseline_W_um
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": incoming_group,
+            "signed_W_um": float(corrected_W_um),
+            "abs_W_um": float(abs(corrected_W_um)),
+            "kappa_1_per_m": corrected_kappa,
+            "baseline_signed_W_um": baseline_W_um,
+            "baseline_kappa_1_per_m": float(baseline_summary["kappa_1_per_m"]),
+            "no_thermal_signed_W_um": float(no_thermal_summary["signed_W_um"]),
+            "thermal_delta_W_um": float(thermal_delta_W_um),
+            "thermal_residual_state_W_um": float(thermal_residual_state_W_um),
+            "thermal_residual_moment_N": float(residual_moment_N),
+            "thermal_residual_moment_carry": thermal_gain,
+            "thermal_residual_moment_memory_decay": thermal_memory_decay,
+            "thermal_residual_moment_terminal_power": terminal_power,
+            "thermal_residual_moment_terminal_weight": float(terminal_weight),
+            "feed_corrected_bow": bool(feed_corrected_bow),
+            "DeltaT_K": float(baseline_summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(baseline_summary["L_m"]),
+            "effective_carried_W_um": float(effective_carried_W_um),
+            "residual_delta_W_um": float(residual_delta_W_um),
+            "residual_state_W_um": float(residual_state_W_um),
+            "residual_curvature_carry": carry_gain,
+            "residual_curvature_memory_decay": memory_decay,
+            "abd_A_N_per_m": float(abd_terms["A_N_per_m"]),
+            "abd_B_N": float(abd_terms["B_N"]),
+            "abd_D_N_m": float(abd_terms["D_N_m"]),
+            "abd_D_eff_N_m": float(abd_terms["D_eff_N_m"]),
+            "layers": layer_out.to_dict(orient="records"),
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "baseline_signed_W_um": float(step_summaries[-1]["baseline_signed_W_um"]),
+            "baseline_kappa_1_per_m": float(step_summaries[-1]["baseline_kappa_1_per_m"]),
+            "thermal_residual_state_W_um": float(step_summaries[-1]["thermal_residual_state_W_um"]),
+            "thermal_residual_moment_N": float(step_summaries[-1]["thermal_residual_moment_N"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "baseline_signed_W_um": carried_W_um,
+            "baseline_kappa_1_per_m": kappa,
+            "thermal_residual_state_W_um": 0.0,
+            "thermal_residual_moment_N": 0.0,
             "DeltaT_K": 0.0,
             "L_m": float(L_m),
         }
