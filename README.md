@@ -3,7 +3,7 @@
 - YAP-stack is a Python-based yield modeling and Monte Carlo simulation tool for
   advanced packaging. This branch focuses on wafer-to-wafer (W2W) and
   die-to-wafer (D2W) hybrid bonding, with stack-aware D2W warpage support.
-- A [GUI of YAP](http://nanocad.ee.ucla.edu:8081/yap_gui/) and the
+- A [GUI of YAP](http://nanocad.ee.ucla.edu/yap_gui/) and the
   [user guide video](https://youtu.be/8hiKIQ6C7ng) are available.
 
 Current local benchmark examples used in this workspace are:
