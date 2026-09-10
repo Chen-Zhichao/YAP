@@ -1,0 +1,10 @@
+D2W simple all-critical YAP modeling case study, Cu_gap_mean=top+bottom dishing only
+Overrides: TOP/BOT_DISH_MEAN_nm=-5.0, TOP/BOT_DISH_STD_nm=1.0, D0=D1=1e-10. No anneal expansion term in Cu_gap_mean.
+Cu gap mean=-10.0000 nm, sigma=1.4142 nm; safe range [0,20] nm from previous scalar run.
+
+ Area(mm2) Pitch(um)         Pads    Overlay   Particle    Mech/pass   log10(Mech)   Mechanical   Combined
+--------------------------------------------------------------------------------------------------------------------
+        50         5      2000000          1      0.995    7.687e-13     -2.42e+07            0          0
+        50         1     50000000          1      0.995    7.687e-13     -6.06e+08            0          0
+       500         5     20000000          1     0.9512    7.687e-13     -2.42e+08            0          0
+       500         1    500000000          1     0.9512    7.687e-13     -6.06e+09            0          0

@@ -1,0 +1,10 @@
+D2W simple all-critical YAP modeling case study, updated dish/D0/D1
+Overrides: TOP/BOT_DISH_MEAN_nm=-5.0, TOP/BOT_DISH_STD_nm=0.5, D0=D1=1e-9.
+Cu gap mean=19.1500 nm, sigma=0.7071 nm; mechanical safe range taken from previous scalar run.
+
+ Area(mm2) Pitch(um)         Pads    Overlay   Particle  Mech/pass   log10(Mech)   Mechanical   Combined
+----------------------------------------------------------------------------------------------------------------
+        50         5      2000000          1     0.9512     0.8853     -1.06e+05            0          0
+        50         1     50000000          1     0.9512     0.8853     -2.64e+06            0          0
+       500         5     20000000          1     0.6065     0.8853     -1.06e+06            0          0
+       500         1    500000000          1     0.6065     0.8853     -2.64e+07            0          0

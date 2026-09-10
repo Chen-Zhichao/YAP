@@ -52,6 +52,8 @@ def parse_args():
         help=(
             "Comma-separated failure mechanisms to model. "
             "Use all, overlay, particle, mechanical, ESD, or warpage. "
+            "ESD and final-warpage yield are temporarily disabled; warpage "
+            "still contributes to overlay. "
             "Example: --mechanism-filter particle,mechanical"
         ),
     )

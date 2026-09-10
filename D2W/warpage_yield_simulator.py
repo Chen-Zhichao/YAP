@@ -419,7 +419,10 @@ def stack_warpage_fail_vector_for_epoch(
     ds_dir = input_args.get('ds_dir', '')
     _3dbx_path = os.path.join(ds_dir, 'generated_stack_config.3dbx')
     if not os.path.exists(_3dbx_path):
-        return np.zeros(int(num_samples), dtype=bool)
+        raise FileNotFoundError(
+            "D2W warpage simulation requires generated_stack_config.3dbx. "
+            f"Could not find {_3dbx_path}."
+        )
 
     stack_cfg_dict = cfg_dict if stack_cfg_dict is None else stack_cfg_dict
 
@@ -432,14 +435,10 @@ def stack_warpage_fail_vector_for_epoch(
             return_samples=True,
         )
     except (KeyError, ValueError, FileNotFoundError) as exc:
-        warning_key = '_stack_warpage_fallback_warned'
-        if not input_args.get(warning_key, False):
-            print(
-                "Final stack warpage simulation unavailable; "
-                f"skipping STACK_WARPAGE_TH failure checks. Reason: {exc}"
-            )
-            input_args[warning_key] = True
-        return np.zeros(int(num_samples), dtype=bool)
+        raise RuntimeError(
+            "D2W final stack warpage simulation failed; yield evaluation cannot "
+            "continue with an all-pass fallback."
+        ) from exc
 
     return ~np.asarray(warpage_result["stack_pass_vector"], dtype=bool)
 

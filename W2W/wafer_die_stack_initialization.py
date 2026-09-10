@@ -6,17 +6,98 @@
 #### Date: Jan 16, 2026
 
 import numpy as np
+from yield_mechanism_policy import DISABLED_YIELD_MECHANISMS
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from matplotlib.patches import Polygon, Circle
 
+
+def _convex_hull_vertices(points: np.ndarray) -> np.ndarray:
+    """Return counter-clockwise convex-hull vertices using a monotone chain."""
+    points = np.unique(np.asarray(points, dtype=np.float64), axis=0)
+    if points.shape[0] <= 2:
+        return points
+
+    order = np.lexsort((points[:, 1], points[:, 0]))
+    sorted_points = points[order]
+
+    def cross(origin, first, second):
+        return (
+            (first[0] - origin[0]) * (second[1] - origin[1])
+            - (first[1] - origin[1]) * (second[0] - origin[0])
+        )
+
+    lower = []
+    for point in sorted_points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+
+    upper = []
+    for point in sorted_points[::-1]:
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+
+    return np.asarray(lower[:-1] + upper[:-1], dtype=np.float64)
+
+
+def _active_pad_boundary_coords(
+    active_mask: np.ndarray,
+    pad_coords: np.ndarray | None,
+    *,
+    pad_arr_w_um: float,
+    pad_arr_l_um: float,
+    pitch_r_um: float,
+    pitch_c_um: float,
+    max_support_points: int = 32,
+) -> np.ndarray:
+    """Build a bounded convex representation of the actual active-pad edge."""
+    active_mask = np.asarray(active_mask, dtype=bool)
+    active_rows = np.flatnonzero(np.any(active_mask, axis=1))
+    if active_rows.size == 0:
+        return np.empty((0, 2), dtype=np.float64)
+
+    num_cols = active_mask.shape[1]
+    left_cols_all = np.argmax(active_mask, axis=1)
+    right_cols_all = num_cols - 1 - np.argmax(active_mask[:, ::-1], axis=1)
+    rows = np.repeat(active_rows, 2)
+    cols = np.column_stack(
+        (left_cols_all[active_rows], right_cols_all[active_rows])
+    ).reshape(-1)
+    flat_idx = rows * num_cols + cols
+
+    if pad_coords is not None:
+        candidates = np.asarray(pad_coords, dtype=np.float64)[flat_idx]
+        candidates = candidates[np.all(np.isfinite(candidates), axis=1)]
+    else:
+        candidates = np.column_stack(
+            (
+                -float(pad_arr_w_um) / 2.0 + cols * float(pitch_c_um),
+                float(pad_arr_l_um) / 2.0 - rows * float(pitch_r_um),
+            )
+        )
+    if candidates.size == 0:
+        return np.empty((0, 2), dtype=np.float64)
+
+    hull = _convex_hull_vertices(candidates)
+    max_support_points = max(4, int(max_support_points))
+    if hull.shape[0] <= max_support_points:
+        return hull
+
+    angles = np.linspace(0.0, 2.0 * np.pi, max_support_points, endpoint=False)
+    directions = np.column_stack((np.cos(angles), np.sin(angles)))
+    support_idx = np.argmax(hull @ directions.T, axis=0)
+    return hull[np.unique(support_idx)]
+
 class Die:
     def __init__(
         self, DIE_W_um, DIE_L_um, die_center, NUM_PADS_PER_DIE,
         DIE_VERTEX_COORDS, PAD_ARR_BOX, 
         pad_yield_flag: bool,
+        OVL_ACTIVE_PAD_BOUNDARY_COORDS: np.ndarray = None,
     ):
         self.DIE_W_um = DIE_W_um
         self.DIE_L_um = DIE_L_um
@@ -24,6 +105,11 @@ class Die:
         self.num_pads = NUM_PADS_PER_DIE
         self.vertices_coords = self.get_vertices_coords(die_center, DIE_VERTEX_COORDS)
         self.pad_array_box = PAD_ARR_BOX + die_center
+        self.ovl_active_pad_boundary_coords = (
+            OVL_ACTIVE_PAD_BOUNDARY_COORDS + die_center
+            if OVL_ACTIVE_PAD_BOUNDARY_COORDS is not None
+            else None
+        )
 
         self.survival = True
         self.voids_occur = False
@@ -52,6 +138,7 @@ class Wafer_Interface:
         base_pad_coords: np.ndarray,
         dice_width: float,
         pad_yield_flag: bool,
+        overlay_active_pad_boundary_coords: np.ndarray = None,
         dice_proportion=1.0,
     ):
         self.wafer_radius = wafer_radius
@@ -70,6 +157,7 @@ class Wafer_Interface:
         self.base_pad_coords = base_pad_coords
         self.dice_width = dice_width
         self.pad_yield_flag = pad_yield_flag
+        self.overlay_active_pad_boundary_coords = overlay_active_pad_boundary_coords
         self.glb_pad_yield_min_max_dict = {}
 
     def generate_die(self, NUM_PADS_PER_DIE, DIE_VERTEX_COORDS, PAD_ARR_BOX):
@@ -102,7 +190,8 @@ class Wafer_Interface:
                     NUM_PADS_PER_DIE,
                     DIE_VERTEX_COORDS,
                     PAD_ARR_BOX,
-                    pad_yield_flag=self.pad_yield_flag
+                    pad_yield_flag=self.pad_yield_flag,
+                    OVL_ACTIVE_PAD_BOUNDARY_COORDS=self.overlay_active_pad_boundary_coords,
                 )
                 for vertex in die.vertices_coords:
                     if (
@@ -315,6 +404,31 @@ def wafer_interface_initialize(
         else:
             print("Too many Cu pads... Will not generate the pad coordinates.")
             PAD_COORDS = None
+
+    critical_mask = np.asarray(
+        pad_bitmap_collection["CRITICAL_PAD_BITMAP"],
+        dtype=bool,
+    )
+    redundant_mask = np.asarray(
+        pad_bitmap_collection["REDUNDANT_PAD_BITMAP"],
+        dtype=bool,
+    )
+    power_ground_mask = np.asarray(
+        pad_bitmap_collection.get(
+            "POWER_GROUND_PAD_BITMAP",
+            np.zeros_like(critical_mask, dtype=bool),
+        ),
+        dtype=bool,
+    )
+    active_mask = critical_mask | redundant_mask | power_ground_mask
+    OVL_ACTIVE_PAD_BOUNDARY_COORDS = _active_pad_boundary_coords(
+        active_mask,
+        PAD_COORDS,
+        pad_arr_w_um=PAD_ARR_W_um,
+        pad_arr_l_um=PAD_ARR_L_um,
+        pitch_r_um=PITCH_r_um,
+        pitch_c_um=PITCH_c_um,
+    )
     
     # Initialize the wafer interface and generate the dies and pads
     wafer_interface = Wafer_Interface(
@@ -328,6 +442,7 @@ def wafer_interface_initialize(
         base_pad_coords=PAD_COORDS,
         dice_width=dice_width,
         pad_yield_flag=pad_yield_flag,
+        overlay_active_pad_boundary_coords=OVL_ACTIVE_PAD_BOUNDARY_COORDS,
     )
     wafer_interface.generate_die(NUM_PADS_PER_DIE, DIE_VERTEX_COORDS, PAD_ARR_BOX)
     wafer_interface.survival_die = len(wafer_interface.die_list)
@@ -421,7 +536,12 @@ class WaferStack:
         """
         Calculate the yield for each die stack based on the failure parameters of each interface.
         """
+        self.die_stack_yield_list.fill(1.0)
         for interface_name, interface in self.interfaces.interface_dict.items():
+            for mechanism in DISABLED_YIELD_MECHANISMS:
+                self.die_yield_list_per_interface_dict[interface_name][mechanism] = (
+                    np.ones(self.num_dies_per_wafer, dtype=float)
+                )
             self.die_yield_list_per_interface_dict[interface_name]['overall'] = self.die_yield_list_per_interface_dict[interface_name]['overlay'] * \
                 self.die_yield_list_per_interface_dict[interface_name]['particle'] * \
                 self.die_yield_list_per_interface_dict[interface_name]['mechanical'] * \
@@ -683,6 +803,3 @@ def wafer_stack_list_initialize(
         
     
     return wafer_stack_list
-
-
-

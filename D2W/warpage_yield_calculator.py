@@ -31,20 +31,55 @@ def curvature_to_bow_um(kappa, L_m):
     return 0.5 * kappa * L_m**2 * 1e6
 
 
-def _infer_bonded_die_count(layer_df):
+def _d2d_sublayer_group_size(layer_df):
     """
-    Infer the number of bonded die/wafer bodies represented by layer_df.
+    Return the repeated sublayer count for exp01 D2D tables, or 0 otherwise.
 
-    The exp01 D2D verification represents each die as two consecutive
-    sublayers, Si plus interface, with the same initial bow.  The production
-    D2W stack model usually has one effective layer per chiplet.  This helper
-    keeps both conventions usable without requiring a new public argument.
+    The legacy exp01 D2D verification represents each die as two consecutive
+    sublayers, Si plus interface, with the same initial bow.  Older sandwich
+    decks represented each die as three consecutive sublayers: bottom interface,
+    Si, top interface.  Current explicit-interface sandwich decks instead put
+    one full interface below each incoming die; those are detected separately by
+    `interface_layout`/`die_index`.  The production D2W stack model usually has
+    one effective layer per chiplet, so D2D detection stays conservative.
     """
     row_count = int(len(layer_df))
     if row_count == 0:
         return 0
-    if row_count % 2 != 0 or "W0_um" not in layer_df.columns:
-        return row_count
+    if "W0_um" not in layer_df.columns:
+        return 0
+
+    if "sublayer" in layer_df.columns:
+        sublayers = [str(value) for value in layer_df["sublayer"].tolist()]
+        patterns = (
+            ("si_substrate", "hybrid_bond_interface_eq_sio2_cu"),
+            (
+                "hybrid_bond_interface_bottom_eq_sio2_cu",
+                "si_substrate",
+                "hybrid_bond_interface_top_eq_sio2_cu",
+            ),
+        )
+        for pattern in patterns:
+            group_size = len(pattern)
+            if row_count % group_size != 0:
+                continue
+            if all(tuple(sublayers[idx : idx + group_size]) == pattern for idx in range(0, row_count, group_size)):
+                w0 = layer_df["W0_um"].to_numpy(dtype=float)
+                same_bow = True
+                for idx in range(0, row_count, group_size):
+                    ref = float(w0[idx])
+                    if any(
+                        not math.isclose(ref, float(w0[idx + offset]), rel_tol=0.0, abs_tol=1.0e-9)
+                        for offset in range(1, group_size)
+                    ):
+                        same_bow = False
+                        break
+                if same_bow:
+                    return group_size
+        return 0
+
+    if row_count % 2 != 0:
+        return 0
 
     w0 = layer_df["W0_um"].to_numpy(dtype=float)
     paired = True
@@ -52,13 +87,29 @@ def _infer_bonded_die_count(layer_df):
         if not math.isclose(float(w0[idx]), float(w0[idx + 1]), rel_tol=0.0, abs_tol=1.0e-9):
             paired = False
             break
-    return row_count // 2 if paired else row_count
+    return 2 if paired else 0
+
+
+def _infer_bonded_die_count(layer_df):
+    """Infer the number of bonded die/wafer bodies represented by layer_df."""
+    row_count = int(len(layer_df))
+    if "die_index" in layer_df.columns:
+        return int(pd.Series(layer_df["die_index"]).nunique())
+    group_size = _d2d_sublayer_group_size(layer_df)
+    return row_count // group_size if group_size else row_count
 
 
 def _is_paired_d2d_layer_table(layer_df):
-    """Return True for D2D tables represented as repeated substrate/interface pairs."""
-    row_count = int(len(layer_df))
-    return row_count > 0 and _infer_bonded_die_count(layer_df) * 2 == row_count
+    """Return True for D2D tables represented as repeated die sublayer groups."""
+    if "interface_layout" in layer_df.columns and "die_index" in layer_df.columns:
+        layouts = {str(value) for value in layer_df["interface_layout"].dropna().tolist()}
+        if layouts and layouts.issubset({"top", "sandwich"}):
+            return True
+    if "sublayer" in layer_df.columns:
+        sublayers = {str(value) for value in layer_df["sublayer"].dropna().tolist()}
+        if "hybrid_bond_interface_bottom_eq_sio2_cu" in sublayers and "die_index" in layer_df.columns:
+            return True
+    return _d2d_sublayer_group_size(layer_df) > 0
 
 
 def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):

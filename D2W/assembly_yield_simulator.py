@@ -15,6 +15,11 @@ from overlay_yield_simulator import overlay_term_simulator
 from defect_yield_simulator import defect_yield_simulator
 from overall_yield_simulator import overall_yield_simulator
 from utils.util import result_wrapper
+from yield_mechanism_policy import (
+    FAILURE_MECHANISMS,
+    active_failure_mechanisms,
+    disabled_requested_mechanisms,
+)
 
 
 def _append_file_suffix(filename, file_suffix):
@@ -22,34 +27,6 @@ def _append_file_suffix(filename, file_suffix):
         return filename
     stem, ext = os.path.splitext(filename)
     return f"{stem}{file_suffix}{ext}"
-
-
-_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
-
-
-def _active_failure_mechanisms(input_args):
-    raw = input_args.get('mechanism_filter', 'all')
-    if raw is None:
-        return set(_FAILURE_MECHANISMS)
-    if isinstance(raw, (set, list, tuple)):
-        requested = [str(item).strip() for item in raw]
-    else:
-        requested = [item.strip() for item in str(raw).split(',')]
-    requested = [item for item in requested if item]
-    if not requested or any(item.lower() == 'all' for item in requested):
-        return set(_FAILURE_MECHANISMS)
-
-    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
-    active = set()
-    for item in requested:
-        key = item.lower()
-        if key not in canonical:
-            raise ValueError(
-                f"Unknown mechanism_filter '{item}'. "
-                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
-            )
-        active.add(canonical[key])
-    return active
 
 
 def Assembly_Yield_Simulator(
@@ -61,8 +38,23 @@ def Assembly_Yield_Simulator(
 ):
     NUM_DIE_STACKS = cfg_skeleton.NUM_DIE_STACKS
     SIM_BATCH_SIZE = cfg_skeleton.SIM_BATCH_SIZE
-    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
-    active_mechanisms = _active_failure_mechanisms(input_args)
+    failure_mechanism_list = list(FAILURE_MECHANISMS) + ['overall']
+    active_mechanisms = active_failure_mechanisms(input_args)
+    disabled_requested = disabled_requested_mechanisms(input_args)
+    if disabled_requested:
+        print(
+            "Temporarily disabled yield mechanisms ignored: {}. "
+            "Warpage remains enabled only as an overlay-error input.".format(
+                ", ".join(sorted(disabled_requested))
+            )
+        )
+    if not active_mechanisms:
+        print("Requested yield mechanisms are disabled; returning unity yield.")
+        return (
+            1.0,
+            [1.0] * NUM_DIE_STACKS,
+            {interface_name: 1.0 for interface_name in cfg_dict},
+        )
     if active_mechanisms == {'ESD'}:
         esd_batch_size = int(getattr(cfg_skeleton, 'ESD_SIM_BATCH_SIZE', 1000))
         SIM_BATCH_SIZE = min(NUM_DIE_STACKS, max(int(SIM_BATCH_SIZE), esd_batch_size))

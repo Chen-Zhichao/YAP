@@ -1,0 +1,9 @@
+D2W simple all-critical YAP modeling case study
+Assumptions: square die, full pad array, all pads critical, pad radius=pitch/4, 100um layer thickness, global mechanical safe range, D2W design_6 defaults except rotation mean=2e-6 rad/std=1e-6 rad and particle D1=D0=1e-9.
+
+ Area(mm2) Pitch(um)         Pads    Overlay   Particle   Mechanical   Combined
+----------------------------------------------------------------------------------
+        50         5      2000000          1     0.9512            0          0
+        50         1     50000000          1     0.9512            0          0
+       500         5     20000000          1     0.6065            0          0
+       500         1    500000000          1     0.6065            0          0

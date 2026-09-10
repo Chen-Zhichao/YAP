@@ -13,34 +13,10 @@ from Cu_expansion_yield_calculator import stack_cu_expansion_yield_calculator
 from esd_yield_calculator import stack_esd_yield_calculator
 from warpage_yield_calculator import stack_warpage_yield_calculator
 from wafer_die_stack_initialization import DieStack
-
-
-_FAILURE_MECHANISMS = ("overlay", "particle", "mechanical", "ESD", "warpage")
-
-
-def _active_failure_mechanisms(input_args):
-    raw = input_args.get("mechanism_filter", "all")
-    if raw is None:
-        return set(_FAILURE_MECHANISMS)
-    if isinstance(raw, (set, list, tuple)):
-        requested = [str(item).strip() for item in raw]
-    else:
-        requested = [item.strip() for item in str(raw).split(",")]
-    requested = [item for item in requested if item]
-    if not requested or any(item.lower() == "all" for item in requested):
-        return set(_FAILURE_MECHANISMS)
-
-    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
-    active = set()
-    for item in requested:
-        key = item.lower()
-        if key not in canonical:
-            raise ValueError(
-                f"Unknown mechanism_filter '{item}'. "
-                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
-            )
-        active.add(canonical[key])
-    return active
+from yield_mechanism_policy import (
+    active_failure_mechanisms,
+    disabled_requested_mechanisms,
+)
 
 
 def _set_skipped_mechanism_yield_to_one(die_stack, mechanism):
@@ -63,7 +39,15 @@ def Assembly_Yield_Calculator(
     )
     init_time = time.time() - start_time
     print("Die stack initialization time: {:.2f} seconds.".format(init_time))
-    active_mechanisms = _active_failure_mechanisms(input_args)
+    active_mechanisms = active_failure_mechanisms(input_args)
+    disabled_requested = disabled_requested_mechanisms(input_args)
+    if disabled_requested:
+        print(
+            "Temporarily disabled yield mechanisms ignored: {}. "
+            "Warpage remains enabled only as an overlay-error input.".format(
+                ", ".join(sorted(disabled_requested))
+            )
+        )
     print("Active yield mechanisms: {}.".format(", ".join(sorted(active_mechanisms))))
 
     ds_dir = input_args.get("design_root_dir", input_args.get("ds_dir", ""))

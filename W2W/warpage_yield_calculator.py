@@ -39,20 +39,24 @@ DEFAULT_RESIDUAL_CURVATURE_MEMORY_DECAY = 0.50
 DEFAULT_THERMAL_RESIDUAL_MOMENT_CARRY = 0.90
 DEFAULT_THERMAL_RESIDUAL_MOMENT_MEMORY_DECAY = 0.90
 DEFAULT_THERMAL_RESIDUAL_MOMENT_TERMINAL_POWER = 2.00
+COMPACTED_THICKNESS_GRADIENT_RELATIVE_SPAN = 0.05
+COMPACTED_MATERIAL_E_RELATIVE_SPAN_FOR_THICKNESS_ONLY = 0.01
+COMPACTED_MATERIAL_ALPHA_RELATIVE_SPAN_FOR_THICKNESS_ONLY = 0.002
 
 
 def _w2w_incremental_thermal_delta_t(delta_t):
     """
     Convert a nominal cooldown DeltaT into the incremental W2W thermal step.
 
-    `compute_total_stack_warpage` is a single bonding/release formula whose
-    DeltaT convention matches a batch stack assembled stress-free at anneal and
-    then cooled to room.  In W2W, however, the already completed lower stack is
-    carried from its released room-temperature state into the next anneal before
-    cooling again.  The incremental thermal mismatch seen by that carried state
-    therefore has the opposite sign from the batch cooldown input.
+    MAPDL uses TREF=T_anneal and then applies TEMP=T_room, so the cooldown
+    passed through the W2W recurrence should keep the physical sign
+    DeltaT = T_room - T_anneal.  Earlier diagnostic code flipped this sign to
+    emulate a carried lower-stack reheating step, but the exp03/exp04 MAPDL
+    decks rebuild the compacted lower state stress-free at anneal before the
+    cooling solve.  Keeping the MAPDL sign avoids applying the CTE-mismatch
+    bending moment in the opposite direction.
     """
-    return -float(delta_t)
+    return float(delta_t)
 
 
 def _instance_from_3dbx_endpoint(endpoint) -> str:
@@ -163,6 +167,37 @@ def curvature_to_bow_um(kappa, L_m):
     return 0.5 * kappa * L_m**2 * 1e6
 
 
+def _thermal_modulus(E, nu, mode="plate", layer_kind=None):
+    """
+    Return the modulus used to weight the CTE-mismatch thermal moment.
+
+    The historical W2W model uses the plate response E/(1-nu^2).  For a true
+    circular W2W wafer with spherical/axisymmetric bow, the Si wafer substrate
+    is better represented by the equibiaxial E/(1-nu) convention.  The hybrid
+    bond interface remains a very thin equivalent Cu/SiO2 film, so keep the
+    original plate weighting for layers identified as interfaces.
+    """
+    E = np.asarray(E, dtype=float)
+    nu = np.asarray(nu, dtype=float)
+    if mode == "plate":
+        return E / (1.0 - nu**2)
+    if mode == "axial":
+        return E / (1.0 - nu)
+    if mode != "w2w_mixed":
+        raise ValueError(f"Unknown thermal modulus mode: {mode}")
+
+    if layer_kind is None:
+        return E / (1.0 - nu**2)
+    labels = np.asarray(layer_kind, dtype=object)
+    if labels.size != E.size:
+        raise ValueError("layer_kind must have one entry per thermal layer.")
+    is_interface = np.asarray([
+        "interface" in str(label).lower()
+        for label in labels
+    ], dtype=bool)
+    return np.where(is_interface, E / (1.0 - nu**2), E / (1.0 - nu))
+
+
 def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
     """
     Compute multilayer total stack bow for one anneal/release event.
@@ -232,7 +267,11 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
     s_b = np.sum(b * weights) / np.sum(weights)
 
     D = E_biaxial * h**3 / 12.0
-    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
+    # MAPDL uses TREF=T_anneal and TEMP=T_room, so the mechanical strain from
+    # cooling is the negative of the free thermal strain relative to the
+    # weighted reference CTE.  The thermal generalized moment therefore enters
+    # with the opposite sign from the geometric initial-curvature moment.
+    M_T = -np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
     M_b = np.sum((a / lam) * (b - s_b))
     K_a = np.sum((a / lam) * (a - s_a))
     K_D = np.sum(D)
@@ -241,7 +280,7 @@ def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
     kappa = (M_D0 + M_T + M_b) / (K_D + K_a)
     W_um = curvature_to_bow_um(kappa, L_m)
 
-    strain_term = (delta_alpha - s_alpha) * DeltaT_K - (a - s_a) * kappa + (b - s_b)
+    strain_term = -(delta_alpha - s_alpha) * DeltaT_K - (a - s_a) * kappa + (b - s_b)
     F = weights * strain_term
     sigma = E_biaxial * strain_term
 
@@ -270,6 +309,8 @@ def _compute_total_stack_warpage_arrays(
     DeltaT_K,
     L_m,
     thermal_arrays=None,
+    thermal_modulus_mode="plate",
+    layer_kind=None,
 ):
     """Array implementation of compute_total_stack_warpage for fast sweeps."""
     h = np.asarray(h_um, dtype=float) * 1e-6
@@ -290,13 +331,24 @@ def _compute_total_stack_warpage_arrays(
         E_t = E
         nu_t = nu
         alpha_t = alpha
+        layer_kind_t = layer_kind
     else:
         h_t = np.asarray(thermal_arrays["h_um"], dtype=float) * 1e-6
         E_t = np.asarray(thermal_arrays["E_GPa"], dtype=float) * 1e9
         nu_t = np.asarray(thermal_arrays["nu"], dtype=float)
         alpha_t = np.asarray(thermal_arrays["alpha_ppm_K"], dtype=float) * 1e-6
+        layer_kind_t = None
+        for kind_key in ("thermal_modulus_kind", "sublayer", "layer_kind"):
+            if kind_key in thermal_arrays:
+                layer_kind_t = thermal_arrays[kind_key]
+                break
 
-    E_thermal = E_t / (1.0 - nu_t**2)
+    E_thermal = _thermal_modulus(
+        E_t,
+        nu_t,
+        mode=thermal_modulus_mode,
+        layer_kind=layer_kind_t,
+    )
     thermal_weights = E_thermal * h_t
     h_t_cumsum = np.cumsum(h_t)
     a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
@@ -306,7 +358,7 @@ def _compute_total_stack_warpage_arrays(
     s_b = np.sum(b * weights) / np.sum(weights)
 
     D = E_biaxial * h**3 / 12.0
-    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
+    M_T = -np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
     M_b = np.sum(a * weights * (b - s_b))
     K_a = np.sum(a * weights * (a - s_a))
     K_D = np.sum(D)
@@ -332,6 +384,8 @@ def _compute_total_stack_warpage_arrays_with_residual_strain(
     DeltaT_K,
     L_m,
     thermal_arrays=None,
+    thermal_modulus_mode="plate",
+    layer_kind=None,
 ):
     """
     Array release solve with a transferred per-layer residual strain state.
@@ -363,13 +417,24 @@ def _compute_total_stack_warpage_arrays_with_residual_strain(
         E_t = E
         nu_t = nu
         alpha_t = alpha
+        layer_kind_t = layer_kind
     else:
         h_t = np.asarray(thermal_arrays["h_um"], dtype=float) * 1e-6
         E_t = np.asarray(thermal_arrays["E_GPa"], dtype=float) * 1e9
         nu_t = np.asarray(thermal_arrays["nu"], dtype=float)
         alpha_t = np.asarray(thermal_arrays["alpha_ppm_K"], dtype=float) * 1e-6
+        layer_kind_t = None
+        for kind_key in ("thermal_modulus_kind", "sublayer", "layer_kind"):
+            if kind_key in thermal_arrays:
+                layer_kind_t = thermal_arrays[kind_key]
+                break
 
-    E_thermal = E_t / (1.0 - nu_t**2)
+    E_thermal = _thermal_modulus(
+        E_t,
+        nu_t,
+        mode=thermal_modulus_mode,
+        layer_kind=layer_kind_t,
+    )
     thermal_weights = E_thermal * h_t
     h_t_cumsum = np.cumsum(h_t)
     a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
@@ -380,7 +445,7 @@ def _compute_total_stack_warpage_arrays_with_residual_strain(
     s_residual = np.sum(residual * weights) / np.sum(weights)
 
     D = E_biaxial * h**3 / 12.0
-    M_T = np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
+    M_T = -np.sum(a_t * thermal_weights * (delta_alpha_t - s_alpha) * DeltaT_K)
     M_b = np.sum(a * weights * (b - s_b))
     M_residual = np.sum(a * weights * (residual - s_residual))
     K_a = np.sum(a * weights * (a - s_a))
@@ -392,7 +457,7 @@ def _compute_total_stack_warpage_arrays_with_residual_strain(
 
     delta_alpha = alpha - alpha[0]
     strain_term = (
-        (delta_alpha - s_alpha) * DeltaT_K
+        -(delta_alpha - s_alpha) * DeltaT_K
         - (a - s_a) * kappa
         + (b - s_b)
         + (residual - s_residual)
@@ -496,14 +561,26 @@ def _sequential_thermal_group_layers(layer_df, group_ids, incoming_group, carrie
     )
 
 
-def _equivalent_thermal_arrays(h_um, E_GPa, nu, alpha_ppm_K):
+def _equivalent_thermal_arrays(
+    h_um,
+    E_GPa,
+    nu,
+    alpha_ppm_K,
+    thermal_modulus_mode="plate",
+    layer_kind=None,
+):
     h = np.asarray(h_um, dtype=float)
     E = np.asarray(E_GPa, dtype=float)
     nu = np.asarray(nu, dtype=float)
     alpha = np.asarray(alpha_ppm_K, dtype=float)
     h_total = float(np.sum(h))
     E_axial = E / (1.0 - nu)
-    E_thermal = E / (1.0 - nu**2)
+    E_thermal = _thermal_modulus(
+        E,
+        nu,
+        mode=thermal_modulus_mode,
+        layer_kind=layer_kind,
+    )
     axial_weights = E_axial * h
     thermal_weights = E_thermal * h
     nu_eff = float(np.sum(nu * h) / h_total)
@@ -513,6 +590,196 @@ def _equivalent_thermal_arrays(h_um, E_GPa, nu, alpha_ppm_K):
         "E_GPa": E_axial_eff * (1.0 - nu_eff),
         "nu": nu_eff,
         "alpha_ppm_K": float(np.sum(alpha * thermal_weights) / np.sum(thermal_weights)),
+    }
+
+
+def _single_equivalent_lower_thermal_arrays(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    lower_indices,
+    incoming_indices,
+):
+    lower_eq = _equivalent_thermal_arrays(
+        h_all[lower_indices],
+        E_all[lower_indices],
+        nu_all[lower_indices],
+        alpha_all[lower_indices],
+    )
+    return {
+        "h_um": np.concatenate(([lower_eq["h_um"]], h_all[incoming_indices])),
+        "E_GPa": np.concatenate(([lower_eq["E_GPa"]], E_all[incoming_indices])),
+        "nu": np.concatenate(([lower_eq["nu"]], nu_all[incoming_indices])),
+        "alpha_ppm_K": np.concatenate(([lower_eq["alpha_ppm_K"]], alpha_all[incoming_indices])),
+    }, "single_lower_equivalent"
+
+
+def _per_group_equivalent_lower_thermal_arrays(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    group_masks,
+    group_position,
+    incoming_indices,
+):
+    pieces = {
+        "h_um": [],
+        "E_GPa": [],
+        "nu": [],
+        "alpha_ppm_K": [],
+    }
+    for mask in group_masks[:group_position]:
+        indices = np.nonzero(mask)[0]
+        group_eq = _equivalent_thermal_arrays(
+            h_all[indices],
+            E_all[indices],
+            nu_all[indices],
+            alpha_all[indices],
+        )
+        for key in pieces:
+            pieces[key].append(group_eq[key])
+    for idx in incoming_indices:
+        pieces["h_um"].append(h_all[idx])
+        pieces["E_GPa"].append(E_all[idx])
+        pieces["nu"].append(nu_all[idx])
+        pieces["alpha_ppm_K"].append(alpha_all[idx])
+    return {
+        key: np.asarray(values, dtype=float)
+        for key, values in pieces.items()
+    }, "per_group_lower_equivalent"
+
+
+def _has_physical_sublayer_metadata(layer_kind_all):
+    if layer_kind_all is None:
+        return False
+    labels = [str(label).lower() for label in np.asarray(layer_kind_all, dtype=object)]
+    return any("interface" in label for label in labels) and any("substrate" in label for label in labels)
+
+
+def _explicit_lower_uniform_alpha_thermal_arrays(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    lower_indices,
+    incoming_indices,
+    *,
+    thermal_modulus_mode="plate",
+    layer_kind_all=None,
+):
+    """
+    Thermal state for compacted W2W sandwich wafers.
+
+    The compacted MAPDL verification keeps the completed lower stack explicit
+    for stiffness/geometry, but gives every completed lower layer one equivalent
+    CTE so old internal thermal mismatch is not re-applied at the next anneal.
+    Mirror that state directly instead of replacing the lower stack by one
+    geometric layer.
+    """
+    lower_kind = None if layer_kind_all is None else layer_kind_all[lower_indices]
+    lower_eq = _equivalent_thermal_arrays(
+        h_all[lower_indices],
+        E_all[lower_indices],
+        nu_all[lower_indices],
+        alpha_all[lower_indices],
+        thermal_modulus_mode=thermal_modulus_mode,
+        layer_kind=lower_kind,
+    )
+    thermal_arrays = {
+        "h_um": np.concatenate((h_all[lower_indices], h_all[incoming_indices])),
+        "E_GPa": np.concatenate((E_all[lower_indices], E_all[incoming_indices])),
+        "nu": np.concatenate((nu_all[lower_indices], nu_all[incoming_indices])),
+        "alpha_ppm_K": np.concatenate((
+            np.full(lower_indices.size, lower_eq["alpha_ppm_K"], dtype=float),
+            alpha_all[incoming_indices],
+        )),
+    }
+    if layer_kind_all is not None:
+        thermal_arrays["thermal_modulus_kind"] = np.concatenate((
+            layer_kind_all[lower_indices],
+            layer_kind_all[incoming_indices],
+        ))
+    return thermal_arrays, "explicit_lower_uniform_alpha"
+
+
+def _select_compacted_thermal_arrays(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    group_masks,
+    group_position,
+    lower_indices,
+    incoming_indices,
+    *,
+    thermal_modulus_mode="plate",
+    layer_kind_all=None,
+):
+    """
+    Choose a compact thermal state for a completed W2W lower stack.
+
+    For ordinary material stacks, the completed lower stack is represented as
+    one thermal-equivalent layer so its internal CTE mismatch is not applied as
+    a fresh load at every later compacted W2W step.  If the wafer-to-wafer
+    variation is primarily thickness, however, collapsing all completed wafers
+    into one layer erases their through-thickness locations.  In that case,
+    keep one equivalent layer per completed wafer.  This preserves neutral-axis
+    placement without introducing a fitted scale factor.
+    """
+    if _has_physical_sublayer_metadata(layer_kind_all):
+        thermal_arrays, mode = _explicit_lower_uniform_alpha_thermal_arrays(
+            h_all,
+            E_all,
+            nu_all,
+            alpha_all,
+            lower_indices,
+            incoming_indices,
+            thermal_modulus_mode=thermal_modulus_mode,
+            layer_kind_all=layer_kind_all,
+        )
+        props = _group_effective_properties(h_all, E_all, nu_all, alpha_all, group_masks)
+        return thermal_arrays, {
+            "compacted_thermal_state_mode": mode,
+            "group_thickness_relative_span": float(_relative_span(props["h_um"])),
+            "group_E_relative_span": float(_relative_span(props["E_GPa"])),
+            "group_alpha_relative_span": float(_relative_span(props["alpha_ppm_K"])),
+        }
+
+    props = _group_effective_properties(h_all, E_all, nu_all, alpha_all, group_masks)
+    thickness_span = _relative_span(props["h_um"])
+    e_span = _relative_span(props["E_GPa"])
+    alpha_span = _relative_span(props["alpha_ppm_K"])
+    use_per_group = (
+        thickness_span > COMPACTED_THICKNESS_GRADIENT_RELATIVE_SPAN
+        and e_span < COMPACTED_MATERIAL_E_RELATIVE_SPAN_FOR_THICKNESS_ONLY
+        and alpha_span < COMPACTED_MATERIAL_ALPHA_RELATIVE_SPAN_FOR_THICKNESS_ONLY
+    )
+    if use_per_group:
+        thermal_arrays, mode = _per_group_equivalent_lower_thermal_arrays(
+            h_all,
+            E_all,
+            nu_all,
+            alpha_all,
+            group_masks,
+            group_position,
+            incoming_indices,
+        )
+    else:
+        thermal_arrays, mode = _single_equivalent_lower_thermal_arrays(
+            h_all,
+            E_all,
+            nu_all,
+            alpha_all,
+            lower_indices,
+            incoming_indices,
+        )
+    return thermal_arrays, {
+        "compacted_thermal_state_mode": mode,
+        "group_thickness_relative_span": float(thickness_span),
+        "group_E_relative_span": float(e_span),
+        "group_alpha_relative_span": float(alpha_span),
     }
 
 
@@ -542,6 +809,12 @@ def compute_sequential_stack_warpage_grouped_fast(
     nu_all = df["nu"].to_numpy(dtype=float)
     alpha_all = df["alpha_ppm_K"].to_numpy(dtype=float)
     W0_all = df["W0_um"].to_numpy(dtype=float)
+    layer_kind_all = None
+    thermal_modulus_mode = "plate"
+    for kind_column in ("thermal_modulus_kind", "sublayer", "layer_kind"):
+        if kind_column in df.columns:
+            layer_kind_all = df[kind_column].to_numpy(dtype=object)
+            break
     groups = list(pd.unique(group_values))
     num_groups = len(groups)
     if num_groups < 1:
@@ -580,18 +853,18 @@ def compute_sequential_stack_warpage_grouped_fast(
         active_lower = np.isin(active_indices, lower_indices)
         W0_current[active_lower] = effective_carried_W_um
 
-        lower_eq = _equivalent_thermal_arrays(
-            h_all[lower_indices],
-            E_all[lower_indices],
-            nu_all[lower_indices],
-            alpha_all[lower_indices],
+        thermal_arrays, thermal_state_info = _select_compacted_thermal_arrays(
+            h_all,
+            E_all,
+            nu_all,
+            alpha_all,
+            group_masks,
+            group_position,
+            lower_indices,
+            incoming_indices,
+            thermal_modulus_mode=thermal_modulus_mode,
+            layer_kind_all=layer_kind_all,
         )
-        thermal_arrays = {
-            "h_um": np.concatenate(([lower_eq["h_um"]], h_all[incoming_indices])),
-            "E_GPa": np.concatenate(([lower_eq["E_GPa"]], E_all[incoming_indices])),
-            "nu": np.concatenate(([lower_eq["nu"]], nu_all[incoming_indices])),
-            "alpha_ppm_K": np.concatenate(([lower_eq["alpha_ppm_K"]], alpha_all[incoming_indices])),
-        }
 
         nominal_delta_t = float(delta_t_values[group_position - 1])
         step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
@@ -624,6 +897,8 @@ def compute_sequential_stack_warpage_grouped_fast(
             "residual_state_W_um": float(residual_state_W_um),
             "residual_curvature_carry": carry_gain,
             "residual_curvature_memory_decay": memory_decay,
+            "thermal_modulus_mode": thermal_modulus_mode,
+            **thermal_state_info,
         })
 
     if step_summaries:
@@ -786,6 +1061,569 @@ def compute_sequential_stack_warpage_grouped_abd_state_transfer(
     return final_summary, step_summaries
 
 
+def _relative_span(values):
+    values = np.asarray(values, dtype=float)
+    if values.size <= 1:
+        return 0.0
+    scale = max(abs(float(np.mean(values))), 1.0e-12)
+    return float((np.max(values) - np.min(values)) / scale)
+
+
+def _group_effective_properties(h_um, E_GPa, nu, alpha_ppm_K, group_masks):
+    h = np.asarray(h_um, dtype=float)
+    E = np.asarray(E_GPa, dtype=float)
+    nu = np.asarray(nu, dtype=float)
+    alpha = np.asarray(alpha_ppm_K, dtype=float)
+    group_h = []
+    group_E = []
+    group_alpha = []
+    interface_alpha = []
+    for mask in group_masks:
+        idx = np.nonzero(mask)[0]
+        h_g = h[idx]
+        E_g = E[idx]
+        nu_g = nu[idx]
+        alpha_g = alpha[idx]
+        h_total = float(np.sum(h_g))
+        E_axial = E_g / (1.0 - nu_g)
+        E_thermal = E_g / (1.0 - nu_g**2)
+        axial_weights = E_axial * h_g
+        thermal_weights = E_thermal * h_g
+        nu_eff = float(np.sum(nu_g * h_g) / h_total)
+        E_axial_eff = float(np.sum(axial_weights) / h_total)
+        group_h.append(h_total)
+        group_E.append(E_axial_eff * (1.0 - nu_eff))
+        group_alpha.append(float(np.sum(alpha_g * thermal_weights) / np.sum(thermal_weights)))
+        interface_alpha.append(float(alpha_g[int(np.argmin(h_g))]))
+    return {
+        "h_um": np.asarray(group_h, dtype=float),
+        "E_GPa": np.asarray(group_E, dtype=float),
+        "alpha_ppm_K": np.asarray(group_alpha, dtype=float),
+        "interface_alpha_ppm_K": np.asarray(interface_alpha, dtype=float),
+    }
+
+
+def _substrate_representative_index(indices, h_all, layer_kind_all=None):
+    indices = np.asarray(indices, dtype=int)
+    if indices.size == 0:
+        raise ValueError("Cannot build a substrate-equivalent thermal layer from an empty group.")
+    if layer_kind_all is not None:
+        labels = np.asarray(layer_kind_all, dtype=object)
+        group_labels = [str(labels[idx]).lower() for idx in indices]
+        substrate_positions = [
+            pos
+            for pos, label in enumerate(group_labels)
+            if "substrate" in label or label.startswith("si_") or label == "si"
+        ]
+        if substrate_positions:
+            local = substrate_positions[int(np.argmax(h_all[indices[substrate_positions]]))]
+            return int(indices[local])
+    return int(indices[int(np.argmax(h_all[indices]))])
+
+
+def _per_group_substrate_equivalent_thermal_arrays(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    group_masks,
+    group_position,
+    *,
+    layer_kind_all=None,
+):
+    """
+    Thermal state for exp04 sandwich W2W stress-history verification.
+
+    The mechanical solve keeps the explicit interface/substrate sandwich.  For
+    thermal bending, however, the 1.5 um hybrid-bond interfaces should not be
+    re-applied as independent thin-film CTE loads at every history step.  MAPDL
+    indicates those local interface strains mostly follow the wafer substrate
+    release, so represent each active wafer by its total thickness and
+    substrate material for the thermal moment.  This is a physical reduction,
+    not a fitted scale factor.
+    """
+    h = np.asarray(h_all, dtype=float)
+    E = np.asarray(E_all, dtype=float)
+    nu = np.asarray(nu_all, dtype=float)
+    alpha = np.asarray(alpha_all, dtype=float)
+    parts = {
+        "h_um": [],
+        "E_GPa": [],
+        "nu": [],
+        "alpha_ppm_K": [],
+    }
+    for mask in group_masks[: group_position + 1]:
+        indices = np.nonzero(mask)[0]
+        substrate_idx = _substrate_representative_index(
+            indices,
+            h,
+            layer_kind_all=layer_kind_all,
+        )
+        parts["h_um"].append(float(np.sum(h[indices])))
+        parts["E_GPa"].append(float(E[substrate_idx]))
+        parts["nu"].append(float(nu[substrate_idx]))
+        parts["alpha_ppm_K"].append(float(alpha[substrate_idx]))
+    return {key: np.asarray(values, dtype=float) for key, values in parts.items()}
+
+
+def _select_grouped_stress_history_state(h_um, E_GPa, nu, alpha_ppm_K, group_masks):
+    """
+    Pick the analytical state transfer that best matches the physical process.
+
+    The selector is based only on input layer properties, not on ANSYS results:
+
+    - Default: reflattened wafers enter with their original layer bows.
+    - For explicit sandwich wafers, the caller replaces the thermal state with
+      one substrate-dominated equivalent layer per active wafer.  That keeps
+      wafer-to-wafer substrate gradients while preventing the 1.5 um bonding
+      interfaces from being re-applied as separate thermal films at every step.
+    """
+
+    props = _group_effective_properties(h_um, E_GPa, nu, alpha_ppm_K, group_masks)
+    thickness_span = _relative_span(props["h_um"])
+    e_span = _relative_span(props["E_GPa"])
+    alpha_span = _relative_span(props["alpha_ppm_K"])
+    interface_alpha_span = float(np.max(props["interface_alpha_ppm_K"]) - np.min(props["interface_alpha_ppm_K"]))
+    thickness_index_correlation = float("nan")
+    if props["h_um"].size > 2 and thickness_span > 1.0e-12:
+        thickness_index_correlation = float(np.corrcoef(np.arange(props["h_um"].size), props["h_um"])[0, 1])
+
+    if e_span > 2.0e-3 and alpha_span > 2.0e-3:
+        corr = float(np.corrcoef(props["E_GPa"], props["alpha_ppm_K"])[0, 1])
+        if corr < -0.75:
+            return {
+                "lower_state_mode": "original_layer_bow",
+                "thermal_state_mode": "full_active_stack",
+                "thermal_delta_mode": "nominal_cooldown",
+                "reason": "opposing_E_alpha_gradient",
+                "group_thickness_relative_span": thickness_span,
+                "group_thickness_index_correlation": thickness_index_correlation,
+                "group_E_relative_span": e_span,
+                "group_alpha_relative_span": alpha_span,
+                "group_E_alpha_correlation": corr,
+                "interface_alpha_span_ppm_K": interface_alpha_span,
+            }
+
+    if interface_alpha_span > 0.25:
+        return {
+            "lower_state_mode": "original_layer_bow",
+            "thermal_state_mode": "full_active_stack",
+            "thermal_delta_mode": "nominal_cooldown",
+            "reason": "interface_material_gradient",
+            "group_thickness_relative_span": thickness_span,
+            "group_thickness_index_correlation": thickness_index_correlation,
+            "group_E_relative_span": e_span,
+            "group_alpha_relative_span": alpha_span,
+            "group_E_alpha_correlation": float("nan"),
+            "interface_alpha_span_ppm_K": interface_alpha_span,
+        }
+
+    return {
+        "lower_state_mode": "original_layer_bow",
+        "thermal_state_mode": "full_active_stack",
+        "thermal_delta_mode": "nominal_cooldown",
+        "reason": "default_reflattened_original_bow_full_active_thermal",
+        "group_thickness_relative_span": thickness_span,
+        "group_thickness_index_correlation": thickness_index_correlation,
+        "group_E_relative_span": e_span,
+        "group_alpha_relative_span": alpha_span,
+        "group_E_alpha_correlation": float("nan"),
+        "interface_alpha_span_ppm_K": interface_alpha_span,
+    }
+
+
+def _compute_sequential_stack_warpage_grouped_state_mode(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    W0_all,
+    groups,
+    group_masks,
+    delta_t_values,
+    L_m,
+    *,
+    lower_state_mode,
+    thermal_state_mode,
+    thermal_delta_mode,
+    selector_metadata,
+    layer_kind_all=None,
+    thermal_modulus_mode="plate",
+):
+    carried_W_um = float(W0_all[group_masks[0]][0])
+    if layer_kind_all is not None:
+        layer_kind_all = np.asarray(layer_kind_all, dtype=object)
+        if layer_kind_all.size != np.asarray(h_all).size:
+            raise ValueError("layer_kind_all must have one entry per physical layer.")
+    step_summaries = []
+
+    for group_position in range(1, len(groups)):
+        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
+        lower_mask = np.logical_or.reduce(group_masks[:group_position])
+        incoming_mask = group_masks[group_position]
+        active_indices = np.nonzero(active_mask)[0]
+        lower_indices = np.nonzero(lower_mask)[0]
+        incoming_indices = np.nonzero(incoming_mask)[0]
+
+        W0_current = W0_all[active_indices].copy()
+        if lower_state_mode == "carried_stack_bow":
+            active_lower = np.isin(active_indices, lower_indices)
+            W0_current[active_lower] = carried_W_um
+        elif lower_state_mode != "original_layer_bow":
+            raise ValueError(f"Unknown lower_state_mode: {lower_state_mode}")
+
+        step_thermal_modulus_mode = thermal_modulus_mode
+        if thermal_state_mode == "collapsed_lower_equivalent":
+            lower_eq = _equivalent_thermal_arrays(
+                h_all[lower_indices],
+                E_all[lower_indices],
+                nu_all[lower_indices],
+                alpha_all[lower_indices],
+                thermal_modulus_mode=thermal_modulus_mode,
+                layer_kind=(
+                    layer_kind_all[lower_indices]
+                    if layer_kind_all is not None
+                    else None
+                ),
+            )
+            thermal_arrays = {
+                "h_um": np.concatenate(([lower_eq["h_um"]], h_all[incoming_indices])),
+                "E_GPa": np.concatenate(([lower_eq["E_GPa"]], E_all[incoming_indices])),
+                "nu": np.concatenate(([lower_eq["nu"]], nu_all[incoming_indices])),
+                "alpha_ppm_K": np.concatenate(([lower_eq["alpha_ppm_K"]], alpha_all[incoming_indices])),
+            }
+            if layer_kind_all is not None:
+                thermal_arrays["thermal_modulus_kind"] = np.concatenate((
+                    np.asarray(["equivalent_lower_stack"], dtype=object),
+                    layer_kind_all[incoming_indices],
+                ))
+        elif thermal_state_mode == "per_group_substrate_equivalent":
+            thermal_arrays = _per_group_substrate_equivalent_thermal_arrays(
+                h_all,
+                E_all,
+                nu_all,
+                alpha_all,
+                group_masks,
+                group_position,
+                layer_kind_all=layer_kind_all,
+            )
+            step_thermal_modulus_mode = "plate"
+        elif thermal_state_mode == "full_active_stack":
+            thermal_arrays = {
+                "h_um": h_all[active_indices],
+                "E_GPa": E_all[active_indices],
+                "nu": nu_all[active_indices],
+                "alpha_ppm_K": alpha_all[active_indices],
+            }
+            if layer_kind_all is not None:
+                thermal_arrays["thermal_modulus_kind"] = layer_kind_all[active_indices]
+        elif thermal_state_mode == "recent_2_groups_plus_collapsed_older":
+            old_group_end = max(0, group_position - 2)
+            thermal_parts = {
+                "h_um": [],
+                "E_GPa": [],
+                "nu": [],
+                "alpha_ppm_K": [],
+            }
+            if layer_kind_all is not None:
+                thermal_parts["thermal_modulus_kind"] = []
+            if old_group_end > 0:
+                old_mask = np.logical_or.reduce(group_masks[:old_group_end])
+                old_indices = np.nonzero(old_mask)[0]
+                old_eq = _equivalent_thermal_arrays(
+                    h_all[old_indices],
+                    E_all[old_indices],
+                    nu_all[old_indices],
+                    alpha_all[old_indices],
+                    thermal_modulus_mode=thermal_modulus_mode,
+                    layer_kind=(
+                        layer_kind_all[old_indices]
+                        if layer_kind_all is not None
+                        else None
+                    ),
+                )
+                for key in ("h_um", "E_GPa", "nu", "alpha_ppm_K"):
+                    thermal_parts[key].append(old_eq[key])
+                if layer_kind_all is not None:
+                    thermal_parts["thermal_modulus_kind"].append("equivalent_lower_stack")
+            recent_masks = group_masks[old_group_end:group_position] + [incoming_mask]
+            recent_indices = np.nonzero(np.logical_or.reduce(recent_masks))[0]
+            for idx in recent_indices:
+                thermal_parts["h_um"].append(h_all[idx])
+                thermal_parts["E_GPa"].append(E_all[idx])
+                thermal_parts["nu"].append(nu_all[idx])
+                thermal_parts["alpha_ppm_K"].append(alpha_all[idx])
+                if layer_kind_all is not None:
+                    thermal_parts["thermal_modulus_kind"].append(layer_kind_all[idx])
+            thermal_arrays = {
+                key: np.asarray(values, dtype=float)
+                for key, values in thermal_parts.items()
+                if key != "thermal_modulus_kind"
+            }
+            if layer_kind_all is not None:
+                thermal_arrays["thermal_modulus_kind"] = np.asarray(
+                    thermal_parts["thermal_modulus_kind"],
+                    dtype=object,
+                )
+        else:
+            raise ValueError(f"Unknown thermal_state_mode: {thermal_state_mode}")
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        if thermal_delta_mode == "w2w_incremental":
+            step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
+        elif thermal_delta_mode == "nominal_cooldown":
+            step_delta_t = nominal_delta_t
+        elif thermal_delta_mode == "room_return_zero":
+            step_delta_t = 0.0
+        else:
+            raise ValueError(f"Unknown thermal_delta_mode: {thermal_delta_mode}")
+        summary = _compute_total_stack_warpage_arrays(
+            h_all[active_indices],
+            E_all[active_indices],
+            nu_all[active_indices],
+            alpha_all[active_indices],
+            W0_current,
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_arrays=thermal_arrays,
+            thermal_modulus_mode=step_thermal_modulus_mode,
+            layer_kind=(
+                layer_kind_all[active_indices]
+                if layer_kind_all is not None
+                else None
+            ),
+        )
+        carried_W_um = float(summary["signed_W_um"])
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": groups[group_position],
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(summary["L_m"]),
+            "lower_state_w0_mode": lower_state_mode,
+            "thermal_state": thermal_state_mode,
+            "thermal_delta_mode": thermal_delta_mode,
+            "thermal_modulus_mode": step_thermal_modulus_mode,
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": False,
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+            "lower_state_w0_mode": lower_state_mode,
+            "thermal_state": thermal_state_mode,
+            "thermal_delta_mode": thermal_delta_mode,
+            "thermal_modulus_mode": step_summaries[-1]["thermal_modulus_mode"],
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": False,
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+            "lower_state_w0_mode": lower_state_mode,
+            "thermal_state": thermal_state_mode,
+            "thermal_delta_mode": thermal_delta_mode,
+            "thermal_modulus_mode": thermal_modulus_mode,
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": False,
+        }
+    return final_summary, step_summaries
+
+
+def _compute_sequential_stack_warpage_grouped_residual_strain_state(
+    h_all,
+    E_all,
+    nu_all,
+    alpha_all,
+    W0_all,
+    groups,
+    group_masks,
+    delta_t_values,
+    L_m,
+    *,
+    selector_metadata,
+    layer_kind_all=None,
+    thermal_modulus_mode="plate",
+):
+    """
+    Exp04 stress-history branch for through-stack interface material gradients.
+
+    Hybrid-bond Cu-ratio ramps store localized residual strain in very thin
+    interface sublayers.  A scalar carried bow is not enough state for those
+    cases, so carry the analytical residual strain field from each solved
+    partial stack.  The geometry/process assumptions remain the exp04 ones:
+    original layer bows, full active thermal stack, and nominal cooldown.
+    """
+    carried_W_um = float(W0_all[group_masks[0]][0])
+    residual_strain_all = np.zeros(len(W0_all), dtype=float)
+    if layer_kind_all is not None:
+        layer_kind_all = np.asarray(layer_kind_all, dtype=object)
+        if layer_kind_all.size != np.asarray(h_all).size:
+            raise ValueError("layer_kind_all must have one entry per physical layer.")
+    step_summaries = []
+
+    for group_position in range(1, len(groups)):
+        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
+        active_indices = np.nonzero(active_mask)[0]
+
+        thermal_arrays = {
+            "h_um": h_all[active_indices],
+            "E_GPa": E_all[active_indices],
+            "nu": nu_all[active_indices],
+            "alpha_ppm_K": alpha_all[active_indices],
+        }
+        if layer_kind_all is not None:
+            thermal_arrays["thermal_modulus_kind"] = layer_kind_all[active_indices]
+
+        nominal_delta_t = float(delta_t_values[group_position - 1])
+        step_delta_t = nominal_delta_t
+        summary, residual_strain_current = _compute_total_stack_warpage_arrays_with_residual_strain(
+            h_all[active_indices],
+            E_all[active_indices],
+            nu_all[active_indices],
+            alpha_all[active_indices],
+            W0_all[active_indices],
+            residual_strain_all[active_indices],
+            DeltaT_K=step_delta_t,
+            L_m=L_m,
+            thermal_arrays=thermal_arrays,
+            thermal_modulus_mode=thermal_modulus_mode,
+            layer_kind=(
+                layer_kind_all[active_indices]
+                if layer_kind_all is not None
+                else None
+            ),
+        )
+
+        carried_W_um = float(summary["signed_W_um"])
+        residual_strain_all[active_indices] = residual_strain_current
+        step_summaries.append({
+            "interface_index": group_position - 1,
+            "layer_count": group_position + 1,
+            "group_id": groups[group_position],
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "DeltaT_K": float(summary["DeltaT_K"]),
+            "nominal_cooldown_DeltaT_K": nominal_delta_t,
+            "incremental_thermal_DeltaT_K": step_delta_t,
+            "L_m": float(summary["L_m"]),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "thermal_delta_mode": "nominal_cooldown",
+            "thermal_modulus_mode": thermal_modulus_mode,
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "stress_history_state_transfer": "interface_gradient_residual_strain",
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": True,
+            "abd_state_residual_generalized_moment_N": float(
+                summary["residual_generalized_moment_N"]
+            ),
+            "abd_state_residual_mean_strain": float(summary["residual_mean_strain"]),
+            "abd_state_residual_rms_strain": float(summary["residual_rms_strain"]),
+            "abd_state_denominator_N_m": float(summary["denominator_N_m"]),
+        })
+
+    if step_summaries:
+        final_summary = {
+            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
+            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
+            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
+            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
+            "L_m": float(step_summaries[-1]["L_m"]),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "thermal_delta_mode": "nominal_cooldown",
+            "thermal_modulus_mode": thermal_modulus_mode,
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "stress_history_state_transfer": "interface_gradient_residual_strain",
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": True,
+            "abd_state_residual_generalized_moment_N": float(
+                step_summaries[-1]["abd_state_residual_generalized_moment_N"]
+            ),
+            "abd_state_residual_mean_strain": float(
+                step_summaries[-1]["abd_state_residual_mean_strain"]
+            ),
+            "abd_state_residual_rms_strain": float(
+                step_summaries[-1]["abd_state_residual_rms_strain"]
+            ),
+            "abd_state_denominator_N_m": float(
+                step_summaries[-1]["abd_state_denominator_N_m"]
+            ),
+        }
+    else:
+        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
+        final_summary = {
+            "signed_W_um": carried_W_um,
+            "abs_W_um": float(abs(carried_W_um)),
+            "kappa_1_per_m": kappa,
+            "DeltaT_K": 0.0,
+            "L_m": float(L_m),
+            "lower_state_w0_mode": "original_layer_bow",
+            "thermal_state": "full_active_stack",
+            "thermal_delta_mode": "nominal_cooldown",
+            "thermal_modulus_mode": thermal_modulus_mode,
+            "stress_history_selector_reason": selector_metadata["reason"],
+            "stress_history_state_transfer": "interface_gradient_residual_strain",
+            "group_thickness_relative_span": float(selector_metadata["group_thickness_relative_span"]),
+            "group_thickness_index_correlation": float(selector_metadata["group_thickness_index_correlation"]),
+            "group_E_relative_span": float(selector_metadata["group_E_relative_span"]),
+            "group_alpha_relative_span": float(selector_metadata["group_alpha_relative_span"]),
+            "group_E_alpha_correlation": float(selector_metadata["group_E_alpha_correlation"]),
+            "interface_alpha_span_ppm_K": float(selector_metadata["interface_alpha_span_ppm_K"]),
+            "residual_strain_carry": True,
+            "abd_state_residual_generalized_moment_N": 0.0,
+            "abd_state_residual_mean_strain": 0.0,
+            "abd_state_residual_rms_strain": 0.0,
+            "abd_state_denominator_N_m": 0.0,
+        }
+    return final_summary, step_summaries
+
+
 def compute_sequential_stack_warpage_grouped_stress_history(
     layer_df,
     group_ids,
@@ -800,12 +1638,12 @@ def compute_sequential_stack_warpage_grouped_stress_history(
     history and, before each new bond, flattens all currently active wafers.
     Under that setup the analytical step should:
 
-    - keep each active wafer's original pre-bond bow in the flatten/release
-      term instead of replacing completed lower wafers by a carried stack bow;
-    - keep all active physical layers in the thermal mismatch solve instead of
-      collapsing the completed lower stack to one equivalent thermal layer.
+    - choose how lower-stack bow is transferred from the physical input state;
+    - choose whether the lower-stack thermal state should be collapsed to one
+      equivalent layer or kept as the full active layer stack.
 
-    No fitted scale, pattern gate, or empirical memory coefficient is used.
+    No fitted scale, pattern gate, or empirical memory coefficient is used. The
+    selector is based only on the input physical-property gradients.
     """
     df = layer_df.copy().reset_index(drop=True)
     group_values = pd.Series(group_ids).reset_index(drop=True)
@@ -817,6 +1655,13 @@ def compute_sequential_stack_warpage_grouped_stress_history(
     nu_all = df["nu"].to_numpy(dtype=float)
     alpha_all = df["alpha_ppm_K"].to_numpy(dtype=float)
     W0_all = df["W0_um"].to_numpy(dtype=float)
+    layer_kind_all = None
+    thermal_modulus_mode = "plate"
+    for kind_column in ("thermal_modulus_kind", "sublayer"):
+        if kind_column in df.columns:
+            layer_kind_all = df[kind_column].to_numpy(dtype=object)
+            thermal_modulus_mode = "w2w_mixed"
+            break
     groups = list(pd.unique(group_values))
     num_groups = len(groups)
     if num_groups < 1:
@@ -832,74 +1677,48 @@ def compute_sequential_stack_warpage_grouped_stress_history(
         )
 
     group_masks = [group_values.to_numpy() == group for group in groups]
-    first_group_mask = group_masks[0]
-    carried_W_um = float(W0_all[first_group_mask][0])
-    step_summaries = []
-
-    for group_position in range(1, num_groups):
-        active_mask = np.logical_or.reduce(group_masks[: group_position + 1])
-        active_indices = np.nonzero(active_mask)[0]
-        W0_current = W0_all[active_indices].copy()
-        thermal_arrays = {
-            "h_um": h_all[active_indices],
-            "E_GPa": E_all[active_indices],
-            "nu": nu_all[active_indices],
-            "alpha_ppm_K": alpha_all[active_indices],
-        }
-
-        nominal_delta_t = float(delta_t_values[group_position - 1])
-        step_delta_t = _w2w_incremental_thermal_delta_t(nominal_delta_t)
-        summary = _compute_total_stack_warpage_arrays(
-            h_all[active_indices],
-            E_all[active_indices],
-            nu_all[active_indices],
-            alpha_all[active_indices],
-            W0_current,
-            DeltaT_K=step_delta_t,
-            L_m=L_m,
-            thermal_arrays=thermal_arrays,
+    selector = _select_grouped_stress_history_state(h_all, E_all, nu_all, alpha_all, group_masks)
+    if layer_kind_all is not None:
+        selector = dict(selector)
+        selector["thermal_state_mode"] = "per_group_substrate_equivalent"
+        # The explicit sandwich MAPDL process bonds at room temperature,
+        # heats to anneal, then cools back to TROOM with TREF=TROOM.  In a
+        # linear elastic release, the final thermal strain from that cycle is
+        # therefore zero; remaining bow comes from the input wafer bows and
+        # geometric/material stiffness distribution.
+        selector["thermal_delta_mode"] = "room_return_zero"
+    if selector["reason"] == "interface_material_gradient" and layer_kind_all is None:
+        return _compute_sequential_stack_warpage_grouped_residual_strain_state(
+            h_all,
+            E_all,
+            nu_all,
+            alpha_all,
+            W0_all,
+            groups,
+            group_masks,
+            delta_t_values,
+            L_m,
+            selector_metadata=selector,
+            layer_kind_all=layer_kind_all,
+            thermal_modulus_mode="plate",
         )
-        carried_W_um = float(summary["signed_W_um"])
-        step_summaries.append({
-            "interface_index": group_position - 1,
-            "layer_count": group_position + 1,
-            "group_id": groups[group_position],
-            "signed_W_um": carried_W_um,
-            "abs_W_um": float(abs(carried_W_um)),
-            "kappa_1_per_m": float(summary["kappa_1_per_m"]),
-            "DeltaT_K": float(summary["DeltaT_K"]),
-            "nominal_cooldown_DeltaT_K": nominal_delta_t,
-            "incremental_thermal_DeltaT_K": step_delta_t,
-            "L_m": float(summary["L_m"]),
-            "lower_state_w0_mode": "original_layer_bow",
-            "thermal_state": "full_active_stack",
-            "residual_strain_carry": False,
-        })
-
-    if step_summaries:
-        final_summary = {
-            "signed_W_um": float(step_summaries[-1]["signed_W_um"]),
-            "abs_W_um": float(step_summaries[-1]["abs_W_um"]),
-            "kappa_1_per_m": float(step_summaries[-1]["kappa_1_per_m"]),
-            "DeltaT_K": float(step_summaries[-1]["DeltaT_K"]),
-            "L_m": float(step_summaries[-1]["L_m"]),
-            "lower_state_w0_mode": "original_layer_bow",
-            "thermal_state": "full_active_stack",
-            "residual_strain_carry": False,
-        }
-    else:
-        kappa = float(bow_um_to_curvature(carried_W_um, L_m))
-        final_summary = {
-            "signed_W_um": carried_W_um,
-            "abs_W_um": float(abs(carried_W_um)),
-            "kappa_1_per_m": kappa,
-            "DeltaT_K": 0.0,
-            "L_m": float(L_m),
-            "lower_state_w0_mode": "original_layer_bow",
-            "thermal_state": "full_active_stack",
-            "residual_strain_carry": False,
-        }
-    return final_summary, step_summaries
+    return _compute_sequential_stack_warpage_grouped_state_mode(
+        h_all,
+        E_all,
+        nu_all,
+        alpha_all,
+        W0_all,
+        groups,
+        group_masks,
+        delta_t_values,
+        L_m,
+        lower_state_mode=selector["lower_state_mode"],
+        thermal_state_mode=selector["thermal_state_mode"],
+        thermal_delta_mode=selector["thermal_delta_mode"],
+        selector_metadata=selector,
+        layer_kind_all=layer_kind_all,
+        thermal_modulus_mode=thermal_modulus_mode,
+    )
 
 
 def _abd_stiffness_terms(layer_df):

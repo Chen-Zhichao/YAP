@@ -13,6 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 import math
+import hashlib
 from scipy.ndimage import distance_transform_edt
 from scipy.spatial import cKDTree
 
@@ -39,6 +40,75 @@ def _cfg_float(cfg, key, default=None):
             raise ValueError(f"Missing required config value: {key}")
         value = default
     return float(value)
+
+
+def _array_digest(array):
+    array = np.ascontiguousarray(array)
+    digest = hashlib.blake2b(digest_size=16)
+    digest.update(str(array.shape).encode("utf-8"))
+    digest.update(str(array.dtype).encode("utf-8"))
+    digest.update(array.view(np.uint8))
+    return digest.hexdigest()
+
+
+def _particle_model_cache_key(cfg, pad_bitmap_collection):
+    """Identify interfaces with identical particle-yield inputs."""
+    cfg_keys = (
+        "PITCH_r_um",
+        "PITCH_c_um",
+        "DIE_W_um",
+        "DIE_L_um",
+        "PAD_TOP_R_um",
+        "PAD_ARR_W_um",
+        "PAD_ARR_L_um",
+        "D0",
+        "D1",
+        "EDGE_REGION_WIDTH_um",
+        "DEFECT_MODEL_GRID_PITCH_um",
+        "DEFECT_MAX_MODEL_GRID_POINTS",
+        "DEFECT_DISTANCE_TRANSFORM_MAX_CELLS",
+        "DEFECT_REDUNDANT_K_NEIGHBORS",
+        "first_contact",
+        "t_0",
+        "z",
+        "k_r",
+        "k_r0",
+    )
+    key_parts = [(key, _cfg_get(cfg, key, None)) for key in cfg_keys]
+
+    critical_bitmap = np.asarray(
+        pad_bitmap_collection.get("CRITICAL_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    ).reshape(-1)
+    redundant_bitmap = np.asarray(
+        pad_bitmap_collection.get("REDUNDANT_PAD_BITMAP", np.zeros(0, dtype=bool)),
+        dtype=bool,
+    ).reshape(-1)
+    group_id_per_pad, tolerated_mechanical = _redundant_group_arrays_from_collection(
+        pad_bitmap_collection
+    )
+    sensitive_mask = critical_bitmap | redundant_bitmap
+    pad_coords = np.asarray(pad_bitmap_collection["pad_coords"])
+
+    key_parts.extend(
+        [
+            ("critical_bitmap", _array_digest(critical_bitmap)),
+            ("redundant_bitmap", _array_digest(redundant_bitmap)),
+            (
+                "sensitive_pad_coords",
+                _array_digest(pad_coords[sensitive_mask]),
+            ),
+            (
+                "redundant_group_id_per_pad",
+                _array_digest(group_id_per_pad[sensitive_mask]),
+            ),
+            (
+                "redundant_tolerated_mechanical",
+                _array_digest(tolerated_mechanical),
+            ),
+        ]
+    )
+    return tuple(key_parts)
 
 
 if njit is not None:
@@ -815,10 +885,29 @@ def stack_defect_yield_calculator(
     """
     Calculate D2W particle yield for every interface and write into die_stack.
     """
+    model_cache = {}
     for interface_name, cfg in cfg_dict.items():
         pad_bitmap_collection = die_stack.interfaces.pad_bitmap_collection_dict[interface_name]
-        particle_yield, info = interface_particle_yield_from_pad_layout(
-            cfg,
-            pad_bitmap_collection,
-        )
+        cache_key = _particle_model_cache_key(cfg, pad_bitmap_collection)
+        if cache_key in model_cache:
+            particle_yield, info, source_interface = model_cache[cache_key]
+            info = dict(info)
+            info["cache_hit"] = True
+            info["cache_source_interface"] = source_interface
+        else:
+            particle_yield, info = interface_particle_yield_from_pad_layout(
+                cfg,
+                pad_bitmap_collection,
+            )
+            info = dict(info)
+            info["cache_hit"] = False
+            info["cache_source_interface"] = interface_name
+            model_cache[cache_key] = (
+                float(particle_yield),
+                dict(info),
+                interface_name,
+            )
         die_stack.die_yield_per_interface_dict[interface_name]['particle'] = particle_yield
+        die_stack.interfaces.failure_params_dict[interface_name][
+            "particle_model_info"
+        ] = info

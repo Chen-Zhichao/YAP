@@ -125,8 +125,8 @@ d2w_simulation:
   Adhesion_energy: 1.2                  # Adhesion energy (J/m²)
   Dielectric_Young_modulus_Pa: 7.3e10                 # Young's modulus (Pa)
   Dielectric_thickness: 1.5e-6          # Dielectric thickness (m)
-  DISH_0_m: 75e-9                         # Reference dish depth (m)
-  k_peel: 6.66e12                       # Peel force constant (N/m⁴/K)\
+  DISH_0_m: 26e-9                         # Reference dish depth (m)
+  k_peel: 1.76e16                       # Peel force constant (N/m³)
 
   # === Adhesion_energy to Critical Peeling Stress Model Parameters ===
   # σ = Effective_Contact_Area * ((Gc_Jpm2 * E_GPa) / (CRIT_aY2_UM * (1.0 - NU**2)))^(1/2)
@@ -307,8 +307,8 @@ d2w_modeling:
   Adhesion_energy: 1.2                  # Adhesion energy (J/m²)
   Dielectric_Young_modulus_Pa: 73e9                   # Dielectric Young's modulus (Pa)
   Dielectric_thickness: 1.5e-6          # Dielectric layer thickness (m)
-  DISH_0_m: 75e-9                         # Reference dish height (m)
-  k_peel: 6.66e15                       # Peel force coefficient (N/m⁴/K)
+  DISH_0_m: 26e-9                         # Reference dish height (m)
+  k_peel: 1.76e16                       # Peel force coefficient (N/m³)
 
   # === Adhesion_energy to Critical Peeling Stress Model Parameters ===
   # σ = Effective_Contact_Area * ((Gc_Jpm2 * E_GPa) / (CRIT_aY2_UM * (1.0 - NU**2)))^(1/2)

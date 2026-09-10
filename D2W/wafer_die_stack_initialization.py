@@ -6,6 +6,7 @@
 #### Date: Sep 26, 2024
 
 import numpy as np
+from yield_mechanism_policy import DISABLED_YIELD_MECHANISMS
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.patches import Polygon
@@ -408,6 +409,8 @@ class DieStack:
         # For yield modeling, calculate the die stack yield based on the die yield of each interface
         self.die_stack_yield = 1.0
         for interface_name in self.cfg_dict.keys():
+            for mechanism in DISABLED_YIELD_MECHANISMS:
+                self.die_yield_per_interface_dict[interface_name][mechanism] = 1.0
             self.die_yield_per_interface_dict[interface_name]['overall'] = self.die_yield_per_interface_dict[interface_name]['overlay'] * \
                 self.die_yield_per_interface_dict[interface_name]['particle'] * \
                 self.die_yield_per_interface_dict[interface_name]['mechanical'] * \

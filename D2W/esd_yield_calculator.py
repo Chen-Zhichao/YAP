@@ -754,11 +754,11 @@ def _d2w_critical_first_touch_probability_grid_sampled(
     """
     Scalable first-touch estimator for very large pad arrays.
 
-    Pads are aggregated into spatial tiles. For each tile, the random dishing
-    contribution is represented by the maximum of n independent Gaussian pad
-    heights in that tile. This preserves the extreme-value nature of first
-    contact while reducing the cost from O(samples * pads) to
-    O(samples * tiles).
+    Pads are partitioned into computational tiles. Every pad still follows the
+    same independent one-level Gaussian dishing model; a tile does not add a
+    shared spatial random effect. Its contribution is represented by the
+    maximum of n independent pad heights, preserving first-contact extremes
+    while reducing the cost from O(samples * pads) to O(samples * tiles).
     """
     active_bitmap = np.asarray(active_bitmap, dtype=bool)
     esd_critical_bitmap = np.asarray(esd_critical_bitmap, dtype=bool)

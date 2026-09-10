@@ -17,6 +17,7 @@ from esd_yield_simulator import (
     esd_failure_simulator_batch,
 )
 from utils.util import atomic_save_npy, get_dishing_bound_cache_path
+from yield_mechanism_policy import FAILURE_MECHANISMS, active_failure_mechanisms
 
 try:
     from warpage_yield_simulator import stack_warpage_fail_vector_for_epoch
@@ -92,34 +93,6 @@ def _overlay_corner_only_enabled(cfg) -> bool:
     return True
 
 
-_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
-
-
-def _active_failure_mechanisms(input_args):
-    raw = input_args.get('mechanism_filter', 'all')
-    if raw is None:
-        return set(_FAILURE_MECHANISMS)
-    if isinstance(raw, (set, list, tuple)):
-        requested = [str(item).strip() for item in raw]
-    else:
-        requested = [item.strip() for item in str(raw).split(',')]
-    requested = [item for item in requested if item]
-    if not requested or any(item.lower() == 'all' for item in requested):
-        return set(_FAILURE_MECHANISMS)
-
-    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
-    active = set()
-    for item in requested:
-        key = item.lower()
-        if key not in canonical:
-            raise ValueError(
-                f"Unknown mechanism_filter '{item}'. "
-                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
-            )
-        active.add(canonical[key])
-    return active
-
-
 def _dishing_bound_cache_path_for_mask(cfg, input_args: dict, mask_name: str) -> str:
     base_path = get_dishing_bound_cache_path(cfg, input_args)
     stem, ext = os.path.splitext(base_path)
@@ -154,7 +127,7 @@ def _build_interface_static_cache(
     base_pad_coords_dict: dict,
     input_args: dict,
 ) -> dict:
-    active_mechanisms = _active_failure_mechanisms(input_args)
+    active_mechanisms = active_failure_mechanisms(input_args)
     run_overlay = 'overlay' in active_mechanisms
     run_mechanical = 'mechanical' in active_mechanisms
     run_esd = 'ESD' in active_mechanisms
@@ -319,7 +292,7 @@ def overall_yield_simulator(
     }
     global_stack_offset = int(input_args.get('global_stack_offset', 0))
     save_failure_maps = bool(input_args.get('save_failure_maps', False))
-    active_mechanisms = _active_failure_mechanisms(input_args)
+    active_mechanisms = active_failure_mechanisms(input_args)
     run_overlay = 'overlay' in active_mechanisms
     run_particle = 'particle' in active_mechanisms
     run_mechanical = 'mechanical' in active_mechanisms
@@ -328,7 +301,7 @@ def overall_yield_simulator(
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
     epoch_fail_vec_per_interface_dict = {}    # This dict stores failure reason (each mechanism) for all die samples in this epoch
-    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
+    failure_mechanism_list = list(FAILURE_MECHANISMS) + ['overall']
     if input_args['verbose']:
         for interface_name, cfg in cfg_dict.items():
             epoch_fail_map_per_interface_dict[interface_name], epoch_fail_vec_per_interface_dict[interface_name] = {}, {}

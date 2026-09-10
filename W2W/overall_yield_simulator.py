@@ -18,22 +18,26 @@ from Cu_gap_simulator import Cu_gap_simulator
 from esd_yield_simulator import choose_center_die_index, esd_failure_simulator
 from debond import debond_dishing_intervals_from_coords
 from Cu_expansion_yield_calculator import stack_stress_yield_calculator
+from yield_mechanism_policy import FAILURE_MECHANISMS, active_failure_mechanisms
 
 
 _CLEAR_LINE = "\033[K"
 _MECHANICAL_DIE_YIELD_CACHE = {}
 
 
-def _print_status(message: str):
-    print(f"\r{message}{_CLEAR_LINE}", flush=True)
+def _print_status(message: str, enabled: bool):
+    if enabled:
+        print(f"\r{message}{_CLEAR_LINE}", flush=True)
 
 
-def _print_progress(message: str):
-    print(f"\r{message}{_CLEAR_LINE}", end="", flush=True)
+def _print_progress(message: str, enabled: bool):
+    if enabled:
+        print(f"\r{message}{_CLEAR_LINE}", end="", flush=True)
 
 
-def _clear_progress_line():
-    print(f"\r{_CLEAR_LINE}", end="", flush=True)
+def _clear_progress_line(enabled: bool):
+    if enabled:
+        print(f"\r{_CLEAR_LINE}", end="", flush=True)
 
 
 def total_memory_mb(obj):
@@ -102,6 +106,13 @@ def _corner_worst_overlay_misalignment_um(
     return float(np.max(np.sqrt(dx**2 + dy**2)))
 
 
+def _overlay_boundary_coords(die):
+    coords = getattr(die, "ovl_active_pad_boundary_coords", None)
+    if coords is None:
+        return die.pad_array_box
+    return coords
+
+
 def _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection):
     dish_keys = (
         "TOP_DISH_MEAN_nm",
@@ -125,34 +136,6 @@ def _mechanical_die_yield_cache_key(cfg, pad_bitmap_collection):
     )
 
 
-_FAILURE_MECHANISMS = ('overlay', 'particle', 'mechanical', 'ESD', 'warpage')
-
-
-def _active_failure_mechanisms(input_args):
-    raw = input_args.get('mechanism_filter', 'all')
-    if raw is None:
-        return set(_FAILURE_MECHANISMS)
-    if isinstance(raw, (set, list, tuple)):
-        requested = [str(item).strip() for item in raw]
-    else:
-        requested = [item.strip() for item in str(raw).split(',')]
-    requested = [item for item in requested if item]
-    if not requested or any(item.lower() == 'all' for item in requested):
-        return set(_FAILURE_MECHANISMS)
-
-    canonical = {item.lower(): item for item in _FAILURE_MECHANISMS}
-    active = set()
-    for item in requested:
-        key = item.lower()
-        if key not in canonical:
-            raise ValueError(
-                f"Unknown mechanism_filter '{item}'. "
-                f"Valid mechanisms: all, {', '.join(_FAILURE_MECHANISMS)}."
-            )
-        active.add(canonical[key])
-    return active
-
-
 def overall_yield_simulator(
     input_args: dict,
     cfg_dict: dict,
@@ -166,7 +149,9 @@ def overall_yield_simulator(
 
     # Read the parameters
     NUM_STACKS = len(waf_stack_list)
-    active_mechanisms = _active_failure_mechanisms(input_args)
+    verbose = bool(input_args.get('verbose', False))
+    global_stack_offset = int(input_args.get('global_stack_offset', epoch * NUM_STACKS))
+    active_mechanisms = active_failure_mechanisms(input_args)
     run_overlay = 'overlay' in active_mechanisms
     run_particle = 'particle' in active_mechanisms
     run_mechanical = 'mechanical' in active_mechanisms
@@ -177,9 +162,9 @@ def overall_yield_simulator(
 
     epoch_fail_map_per_interface_dict = {}    # This dict stores the fail bump maps for all die samples in this epoch for each mechanism
     epoch_fail_vec_per_interface_dict = {}    # This dict stores failure reason (each mechanism) for all die samples in this epoch
-    failure_mechanism_list = list(_FAILURE_MECHANISMS) + ['overall']
+    failure_mechanism_list = list(FAILURE_MECHANISMS) + ['overall']
 
-    if input_args['verbose']:
+    if verbose:
         for interface_name, cfg in cfg_dict.items():
             epoch_fail_map_per_interface_dict[interface_name], epoch_fail_vec_per_interface_dict[interface_name] = {}, {}
             for failure_mechanism in failure_mechanism_list:
@@ -194,12 +179,13 @@ def overall_yield_simulator(
             cfg.num_dies_per_wafer = num_dies_per_wafer
             _print_status(
                 "Simulating stack {}/{} interface {}/{}: {} ...".format(
-                    epoch * NUM_STACKS + stack_ind + 1,
+                    global_stack_offset + stack_ind + 1,
                     cfg.NUM_WAFER_STACKS,
                     interface_ind + 1,
                     len(waf_stack.interfaces.interface_dict),
                     interface_name,
-                )
+                ),
+                verbose,
             )
             # Read the parameters needed for this interface
             WAF_R_um                        =       cfg.WAF_R_um
@@ -263,9 +249,15 @@ def overall_yield_simulator(
             else:
                 redundant_group_id_grid = None
             esd_center_tol_um = getattr(cfg, "ESD_CENTER_TOL_UM", None)
-            selected_esd_die_ind = choose_center_die_index(
-                waf_interface.die_list,
-                tolerance_um=None if esd_center_tol_um is None else float(esd_center_tol_um),
+            selected_esd_die_ind = (
+                choose_center_die_index(
+                    waf_interface.die_list,
+                    tolerance_um=(
+                        None if esd_center_tol_um is None else float(esd_center_tol_um)
+                    ),
+                )
+                if run_esd
+                else None
             )
 
             if esd_only_fast_path:
@@ -273,11 +265,12 @@ def overall_yield_simulator(
                     _print_status(
                         "ESD-only fast path for stack {}/{} interface {}/{}: "
                         "no center die selected.".format(
-                            epoch * NUM_STACKS + stack_ind + 1,
+                            global_stack_offset + stack_ind + 1,
                             cfg.NUM_WAFER_STACKS,
                             interface_ind + 1,
                             len(waf_stack.interfaces.interface_dict),
-                        )
+                        ),
+                        verbose,
                     )
                     continue
 
@@ -320,13 +313,14 @@ def overall_yield_simulator(
                 _print_status(
                     "ESD-only fast path for stack {}/{} interface {}/{}: "
                     "{} center die {}.".format(
-                        epoch * NUM_STACKS + stack_ind + 1,
+                        global_stack_offset + stack_ind + 1,
                         cfg.NUM_WAFER_STACKS,
                         interface_ind + 1,
                         len(waf_stack.interfaces.interface_dict),
                         interface_name,
                         "failed" if failed else "survived",
-                    )
+                    ),
+                    verbose,
                 )
                 continue
 
@@ -377,7 +371,7 @@ def overall_yield_simulator(
                 _print_status(
                     "Mechanical-only fast path for stack {}/{} interface {}/{}: "
                     "{} yield {:.6f}, failed {}/{} dies.".format(
-                        epoch * NUM_STACKS + stack_ind + 1,
+                        global_stack_offset + stack_ind + 1,
                         cfg.NUM_WAFER_STACKS,
                         interface_ind + 1,
                         len(waf_stack.interfaces.interface_dict),
@@ -385,7 +379,8 @@ def overall_yield_simulator(
                         mechanical_die_yield,
                         int(np.count_nonzero(fail_mask)),
                         int(candidate_idx.size),
-                    )
+                    ),
+                    verbose,
                 )
                 continue
 
@@ -400,33 +395,34 @@ def overall_yield_simulator(
                 if candidate_idx.size > 0:
                     die_list = waf_interface.die_list
                     corner_coords = np.asarray(
-                        [die_list[int(idx)].pad_array_box for idx in candidate_idx],
+                        [_overlay_boundary_coords(die_list[int(idx)]) for idx in candidate_idx],
                         dtype=float,
                     )
-                    x = corner_coords[:, :, 0]
-                    y = corner_coords[:, :, 1]
-                    dx = (
-                        system_translation_x_um
-                        - system_rotation_rad * y
-                        + system_magnification_ppm * x
-                    )
-                    dy = (
-                        system_translation_y_um
-                        + system_rotation_rad * x
-                        + system_magnification_ppm * y
-                    )
-                    worst_boundary_misalignment = np.max(
-                        np.sqrt(dx**2 + dy**2),
-                        axis=1,
-                    )
-                    worst_boundary_misalignment += np.random.normal(
-                        RANDOM_MISALIGNMENT_MEAN_um,
-                        RANDOM_MISALIGNMENT_STD_um,
-                        size=candidate_idx.size,
-                    )
-                    fail_mask[candidate_idx] = (
-                        worst_boundary_misalignment >= MAX_ALLOWED_MISALIGNMENT_um
-                    )
+                    if corner_coords.shape[1] > 0:
+                        x = corner_coords[:, :, 0]
+                        y = corner_coords[:, :, 1]
+                        dx = (
+                            system_translation_x_um
+                            - system_rotation_rad * y
+                            + system_magnification_ppm * x
+                        )
+                        dy = (
+                            system_translation_y_um
+                            + system_rotation_rad * x
+                            + system_magnification_ppm * y
+                        )
+                        worst_boundary_misalignment = np.max(
+                            np.sqrt(dx**2 + dy**2),
+                            axis=1,
+                        )
+                        worst_boundary_misalignment += np.random.normal(
+                            RANDOM_MISALIGNMENT_MEAN_um,
+                            RANDOM_MISALIGNMENT_STD_um,
+                            size=candidate_idx.size,
+                        )
+                        fail_mask[candidate_idx] = (
+                            worst_boundary_misalignment >= MAX_ALLOWED_MISALIGNMENT_um
+                        )
 
                 if np.any(fail_mask):
                     waf_stack.die_stack_survival[fail_mask] = False
@@ -446,7 +442,7 @@ def overall_yield_simulator(
                 _print_status(
                     "Overlay-only fast path for stack {}/{} interface {}/{}: "
                     "{} yield {:.6f}, failed {}/{} dies.".format(
-                        epoch * NUM_STACKS + stack_ind + 1,
+                        global_stack_offset + stack_ind + 1,
                         cfg.NUM_WAFER_STACKS,
                         interface_ind + 1,
                         len(waf_stack.interfaces.interface_dict),
@@ -454,7 +450,8 @@ def overall_yield_simulator(
                         overlay_die_yield,
                         int(np.count_nonzero(fail_mask)),
                         int(candidate_idx.size),
-                    )
+                    ),
+                    verbose,
                 )
                 continue
 
@@ -468,7 +465,8 @@ def overall_yield_simulator(
                             die_count,
                             len(waf_interface.die_list),
                             (time.time() - start_time) / die_count * 10,
-                        )
+                        ),
+                        verbose,
                     )
                     # start_time = time.time()
                 redundant_pad_fail_map = np.zeros((PAD_ARR_ROW, PAD_ARR_COL), dtype=bool)
@@ -485,13 +483,17 @@ def overall_yield_simulator(
                 Check the overlay errors
                 '''
                 if run_overlay and approximate_set == 1:
-                    worst_boundary_misalignment = _corner_worst_overlay_misalignment_um(
-                        die.pad_array_box,
-                        system_translation_x_um,
-                        system_translation_y_um,
-                        system_rotation_rad,
-                        system_magnification_ppm,
-                    )
+                    overlay_boundary_coords = _overlay_boundary_coords(die)
+                    if len(overlay_boundary_coords) == 0:
+                        worst_boundary_misalignment = -np.inf
+                    else:
+                        worst_boundary_misalignment = _corner_worst_overlay_misalignment_um(
+                            overlay_boundary_coords,
+                            system_translation_x_um,
+                            system_translation_y_um,
+                            system_rotation_rad,
+                            system_magnification_ppm,
+                        )
                     worst_boundary_misalignment += np.random.normal(
                         RANDOM_MISALIGNMENT_MEAN_um,
                         RANDOM_MISALIGNMENT_STD_um,
@@ -779,7 +781,7 @@ def overall_yield_simulator(
                             continue
                 if cfg.verbose:
                     epoch_fail_map_per_interface_dict[interface_name]['overall'] += temp_overall_fail_map.astype(int)               
-            _clear_progress_line()
+            _clear_progress_line(verbose)
             # Record the time
             # print("The time for checking wafer {} is {} seconds.".format(waf_ind, time.time() - start_time))
             # # print("The number of survival dies in the wafer is {}.".format(wafer.survival_die))

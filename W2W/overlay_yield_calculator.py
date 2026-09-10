@@ -38,9 +38,12 @@ def die_pad_misalignment(
     system_rotation_rad,
     system_magnification_ppm,
 ):
-    pad_misalignment = np.zeros(len(die.pad_array_box))
-    dx = (system_translation_x_um - system_rotation_rad * die.pad_array_box[:, 1] + system_magnification_ppm * die.pad_array_box[:, 0])
-    dy = (system_translation_y_um + system_rotation_rad * die.pad_array_box[:, 0] + system_magnification_ppm * die.pad_array_box[:, 1])
+    boundary_coords = getattr(die, "ovl_active_pad_boundary_coords", None)
+    if boundary_coords is None:
+        boundary_coords = die.pad_array_box
+    pad_misalignment = np.zeros(len(boundary_coords))
+    dx = (system_translation_x_um - system_rotation_rad * boundary_coords[:, 1] + system_magnification_ppm * boundary_coords[:, 0])
+    dy = (system_translation_y_um + system_rotation_rad * boundary_coords[:, 0] + system_magnification_ppm * boundary_coords[:, 1])
     pad_misalignment = np.sqrt(dx**2 + dy**2)
     return pad_misalignment
 
@@ -195,23 +198,46 @@ def stack_overlay_yield_calculator(
         # print(system_magnification_samples_ppm.mean() * 150e+3 * 1e3, " nm")
         
         die_list = waf_stack.interfaces.interface_dict[interface_name].die_list
-        corner_coords_um = np.asarray(
-            [die.pad_array_box for die in die_list],
+        boundary_coords_um = np.asarray(
+            [
+                (
+                    die.ovl_active_pad_boundary_coords
+                    if getattr(die, "ovl_active_pad_boundary_coords", None) is not None
+                    else die.pad_array_box
+                )
+                for die in die_list
+            ],
             dtype=float,
         )
         overlay_die_yield = np.empty(len(die_list), dtype=float)
+
+        if boundary_coords_um.shape[1] == 0:
+            waf_stack.die_yield_list_per_interface_dict[interface_name]['overlay'] = np.ones(
+                len(die_list),
+                dtype=float,
+            )
+            continue
 
         tx = system_translation_x_samples_um[:, None, None]
         ty = system_translation_y_samples_um[:, None, None]
         theta = system_rotation_samples_rad[:, None, None]
         mag = system_magnification_samples_ppm[:, None, None]
 
-        # Keep the memory bounded for large wafer maps while still avoiding the
-        # old Python loop over dies and corners.
-        chunk_size = 512
+        # Bound the broadcast working set by the number of sampled global
+        # overlay states.  This keeps high-accuracy runs (for example,
+        # 50,000 samples) practical without changing the calculation.
+        max_broadcast_elements = 4_000_000
+        num_corners = boundary_coords_um.shape[1]
+        chunk_size = max(
+            1,
+            min(
+                512,
+                max_broadcast_elements // max(num_samples * num_corners, 1),
+            ),
+        )
         for start_idx in range(0, len(die_list), chunk_size):
             stop_idx = min(start_idx + chunk_size, len(die_list))
-            coords = corner_coords_um[start_idx:stop_idx]
+            coords = boundary_coords_um[start_idx:stop_idx]
             x = coords[None, :, :, 0]
             y = coords[None, :, :, 1]
             dx = tx - theta * y + mag * x
