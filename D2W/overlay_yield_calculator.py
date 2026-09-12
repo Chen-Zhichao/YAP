@@ -22,6 +22,31 @@ from scipy.integrate import quad
 from scipy.stats import norm
 
 
+def _samplewise_worst_corner_yield(
+    corner_misalignment_samples_um,
+    max_allowed_misalignment_um,
+    random_misalignment_mean_um,
+    random_misalignment_std_um,
+):
+    """Average die yield after selecting the worst corner in each sample."""
+    corner_samples = np.asarray(corner_misalignment_samples_um)
+    if corner_samples.ndim != 2:
+        raise ValueError("corner_misalignment_samples_um must be a 2-D array")
+    worst_samples = np.max(corner_samples, axis=0)
+    upper_limit = max_allowed_misalignment_um - worst_samples
+    lower_limit = -max_allowed_misalignment_um - worst_samples
+    sample_yield = norm.cdf(
+        upper_limit,
+        loc=random_misalignment_mean_um,
+        scale=random_misalignment_std_um,
+    ) - norm.cdf(
+        lower_limit,
+        loc=random_misalignment_mean_um,
+        scale=random_misalignment_std_um,
+    )
+    return float(np.mean(sample_yield))
+
+
 def _circle_overlap_area(distance_um, radius_1_um, radius_2_um):
     """Return the overlap area of two circles without singular endpoints."""
     distance_um = float(distance_um)
@@ -197,24 +222,20 @@ def overlay_yield_calculator(*,
     far_pad_misalignment_samples_2 = np.sqrt(far_dx_samples_2**2 + far_dy_samples_2**2)
     far_pad_misalignment_samples_3 = np.sqrt(far_dx_samples_3**2 + far_dy_samples_3**2)
 
-    upper_limit_0 = MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_0
-    lower_limit_0 = -MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_0
-    upper_limit_1 = MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_1
-    lower_limit_1 = -MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_1
-    upper_limit_2 = MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_2
-    lower_limit_2 = -MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_2
-    upper_limit_3 = MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_3
-    lower_limit_3 = -MAX_ALLOWED_MISALIGNMENT - far_pad_misalignment_samples_3
-
-    overlay_die_yield_0 = np.mean(norm.cdf(upper_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) \
-                        - norm.cdf(lower_limit_0, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-    overlay_die_yield_1 = np.mean(norm.cdf(upper_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) \
-                        - norm.cdf(lower_limit_1, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-    overlay_die_yield_2 = np.mean(norm.cdf(upper_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) \
-                        - norm.cdf(lower_limit_2, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-    overlay_die_yield_3 = np.mean(norm.cdf(upper_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um) \
-                        - norm.cdf(lower_limit_3, loc=RANDOM_MISALIGNMENT_MEAN_um, scale=RANDOM_MISALIGNMENT_STD_um))
-    overlay_die_yield = min(overlay_die_yield_0, overlay_die_yield_1, overlay_die_yield_2, overlay_die_yield_3)
+    # A Monte Carlo sample is one global systematic-overlay realization.
+    # Determine whether that realization survives the worst die corner before
+    # averaging across independent realizations.
+    overlay_die_yield = _samplewise_worst_corner_yield(
+        [
+            far_pad_misalignment_samples_0,
+            far_pad_misalignment_samples_1,
+            far_pad_misalignment_samples_2,
+            far_pad_misalignment_samples_3,
+        ],
+        MAX_ALLOWED_MISALIGNMENT,
+        RANDOM_MISALIGNMENT_MEAN_um,
+        RANDOM_MISALIGNMENT_STD_um,
+    )
     
 
     if pad_yield_flag == True:
