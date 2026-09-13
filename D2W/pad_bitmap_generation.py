@@ -16,6 +16,7 @@ import time
 from matplotlib.colors import ListedColormap, BoundaryNorm
 import cv2
 from scipy.spatial import KDTree
+from collections import deque
 
 def downsample_bitmap(bitmap, block_size):
     """
@@ -153,53 +154,140 @@ def assign_pad_blocks(mode, num_pads_blocks, num_pads_block_row, num_pads_block_
     return critical_pad_blocks, redundant_pad_blocks, dummy_pad_blocks
 
 
-def place_redundant_block_pairs(critical_blocks, block_rows, block_cols, target_pairs, block_step):
-    """Place axis-aligned main/gap/copy triplets near the die center."""
+def place_redundant_block_pairs(
+    redundant_blocks,
+    block_rows,
+    block_cols,
+    target_pairs,
+    block_distance,
+):
+    """Find randomized, non-overlapping pairs in the requested distance band.
+
+    The old greedy allocator could strand unmatched blocks.  It also mixed
+    KDTree-local indices with global block IDs, which allowed physical blocks
+    to be reused.  This routine builds the undirected candidate graph and uses
+    Edmonds' blossom algorithm to obtain a maximum-cardinality matching.
+    """
+    blocks = np.asarray(redundant_blocks, dtype=int)
     if target_pairs == 0:
-        empty = np.empty(0, dtype=int)
-        return empty, empty, empty
-
-    all_blocks = set(range(block_rows * block_cols))
-    available = all_blocks - set(np.asarray(critical_blocks, dtype=int))
-    center_row = (block_rows - 1) / 2
-    center_col = (block_cols - 1) / 2
-    candidates = []
-    for row in range(block_rows):
-        for col in range(block_cols):
-            for row_step, col_step in ((block_step, 0), (0, block_step)):
-                copy_row = row + row_step
-                copy_col = col + col_step
-                if copy_row >= block_rows or copy_col >= block_cols:
-                    continue
-                if block_step != 2:
-                    continue
-                gap_row = row + row_step // 2
-                gap_col = col + col_step // 2
-                main_id = row * block_cols + col
-                gap_id = gap_row * block_cols + gap_col
-                copy_id = copy_row * block_cols + copy_col
-                if {main_id, gap_id, copy_id}.issubset(available):
-                    radius2 = (gap_row - center_row) ** 2 + (gap_col - center_col) ** 2
-                    candidates.append((radius2, main_id, gap_id, copy_id))
-
-    reserved = set()
-    pairs = []
-    gaps = []
-    for _, main_id, gap_id, copy_id in sorted(candidates):
-        triplet = {main_id, gap_id, copy_id}
-        if reserved.isdisjoint(triplet):
-            reserved.update(triplet)
-            pairs.append((main_id, copy_id))
-            gaps.append(gap_id)
-            if len(pairs) == target_pairs:
-                break
-
-    if len(pairs) != target_pairs:
+        return []
+    if target_pairs < 0 or 2 * target_pairs > len(blocks):
         raise ValueError(
-            f"Not enough room for {target_pairs} main/gap/copy redundant block triplets."
+            f"Requested {target_pairs} non-overlapping pairs from {len(blocks)} blocks."
         )
-    pair_array = np.asarray(pairs, dtype=int)
-    return pair_array[:, 0], pair_array[:, 1], np.asarray(gaps, dtype=int)
+
+    positions = np.column_stack((blocks // block_cols, blocks % block_cols))
+    tree = KDTree(positions)
+    adjacency = [[] for _ in range(len(blocks))]
+    for node, position in enumerate(positions):
+        neighbor_nodes = tree.query_ball_point(position, r=block_distance + 0.5)
+        for neighbor in neighbor_nodes:
+            if neighbor <= node:
+                continue
+            distance = np.linalg.norm(position - positions[neighbor])
+            if block_distance - 0.1 < distance <= block_distance + 0.5:
+                adjacency[node].append(neighbor)
+                adjacency[neighbor].append(node)
+
+    for neighbors in adjacency:
+        np.random.shuffle(neighbors)
+    root_order = np.random.permutation(len(blocks))
+    match = [-1] * len(blocks)
+    parent = [-1] * len(blocks)
+    base = list(range(len(blocks)))
+    used = [False] * len(blocks)
+    blossom = [False] * len(blocks)
+
+    def lowest_common_ancestor(first, second):
+        visited = [False] * len(blocks)
+        while True:
+            first = base[first]
+            visited[first] = True
+            if match[first] == -1:
+                break
+            first = parent[match[first]]
+        while True:
+            second = base[second]
+            if visited[second]:
+                return second
+            second = parent[match[second]]
+
+    def mark_blossom_path(vertex, blossom_base, child):
+        while base[vertex] != blossom_base:
+            blossom[base[vertex]] = True
+            blossom[base[match[vertex]]] = True
+            parent[vertex] = child
+            child = match[vertex]
+            vertex = parent[match[vertex]]
+
+    def find_augmenting_path(root):
+        for index in range(len(blocks)):
+            used[index] = False
+            parent[index] = -1
+            base[index] = index
+        queue = deque([root])
+        used[root] = True
+        while queue:
+            vertex = queue.popleft()
+            for neighbor in adjacency[vertex]:
+                if base[vertex] == base[neighbor] or match[vertex] == neighbor:
+                    continue
+                if neighbor == root or (
+                    match[neighbor] != -1 and parent[match[neighbor]] != -1
+                ):
+                    common_base = lowest_common_ancestor(vertex, neighbor)
+                    for index in range(len(blocks)):
+                        blossom[index] = False
+                    mark_blossom_path(vertex, common_base, neighbor)
+                    mark_blossom_path(neighbor, common_base, vertex)
+                    for index in range(len(blocks)):
+                        if blossom[base[index]]:
+                            base[index] = common_base
+                            if not used[index]:
+                                used[index] = True
+                                queue.append(index)
+                elif parent[neighbor] == -1:
+                    parent[neighbor] = vertex
+                    if match[neighbor] == -1:
+                        current = neighbor
+                        while current != -1:
+                            previous = parent[current]
+                            next_vertex = match[previous] if previous != -1 else -1
+                            match[current] = previous
+                            if previous != -1:
+                                match[previous] = current
+                            current = next_vertex
+                        return True
+                    neighbor = match[neighbor]
+                    used[neighbor] = True
+                    queue.append(neighbor)
+        return False
+
+    for root_raw in root_order:
+        root = int(root_raw)
+        if match[root] == -1:
+            find_augmenting_path(root)
+
+    matched_pairs = [
+        (node, partner)
+        for node, partner in enumerate(match)
+        if partner != -1 and node < partner
+    ]
+    if len(matched_pairs) < target_pairs:
+        raise ValueError(
+            "Not enough non-overlapping pad block pairs at the requested distance "
+            f"(required {target_pairs}, maximum matching {len(matched_pairs)})."
+        )
+
+    selected = np.random.permutation(len(matched_pairs))[:target_pairs]
+    pairs = []
+    for pair_index_raw in selected:
+        first, second = matched_pairs[int(pair_index_raw)]
+        main, copy = int(blocks[first]), int(blocks[second])
+        if np.random.random() < 0.5:
+            main, copy = copy, main
+        pairs.append((main, copy))
+    return pairs
 
 
 
@@ -309,39 +397,6 @@ def pad_bitmap_generate_random(cfg, pad_layout_pattern):
                                                                                     num_redundant_pad_blocks, 
                                                                                     redundant_mesh_spacing=3)
 
-    planned_redundant_pad_block_pair_dict = {}
-    block_step = int(round(redundant_logical_pad_dist / pad_block_size))
-    same_block_cluster_count = int(pad_block_size / (2 * redundant_logical_pad_dist))
-    if num_redundant_logical_pads > 0 and same_block_cluster_count == 0 and block_step == 2:
-        required_pairs = math.ceil(num_redundant_logical_pads / pad_block_size**2)
-        main_blocks, copy_blocks, gap_blocks = place_redundant_block_pairs(
-            critical_pad_blocks,
-            num_pads_block_row,
-            num_pads_block_col,
-            required_pairs,
-            block_step,
-        )
-        planned_redundant_pad_block_pair_dict = dict(zip(main_blocks, copy_blocks))
-        reserved_blocks = set(np.concatenate((main_blocks, copy_blocks, gap_blocks)))
-        pair_blocks = list(np.concatenate((main_blocks, copy_blocks)))
-        fill_candidates = [
-            int(block_id) for block_id in redundant_pad_blocks
-            if int(block_id) not in reserved_blocks
-        ]
-        if len(pair_blocks) + len(fill_candidates) < num_redundant_pad_blocks:
-            excluded = set(np.asarray(critical_pad_blocks, dtype=int)) | reserved_blocks | set(fill_candidates)
-            fill_candidates.extend(
-                block_id for block_id in range(num_pads_blocks) if block_id not in excluded
-            )
-        redundant_pad_blocks = np.asarray(
-            pair_blocks + fill_candidates[:num_redundant_pad_blocks - len(pair_blocks)],
-            dtype=int,
-        )
-        dummy_pad_blocks = np.setdiff1d(
-            np.arange(num_pads_blocks),
-            np.concatenate((critical_pad_blocks, redundant_pad_blocks)),
-        )
-
     # Save the pad block indices
     np.save("pad_bitmap/critical_pad_blocks.npy", critical_pad_blocks)
     np.save("pad_bitmap/redundant_pad_blocks.npy", redundant_pad_blocks)
@@ -360,20 +415,23 @@ def pad_bitmap_generate_random(cfg, pad_layout_pattern):
         col_end = min(col_end, PAD_ARR_COL)
         CRITICAL_PAD_BITMAP[row_start:row_end, col_start:col_end] = 1
     # Calculate the outmost critical pad coordinates for overlay simulation (4 totally)
-    critical_block_positions = np.column_stack((
-        critical_pad_blocks // num_pads_block_col,
-        critical_pad_blocks % num_pads_block_col,
-    ))
-    top_left = critical_block_positions[np.argmin(critical_block_positions[:, 0] + critical_block_positions[:, 1])]
-    top_right = critical_block_positions[np.argmin(critical_block_positions[:, 0] - critical_block_positions[:, 1])]
-    bottom_left = critical_block_positions[np.argmax(critical_block_positions[:, 0] - critical_block_positions[:, 1])]
-    bottom_right = critical_block_positions[np.argmax(critical_block_positions[:, 0] + critical_block_positions[:, 1])]
-    critical_pad_boundary_bitmap_row_col_block_ind = np.array([
-        top_left,
-        top_right + [0, 1],
-        bottom_left + [1, 0],
-        bottom_right + [1, 1],
-    ], dtype=int)
+    if num_critical_pad_blocks == 0:
+        critical_pad_boundary_bitmap_row_col_block_ind = np.empty((0, 2), dtype=int)
+    else:
+        critical_block_positions = np.column_stack((
+            critical_pad_blocks // num_pads_block_col,
+            critical_pad_blocks % num_pads_block_col,
+        ))
+        top_left = critical_block_positions[np.argmin(critical_block_positions[:, 0] + critical_block_positions[:, 1])]
+        top_right = critical_block_positions[np.argmin(critical_block_positions[:, 0] - critical_block_positions[:, 1])]
+        bottom_left = critical_block_positions[np.argmax(critical_block_positions[:, 0] - critical_block_positions[:, 1])]
+        bottom_right = critical_block_positions[np.argmax(critical_block_positions[:, 0] + critical_block_positions[:, 1])]
+        critical_pad_boundary_bitmap_row_col_block_ind = np.array([
+            top_left,
+            top_right + [0, 1],
+            bottom_left + [1, 0],
+            bottom_right + [1, 1],
+        ], dtype=int)
     # print("Critical pad boundary bitmap row-col indices:", critical_pad_boundary_bitmap_row_col_ind)
 
 
@@ -425,7 +483,7 @@ def pad_bitmap_generate_random(cfg, pad_layout_pattern):
         # If num_clusters is 0, it means the pad block contains all the main or copy pads
         num_clusters = int((col_end - col_start) / (2 * redundant_logical_pad_dist))
         # Find the pad block pairs that has the required distance
-        redundant_pad_block_pair_dict = dict(planned_redundant_pad_block_pair_dict)
+        redundant_pad_block_pair_dict = {}
         if num_clusters > 0:
             # the main pad and its copies can be placed in the same block
             shuffled_items = list(redundant_pad_block_info_dict.items())
@@ -477,84 +535,20 @@ def pad_bitmap_generate_random(cfg, pad_layout_pattern):
                 if len(used_pad_ids) >= num_redundant_logical_pads * redundant_logical_pad_copy:
                     break
         else:
-            # the main pad and its copies have to be placed across different pad blocks to satisfy the distance requirement
-            # first, calculate the required pad block distance based on the redundant_logical_pad_dist
+            # The main pad and its copy must occupy different blocks.  Solve
+            # the complete non-overlapping pairing problem instead of making
+            # irreversible greedy choices that can strand the final blocks.
             pad_block_dist = int(redundant_logical_pad_dist / pad_block_size)
-            # Get the pad block row-column ids for the redundant pads
-            pad_block_row_col_map = np.array([
-                (block_ind // num_pads_block_col, block_ind % num_pads_block_col)
-                for block_ind in redundant_pad_blocks
-            ])
-            # Build a KD-tree for fast nearest neighbor search
-            pad_block_tree = KDTree(pad_block_row_col_map)
-            used_redundant_pad_block_ids_set = set(
-                planned_redundant_pad_block_pair_dict.keys()
-            ) | set(planned_redundant_pad_block_pair_dict.values())
-            available_redundant_pad_block_ids_set = set(redundant_pad_blocks)
-            available_redundant_pad_block_ids_set -= used_redundant_pad_block_ids_set
-
-            redundant_pad_blocks_shuffled = np.random.permutation(
-                list(available_redundant_pad_block_ids_set)
+            required_pairs = math.ceil(num_redundant_logical_pads / pad_block_size**2)
+            redundant_pad_block_pair_dict = dict(
+                place_redundant_block_pairs(
+                    redundant_pad_blocks,
+                    num_pads_block_row,
+                    num_pads_block_col,
+                    required_pairs,
+                    pad_block_dist,
+                )
             )
-            for block_ind in redundant_pad_blocks_shuffled:
-            # for block_ind in redundant_pad_blocks:
-                # Check if the block is already used
-                if block_ind in used_redundant_pad_block_ids_set:
-                    continue
-                main_block_ind = block_ind
-                main_block_pos = np.array([(main_block_ind // num_pads_block_col, main_block_ind % num_pads_block_col)])
-                # Query the KD-tree for the nearest neighbors
-                # inner_neighbor_ids = pad_block_tree.query_ball_point(main_block_pos, r=max(0,pad_block_dist-1))[0]
-                inner_neighbor_ids = pad_block_tree.query_ball_point(main_block_pos, r=pad_block_dist-0.1)[0]
-                outer_neighbor_ids = pad_block_tree.query_ball_point(main_block_pos, r=pad_block_dist+0.5)[0]
-                neighbor_ids = np.setdiff1d(outer_neighbor_ids, inner_neighbor_ids)
-                # Find the farthest neighbor
-                filtered_ids_dist = []
-                for neighbor_id in np.array(neighbor_ids):
-                    pos = pad_block_row_col_map[neighbor_id]
-                    dist = np.linalg.norm(main_block_pos - pos)
-                    if dist >= pad_block_dist:
-                        filtered_ids_dist.append((neighbor_id, dist))
-                    # print("main_block_ind:{}, neighbor_id:{}, dist:{}".format(main_block_ind, neighbor_id, dist))
-                # raise ValueError("The distance between the main block and the neighbor block is less than the required distance.")
-                # Select the farthest neighbor (this neighbor usually has the required distance)
-                if len(filtered_ids_dist) > 0:
-                    # Sort the filtered ids based on the distance (ascending order)
-                    filtered_ids_dist.sort(key=lambda x: x[1])
-                    # Assign main and copy pad block locations randomly for the case study
-                    # # generate a random number between 0 and 1
-                    # rand_num = np.random.rand()
-                    # if rand_num < 0.5:
-                    #     if len(filtered_ids_dist) > 1 and filtered_ids_dist[0][1] == filtered_ids_dist[1][1]:
-                    #         # switch the first and second elements
-                    #         filtered_ids_dist[0], filtered_ids_dist[1] = filtered_ids_dist[1], filtered_ids_dist[0]
-                    #     elif len(filtered_ids_dist) > 2 and filtered_ids_dist[0][1] == filtered_ids_dist[2][1]:
-                    #         # switch the first and third elements
-                    #         filtered_ids_dist[0], filtered_ids_dist[2] = filtered_ids_dist[2], filtered_ids_dist[0]
-
-                    # print("filtered_ids_dist:", filtered_ids_dist)
-                    # Choose the farthest neighbor as the copy pad block (can not be the used pad block)
-                    for neighbor_id, dist in filtered_ids_dist:
-                        # print("cpy_block_ind:{}, dist:{}".format(redundant_pad_blocks[neighbor_id], dist))
-                        copy_block_ind = redundant_pad_blocks[neighbor_id]
-                        # KDTree neighbor IDs index redundant_pad_blocks; availability is
-                        # tracked using the corresponding global block IDs.
-                        if copy_block_ind in available_redundant_pad_block_ids_set:
-                            # Update the used pad block ids
-                            used_redundant_pad_block_ids_set.add(main_block_ind)
-                            used_redundant_pad_block_ids_set.add(copy_block_ind)
-                            # print("main_block_ind:{}, copy_block_ind:{}, dist:{}".format(main_block_ind, copy_block_ind, dist))
-                            # Update the available pad block ids
-                            available_redundant_pad_block_ids_set = available_redundant_pad_block_ids_set - used_redundant_pad_block_ids_set
-                            # Update the redundant pad block pair dictionary
-                            redundant_pad_block_pair_dict[main_block_ind] = copy_block_ind
-                            break
-                if len(redundant_pad_block_pair_dict) * pad_block_size**2 >= num_redundant_logical_pads:
-                    # We've found enough pad block pairs
-                    break
-            if len(redundant_pad_block_pair_dict) * pad_block_size**2 < num_redundant_logical_pads:
-                raise ValueError("Not enough pad block pairs to assign the redundant pads. Please reduce the redundant_logical_pad_ratio.")
-            # print("Redundant pad block pair dictionary:", redundant_pad_block_pair_dict)
 
             # Assign the physical pads for the redundant logical pads
             # Each redundant logical pad has redundant_logical_pad_copy copies
