@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
+import sys
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -14,6 +14,9 @@ from omegaconf import OmegaConf
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RESULTS = HERE / "results"
+sys.path.insert(0, str(HERE.parent))
+
+from model_worker import assert_result_source_compatible  # noqa: E402
 
 
 def main() -> None:
@@ -24,9 +27,7 @@ def main() -> None:
     assert summary["total_cases"] == 24
     assert summary["reproduction_pass"] == bool(exp.expected_reproduction_pass)
     assert math.isclose(summary["pass_abs_tolerance"], float(exp.pass_abs_tolerance))
-    assert summary["repository_commit"] == subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-    ).strip()
+    assert_result_source_compatible(str(summary["repository_commit"]))
     audit_path = RESULTS / "historical_source_audit.json"
     if audit_path.exists():
         audit = json.loads(audit_path.read_text())

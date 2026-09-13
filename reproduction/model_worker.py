@@ -13,6 +13,7 @@ import argparse
 import json
 import math
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,6 +24,48 @@ from omegaconf import OmegaConf
 
 ROOT = Path(__file__).resolve().parents[1]
 REPRODUCTION_DIR = Path(__file__).resolve().parent
+
+CALCULATOR_SOURCE_PATHS = (
+    "W2W/Cu_expansion_yield_calculator.py",
+    "W2W/defect_yield_calculator.py",
+    "W2W/overlay_yield_calculator.py",
+    "W2W/roughness_parameters.py",
+    "W2W/utils/util.py",
+    "D2W/Cu_expansion_yield_calculator.py",
+    "D2W/defect_yield_calculator.py",
+    "D2W/overlay_yield_calculator.py",
+    "D2W/roughness_parameters.py",
+    "D2W/utils/util.py",
+)
+
+
+def assert_result_source_compatible(result_commit: str) -> None:
+    """Accept stored results when their calculator sources are still unchanged.
+
+    Reproduction-only documentation commits necessarily come after generated
+    outputs. Requiring an exact HEAD match would make a clean checked-in package
+    fail immediately. Instead, require the recorded commit to be an ancestor
+    and reject any intervening change to a calculator used by this package.
+    """
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", result_commit, "HEAD"],
+        cwd=ROOT,
+        check=False,
+    )
+    if ancestor.returncode != 0:
+        raise AssertionError(
+            f"Stored result commit {result_commit} is not an ancestor of current HEAD."
+        )
+    changed = subprocess.check_output(
+        ["git", "diff", "--name-only", f"{result_commit}..HEAD", "--", *CALCULATOR_SOURCE_PATHS],
+        cwd=ROOT,
+        text=True,
+    ).splitlines()
+    if changed:
+        raise AssertionError(
+            "Calculator sources changed after the stored results were generated; "
+            f"rerun the figure package. Changed files: {', '.join(changed)}"
+        )
 
 
 def parse_args() -> argparse.Namespace:

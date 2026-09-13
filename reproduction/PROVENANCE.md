@@ -71,8 +71,8 @@ commit `b6f9651` and the pre-summer commit `6e80bc8`, D2W `d2w_modeling`
 instead gives `1e-6/5e-7 rad`, while `D2W/calculator_main.ipynb` overwrites the
 mean with `2e-6 rad` and uses top/bottom radius ratio `2/3`. The latest branch
 retains the latter config/notebook values. None fully reproduces the rightmost
-three Fig. 16 bars; details and numerical comparisons are in
-`results/FIG15_16_VERSION_AUDIT.md`.
+three Fig. 16 bars. The retained numerical comparisons are documented in
+`fig16/README.md` and `fig16/results/summary.json`.
 
 All five published quantities are now gated. The best recovered profile is the
 December-2025 modeling config: 8/12 cases pass at 0.015 absolute tolerance,
@@ -115,11 +115,6 @@ invalidation, and rejects incompatible full-resolution bitmap shapes. These
 are correctness/reproducibility changes. The old `<1 um` notebook branch loaded
 an existing bitmap without proving it matched the active configuration; the
 new validation deliberately exposes that stale-state problem.
-
-`configs/fig16_right3_effective_fit.yaml` is retained only as a diagnostic
-compatibility configuration. Its parameters were fitted to approximate raster
-readbacks and are not present in git history or asserted to be the original
-paper inputs.
 
 ## Fig. 17 overlay compatibility audit
 

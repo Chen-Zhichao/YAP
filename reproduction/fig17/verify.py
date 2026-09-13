@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
+import sys
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -14,14 +15,16 @@ from omegaconf import OmegaConf
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RESULTS = HERE / "results"
+sys.path.insert(0, str(HERE.parent))
+
+from model_worker import assert_result_source_compatible  # noqa: E402
 
 
 def main() -> None:
     cfg = OmegaConf.load(HERE / "config.yaml").experiment
     current = json.loads((RESULTS / "current_summary.json").read_text())
     legacy = json.loads((RESULTS / "legacy_overlay_summary.json").read_text())
-    assert current["repository_commit"] == subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    assert_result_source_compatible(str(current["repository_commit"]))
     assert current["components"] == list(cfg.components)
     assert legacy["audit_only"] and legacy["not_used_for_current_results"]
     assert math.isclose(legacy["pass_abs_tolerance"], float(cfg.pass_abs_tolerance))

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +15,9 @@ from omegaconf import OmegaConf
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RESULTS = HERE / "results"
+sys.path.insert(0, str(HERE.parent))
+
+from model_worker import assert_result_source_compatible  # noqa: E402
 
 
 def verify_side(side: str) -> dict[str, float | int | str]:
@@ -86,15 +89,8 @@ def main() -> None:
     assert float(config.common.top_dishing_mean_nm) == -10.0
     assert float(config.common.bottom_dishing_mean_nm) == -10.0
     report = {side: verify_side(side) for side in ("w2w", "d2w")}
-    current_commit = subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-    ).strip()
     for side, metrics in report.items():
-        if metrics["repository_commit"] != current_commit:
-            raise AssertionError(
-                f"{side}: result was generated at {metrics['repository_commit']}, "
-                f"but current HEAD is {current_commit}; rerun run.sh"
-            )
+        assert_result_source_compatible(str(metrics["repository_commit"]))
     for name in ("fig13_current_code.png", "fig13_current_code.pdf"):
         if not (RESULTS / name).is_file():
             raise FileNotFoundError(f"Missing {RESULTS / name}; run make_plot.py")

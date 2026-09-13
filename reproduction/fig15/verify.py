@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
+import sys
 from pathlib import Path
 
 from omegaconf import OmegaConf
@@ -14,6 +14,9 @@ from omegaconf import OmegaConf
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[1]
 RESULTS = HERE / "results"
+sys.path.insert(0, str(HERE.parent))
+
+from model_worker import assert_result_source_compatible  # noqa: E402
 
 
 def main() -> None:
@@ -28,9 +31,7 @@ def main() -> None:
     if len(summary["profiles"]) == len(config.profiles):
         assert summary["plot_profile"] == str(config.plot_profile)
     assert math.isclose(summary["pass_abs_tolerance"], float(config.pass_abs_tolerance))
-    assert summary["repository_commit"] == subprocess.check_output(
-        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-    ).strip()
+    assert_result_source_compatible(str(summary["repository_commit"]))
     eligible_pass = []
     for profile_name, profile in summary["profiles"].items():
         assert len(profile["cases"]) == 12
