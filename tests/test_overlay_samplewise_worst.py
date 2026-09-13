@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import numpy as np
+import types
 import unittest
 from scipy.stats import norm
 
 from D2W.overlay_yield_calculator import (
     _samplewise_worst_corner_yield as d2w_samplewise_yield,
+    _wafer_to_die_distortion_scale,
 )
 from W2W.overlay_yield_calculator import (
     _samplewise_worst_corner_yield as w2w_samplewise_yield,
@@ -54,6 +56,21 @@ class SamplewiseWorstCornerTest(unittest.TestCase):
             with self.subTest(calculator=calculator.__module__):
                 with self.assertRaisesRegex(ValueError, "2-D"):
                     calculator(np.array([0.01, 0.02]), 0.1, 0.0, 0.02)
+
+    def test_d2w_wafer_to_die_scaling_is_explicit(self):
+        die = types.SimpleNamespace(DIE_W_um=10000.0, DIE_L_um=10000.0)
+        self.assertEqual(
+            _wafer_to_die_distortion_scale(
+                wafer_radius_um=150000.0, die=die, enabled=False
+            ),
+            1.0,
+        )
+        self.assertAlmostEqual(
+            _wafer_to_die_distortion_scale(
+                wafer_radius_um=150000.0, die=die, enabled=True
+            ),
+            150000.0 / np.hypot(5000.0, 5000.0),
+        )
 
 
 if __name__ == "__main__":

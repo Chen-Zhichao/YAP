@@ -72,6 +72,10 @@ def Assembly_Yield_Calculator(
         redundant_flag                  =       cfg.redundant_flag,
         pad_yield_flag                  =       cfg.pad_yield_flag,
         pad_yield_map_sub_factor        =       cfg.pad_yield_map_sub_factor,
+        scale_systematic_distortion_from_wafer = bool(
+            getattr(cfg, "scale_systematic_distortion_from_wafer", False)
+        ),
+        WAF_R_um                        =       cfg.WAF_R_um,
     )
     die.die_yield['Y_ovl'], die.pad_yield_map['Y_ovl'] = overlay_die_yield, overlay_pad_yield_map
 

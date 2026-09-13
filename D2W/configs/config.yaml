@@ -2,6 +2,7 @@
 #### Simulation parameters for Die-to-Wafer (D2W) hybrid bonding simulation.
 #### ==================================================================== ####
 d2w_simulation:
+  scale_systematic_distortion_from_wafer: false  # Historical D2W wafer/die scaling; opt in per experiment
   # === General Settings ===
   MODE: "D2W_Hybrid_Bonding_Simulation" # Name of the simulation
   DEBUG: false                          # Enable debug mode
@@ -90,6 +91,7 @@ d2w_simulation:
 #### Modeling parameters for Die-to-Wafer (D2W) hybrid bonding simulation.
 #### ==================================================================== ####
 d2w_modeling:
+  scale_systematic_distortion_from_wafer: false  # Historical D2W wafer/die scaling; opt in per experiment
   # === General Settings ===
   MODE: "D2W_Hybrid_Bonding_Modeling"   # Name of the modeling
   DEBUG: false                          # Enable debug mode
