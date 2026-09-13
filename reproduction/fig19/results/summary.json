@@ -1,0 +1,396 @@
+{
+  "figure": 19,
+  "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "reference_source": "Exact numeric arrays recovered from the user-uploaded December-2025 replica_distance/w2w_replica_dist_20_40_60_80.m; the rendered bars agree with published Fig. 19.",
+  "result_component": "Y_df",
+  "pass_abs_tolerance": 0.03,
+  "total_cases": 24,
+  "passing_cases": 12,
+  "reproduction_pass": false,
+  "overall_rmse": 0.11975171880581782,
+  "overall_max_abs_error": 0.3444954657144807,
+  "common_overrides": {
+    "PITCH_um": 1.0,
+    "DIE_W_um": 10000.0,
+    "DIE_L_um": 10000.0,
+    "pad_block_dim_um": 200.0,
+    "t_0": 0.1
+  },
+  "current_code_profile_source": "Published Table I and Fig. 19 text, evaluated by the current yap+ defect calculators. Dedicated block maps are constructed compactly by reproduction/model_worker.py. The 20:1 case is the current 200-um-grid same-block limiting surrogate documented in this package.",
+  "historical_20to1_audit": {
+    "source": "User-uploaded December-2025 YAP+ archive",
+    "source_files": [
+      "YAPlus_1204/extracted/W2W/configs/config.yaml",
+      "YAPlus_1204/extracted/D2W/configs/config.yaml",
+      "YAPlus_1204/extracted/{W2W,D2W}/pad_bitmap_generation.py"
+    ],
+    "old_generator_fields": [
+      "multi2one_flag",
+      "multi2one_ratio"
+    ],
+    "w2w_config_multi2one_flag": false,
+    "w2w_config_multi2one_ratio": 20,
+    "d2w_config_multi2one_flag": false,
+    "d2w_config_multi2one_ratio": 80,
+    "recovered_d2w_20to1_run_override": false,
+    "old_main_copy_distance_pitches": 2.0,
+    "current_generator_supports_multi2one": false,
+    "current_grid_surrogate": "At 1 um pitch, the old 2-pitch shared group is far below the 200 um modeling pixel. All 20 mains and their shared replica therefore occupy one model block and have the same defect-sensitive block area as the no-redundancy case, apart from the calculator's fine/coarse quadrature branch."
+  },
+  "uploaded_replica_distance_audit": {
+    "archive_relative_to_workspace": "YAPlus_1204/replica_distance.zip",
+    "archive_sha256": "50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b",
+    "exact_bar_source_member": "replica_distance/w2w_replica_dist_20_40_60_80.m",
+    "conversion_notebook_member": "replica_distance/npy_to_mat.ipynb",
+    "distribution_shapes": {
+      "die_10000_um": [
+        999,
+        10
+      ],
+      "die_3200_um": [
+        999,
+        10
+      ]
+    },
+    "distribution_scope": "W2W random-layout data used by the Fig. 18-style plots",
+    "distribution_density_axes_cm2": {
+      "die_10000_um": "logspace(-2, -0.25, 10)",
+      "die_3200_um": "logspace(-2, 0.65, 10)"
+    },
+    "caveat": "The archive recovers exact plotted bar arrays and eight distribution datasets, but not the Python simulation script that generated the NPY dictionaries. The notebook only converts NPY dictionaries to MAT."
+  },
+  "sides": {
+    "w2w": {
+      "rmse": 0.07539607967409107,
+      "max_abs_error": 0.171302994797218,
+      "passing_cases": 6,
+      "total_cases": 12,
+      "all_cases_pass": false,
+      "densities": [
+        {
+          "tag": "d1",
+          "density_cm2": 1.0,
+          "passing_cases": 0,
+          "all_cases_pass": false,
+          "cases": [
+            {
+              "index": 1,
+              "tag": "spacing0",
+              "label": "0",
+              "actual": 0.2881404974442026,
+              "paper_reference": 0.332,
+              "absolute_error": 0.0438595025557974,
+              "case_pass": false,
+              "output": "w2w_d1_spacing0.json"
+            },
+            {
+              "index": 2,
+              "tag": "spacing200",
+              "label": "200",
+              "actual": 0.3128210646209115,
+              "paper_reference": 0.388,
+              "absolute_error": 0.07517893537908849,
+              "case_pass": false,
+              "output": "w2w_d1_spacing200.json"
+            },
+            {
+              "index": 3,
+              "tag": "spacing400",
+              "label": "400",
+              "actual": 0.43244312667898477,
+              "paper_reference": 0.5001,
+              "absolute_error": 0.06765687332101522,
+              "case_pass": false,
+              "output": "w2w_d1_spacing400.json"
+            },
+            {
+              "index": 4,
+              "tag": "spacing600",
+              "label": "600",
+              "actual": 0.49006816220015403,
+              "paper_reference": 0.6408,
+              "absolute_error": 0.150731837799846,
+              "case_pass": false,
+              "output": "w2w_d1_spacing600.json"
+            },
+            {
+              "index": 5,
+              "tag": "spacing800",
+              "label": "800",
+              "actual": 0.606697005202782,
+              "paper_reference": 0.778,
+              "absolute_error": 0.171302994797218,
+              "case_pass": false,
+              "output": "w2w_d1_spacing800.json"
+            },
+            {
+              "index": 6,
+              "tag": "shared20",
+              "label": "20:1",
+              "actual": 0.2886408059432882,
+              "paper_reference": 0.3326,
+              "absolute_error": 0.04395919405671178,
+              "case_pass": false,
+              "output": "w2w_d1_shared20.json"
+            }
+          ]
+        },
+        {
+          "tag": "d01",
+          "density_cm2": 0.1,
+          "passing_cases": 6,
+          "all_cases_pass": true,
+          "cases": [
+            {
+              "index": 1,
+              "tag": "spacing0",
+              "label": "0",
+              "actual": 0.8829994440924313,
+              "paper_reference": 0.895,
+              "absolute_error": 0.012000555907568766,
+              "case_pass": true,
+              "output": "w2w_d01_spacing0.json"
+            },
+            {
+              "index": 2,
+              "tag": "spacing200",
+              "label": "200",
+              "actual": 0.8902861126378042,
+              "paper_reference": 0.9096,
+              "absolute_error": 0.019313887362195747,
+              "case_pass": true,
+              "output": "w2w_d01_spacing200.json"
+            },
+            {
+              "index": 3,
+              "tag": "spacing400",
+              "label": "400",
+              "actual": 0.9195871625348527,
+              "paper_reference": 0.933,
+              "absolute_error": 0.01341283746514732,
+              "case_pass": true,
+              "output": "w2w_d01_spacing400.json"
+            },
+            {
+              "index": 4,
+              "tag": "spacing600",
+              "label": "600",
+              "actual": 0.9311628671875302,
+              "paper_reference": 0.9564,
+              "absolute_error": 0.025237132812469865,
+              "case_pass": true,
+              "output": "w2w_d01_spacing600.json"
+            },
+            {
+              "index": 5,
+              "tag": "spacing800",
+              "label": "800",
+              "actual": 0.9512555094475013,
+              "paper_reference": 0.9752,
+              "absolute_error": 0.0239444905524987,
+              "case_pass": true,
+              "output": "w2w_d01_spacing800.json"
+            },
+            {
+              "index": 6,
+              "tag": "shared20",
+              "label": "20:1",
+              "actual": 0.8831526427335672,
+              "paper_reference": 0.8957,
+              "absolute_error": 0.012547357266432857,
+              "case_pass": true,
+              "output": "w2w_d01_shared20.json"
+            }
+          ]
+        }
+      ],
+      "poisson_density_consistency": {
+        "identity": "Y(D=1 cm^-2) = Y(D=0.1 cm^-2)^10",
+        "current_max_abs_residual": 2.220446049250313e-16,
+        "paper_reference_max_abs_residual": 0.002215413903483565,
+        "current_residuals": [
+          1.6653345369377348e-16,
+          2.220446049250313e-16,
+          -1.1102230246251565e-16,
+          2.220446049250313e-16,
+          -1.1102230246251565e-16,
+          -1.1102230246251565e-16
+        ],
+        "paper_reference_residuals": [
+          0.002215413903483565,
+          0.0002922192298864257,
+          0.00027676913929786107,
+          0.0004820531142134543,
+          7.643734879791975e-05,
+          0.0002269961022883238
+        ]
+      }
+    },
+    "d2w": {
+      "rmse": 0.1516455719224054,
+      "max_abs_error": 0.3444954657144807,
+      "passing_cases": 6,
+      "total_cases": 12,
+      "all_cases_pass": false,
+      "densities": [
+        {
+          "tag": "d1",
+          "density_cm2": 1.0,
+          "passing_cases": 2,
+          "all_cases_pass": false,
+          "cases": [
+            {
+              "index": 1,
+              "tag": "spacing0",
+              "label": "0",
+              "actual": 0.35294453428551925,
+              "paper_reference": 0.6974,
+              "absolute_error": 0.34445546571448077,
+              "case_pass": false,
+              "output": "d2w_d1_spacing0.json"
+            },
+            {
+              "index": 2,
+              "tag": "spacing200",
+              "label": "200",
+              "actual": 0.7239226910855615,
+              "paper_reference": 0.88782,
+              "absolute_error": 0.16389730891443854,
+              "case_pass": false,
+              "output": "d2w_d1_spacing200.json"
+            },
+            {
+              "index": 3,
+              "tag": "spacing400",
+              "label": "400",
+              "actual": 0.9942709322339467,
+              "paper_reference": 0.93712,
+              "absolute_error": 0.05715093223394674,
+              "case_pass": false,
+              "output": "d2w_d1_spacing400.json"
+            },
+            {
+              "index": 4,
+              "tag": "spacing600",
+              "label": "600",
+              "actual": 0.9969217066539919,
+              "paper_reference": 0.99756,
+              "absolute_error": 0.0006382933460080675,
+              "case_pass": true,
+              "output": "d2w_d1_spacing600.json"
+            },
+            {
+              "index": 5,
+              "tag": "spacing800",
+              "label": "800",
+              "actual": 0.9996808516182399,
+              "paper_reference": 0.99879,
+              "absolute_error": 0.000890851618239985,
+              "case_pass": true,
+              "output": "d2w_d1_spacing800.json"
+            },
+            {
+              "index": 6,
+              "tag": "shared20",
+              "label": "20:1",
+              "actual": 0.35294453428551925,
+              "paper_reference": 0.69744,
+              "absolute_error": 0.3444954657144807,
+              "case_pass": false,
+              "output": "d2w_d1_shared20.json"
+            }
+          ]
+        },
+        {
+          "tag": "d01",
+          "density_cm2": 0.1,
+          "passing_cases": 4,
+          "all_cases_pass": false,
+          "cases": [
+            {
+              "index": 1,
+              "tag": "spacing0",
+              "label": "0",
+              "actual": 0.9010951373483492,
+              "paper_reference": 0.9646,
+              "absolute_error": 0.06350486265165078,
+              "case_pass": false,
+              "output": "d2w_d01_spacing0.json"
+            },
+            {
+              "index": 2,
+              "tag": "spacing200",
+              "label": "200",
+              "actual": 0.9682092310757155,
+              "paper_reference": 0.988172,
+              "absolute_error": 0.019962768924284502,
+              "case_pass": true,
+              "output": "d2w_d01_spacing200.json"
+            },
+            {
+              "index": 3,
+              "tag": "spacing400",
+              "label": "400",
+              "actual": 0.9994256108420888,
+              "paper_reference": 0.99352,
+              "absolute_error": 0.005905610842088849,
+              "case_pass": true,
+              "output": "d2w_d01_spacing400.json"
+            },
+            {
+              "index": 4,
+              "tag": "spacing600",
+              "label": "600",
+              "actual": 0.99969174341716,
+              "paper_reference": 0.99975628,
+              "absolute_error": 6.453658284000241e-05,
+              "case_pass": true,
+              "output": "d2w_d01_spacing600.json"
+            },
+            {
+              "index": 5,
+              "tag": "spacing800",
+              "label": "800",
+              "actual": 0.9999680805773913,
+              "paper_reference": 0.9998799,
+              "absolute_error": 8.818057739123919e-05,
+              "case_pass": true,
+              "output": "d2w_d01_spacing800.json"
+            },
+            {
+              "index": 6,
+              "tag": "shared20",
+              "label": "20:1",
+              "actual": 0.9010951373483492,
+              "paper_reference": 0.96460761,
+              "absolute_error": 0.06351247265165072,
+              "case_pass": false,
+              "output": "d2w_d01_shared20.json"
+            }
+          ]
+        }
+      ],
+      "poisson_density_consistency": {
+        "identity": "Y(D=1 cm^-2) = Y(D=0.1 cm^-2)^10",
+        "current_max_abs_residual": 4.440892098500626e-16,
+        "paper_reference_max_abs_residual": 6.27163280993992e-05,
+        "current_residuals": [
+          5.551115123125783e-17,
+          0.0,
+          1.1102230246251565e-16,
+          4.440892098500626e-16,
+          1.1102230246251565e-16,
+          5.551115123125783e-17
+        ],
+        "paper_reference_residuals": [
+          1.5041871527343709e-05,
+          -1.0530153136123488e-06,
+          6.27163280993992e-05,
+          -5.471238249565857e-06,
+          -9.648872615342086e-06,
+          2.1262501204155626e-08
+        ]
+      }
+    }
+  }
+}

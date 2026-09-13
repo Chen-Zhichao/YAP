@@ -1,0 +1,393 @@
+{
+  "audit_only": true,
+  "not_used_for_current_results": true,
+  "historical_formula": "per-sample max(systematic corner magnitude), then one scalar random-error CDF",
+  "seed": 20260120,
+  "num_samples": 200000,
+  "pass_abs_tolerance": 0.02,
+  "profiles": {
+    "may_2025_git_exact": {
+      "source_commit": "6cc2408",
+      "description": "pre-layout-aware D2W code: max corner per sample; D2W also scales rotation/magnification by wafer-radius/die-half-diagonal",
+      "parameter_profile": "paper_table_i",
+      "d2w_radial_scale": true,
+      "use_critical_boundaries": false,
+      "passing_cases": 8,
+      "all_cases_pass": true,
+      "max_abs_error": 0.012540791729738654,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual_Y_ovl": 0.9625134750826192,
+          "paper_Y_ovl": 0.96,
+          "absolute_error": 0.002513475082619232,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual_Y_ovl": 0.9625134750826192,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.004513475082619234,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual_Y_ovl": 0.9625134750826192,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.004513475082619234,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual_Y_ovl": 0.9625134750826192,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.004513475082619234,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual_Y_ovl": 0.9274592082702613,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.007459208270261253,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual_Y_ovl": 0.9274592082702613,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.007459208270261253,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual_Y_ovl": 0.9274592082702613,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.007459208270261253,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual_Y_ovl": 0.9274592082702613,
+          "paper_Y_ovl": 0.94,
+          "absolute_error": 0.012540791729738654,
+          "pass": true
+        }
+      ]
+    },
+    "august_2025_git_exact": {
+      "source_commit": "331ac05",
+      "description": "layout-aware boundaries and max corner per sample; no D2W radial scale",
+      "parameter_profile": "august_2025_modeling",
+      "d2w_radial_scale": false,
+      "use_critical_boundaries": true,
+      "passing_cases": 8,
+      "all_cases_pass": true,
+      "max_abs_error": 0.01770728185567072,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual_Y_ovl": 0.9587314334282353,
+          "paper_Y_ovl": 0.96,
+          "absolute_error": 0.0012685665717646621,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual_Y_ovl": 0.9587314334282353,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.0007314334282353396,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual_Y_ovl": 0.9587314334282353,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.0007314334282353396,
+          "pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual_Y_ovl": 0.9595355527152896,
+          "paper_Y_ovl": 0.958,
+          "absolute_error": 0.001535552715289601,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual_Y_ovl": 0.9373526577055417,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.01735265770554162,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual_Y_ovl": 0.9377072818556708,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.01770728185567072,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual_Y_ovl": 0.9373526577055417,
+          "paper_Y_ovl": 0.92,
+          "absolute_error": 0.01735265770554162,
+          "pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual_Y_ovl": 0.9539364364351504,
+          "paper_Y_ovl": 0.94,
+          "absolute_error": 0.013936436435150412,
+          "pass": true
+        }
+      ]
+    }
+  },
+  "compatibility_composite": {
+    "overlay_source": "august_2025_git_exact (331ac05)",
+    "non_overlay_source": "current calculators",
+    "layout_mapping_profile": "inferred_logical_mapping (explicit sensitivity fit, not recovered provenance)",
+    "passing_cases": 8,
+    "all_cases_pass": true,
+    "max_abs_error": 0.01770728185567072,
+    "cases": [
+      {
+        "side": "w2w",
+        "layout": "full",
+        "actual": {
+          "Y_ovl": 0.9587314334282353,
+          "Y_cr": 0.9470200664246823,
+          "Y_df": 0.884234442623021,
+          "Y_bond": 0.8028299680436448
+        },
+        "reference": {
+          "Y_ovl": 0.96,
+          "Y_cr": 0.945,
+          "Y_df": 0.883,
+          "Y_bond": 0.801
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.0012685665717646621,
+          "Y_cr": 0.002020066424682332,
+          "Y_df": 0.0012344426230209704,
+          "Y_bond": 0.0018299680436447696
+        },
+        "case_pass": true
+      },
+      {
+        "side": "w2w",
+        "layout": "sparse",
+        "actual": {
+          "Y_ovl": 0.9587314334282353,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.9088188820564983,
+          "Y_bond": 0.8618786931079379
+        },
+        "reference": {
+          "Y_ovl": 0.958,
+          "Y_cr": 0.99,
+          "Y_df": 0.908,
+          "Y_bond": 0.86
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.0007314334282353396,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.0008188820564982713,
+          "Y_bond": 0.0018786931079378677
+        },
+        "case_pass": true
+      },
+      {
+        "side": "w2w",
+        "layout": "peripheral",
+        "actual": {
+          "Y_ovl": 0.9587314334282353,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.9102689114065585,
+          "Y_bond": 0.8632538289307875
+        },
+        "reference": {
+          "Y_ovl": 0.958,
+          "Y_cr": 0.99,
+          "Y_df": 0.91,
+          "Y_bond": 0.864
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.0007314334282353396,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.0002689114065584919,
+          "Y_bond": 0.0007461710692124868
+        },
+        "case_pass": true
+      },
+      {
+        "side": "w2w",
+        "layout": "centralized",
+        "actual": {
+          "Y_ovl": 0.9595355527152896,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.940098400637891,
+          "Y_bond": 0.892290400950094
+        },
+        "reference": {
+          "Y_ovl": 0.958,
+          "Y_cr": 0.99,
+          "Y_df": 0.942,
+          "Y_bond": 0.893
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.001535552715289601,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.0019015993621089855,
+          "Y_bond": 0.0007095990499059734
+        },
+        "case_pass": true
+      },
+      {
+        "side": "d2w",
+        "layout": "full",
+        "actual": {
+          "Y_ovl": 0.9373526577055417,
+          "Y_cr": 0.9470200664246823,
+          "Y_df": 0.8998611724940261,
+          "Y_bond": 0.7987993625119307
+        },
+        "reference": {
+          "Y_ovl": 0.92,
+          "Y_cr": 0.945,
+          "Y_df": 0.899,
+          "Y_bond": 0.783
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.01735265770554162,
+          "Y_cr": 0.002020066424682332,
+          "Y_df": 0.0008611724940260634,
+          "Y_bond": 0.015799362511930704
+        },
+        "case_pass": true
+      },
+      {
+        "side": "d2w",
+        "layout": "sparse",
+        "actual": {
+          "Y_ovl": 0.9377072818556708,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.9306351590547841,
+          "Y_bond": 0.8632142097795789
+        },
+        "reference": {
+          "Y_ovl": 0.92,
+          "Y_cr": 0.99,
+          "Y_df": 0.93,
+          "Y_bond": 0.848
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.01770728185567072,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.0006351590547840624,
+          "Y_bond": 0.01521420977957888
+        },
+        "case_pass": true
+      },
+      {
+        "side": "d2w",
+        "layout": "peripheral",
+        "actual": {
+          "Y_ovl": 0.9373526577055417,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.9698100082408286,
+          "Y_bond": 0.8992107972136915
+        },
+        "reference": {
+          "Y_ovl": 0.92,
+          "Y_cr": 0.99,
+          "Y_df": 0.972,
+          "Y_bond": 0.885
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.01735265770554162,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.002189991759171339,
+          "Y_bond": 0.01421079721369145
+        },
+        "case_pass": true
+      },
+      {
+        "side": "d2w",
+        "layout": "centralized",
+        "actual": {
+          "Y_ovl": 0.9539364364351504,
+          "Y_cr": 0.9891720496222407,
+          "Y_df": 0.9754507541020193,
+          "Y_bond": 0.9204424133801039
+        },
+        "reference": {
+          "Y_ovl": 0.94,
+          "Y_cr": 0.99,
+          "Y_df": 0.978,
+          "Y_bond": 0.91
+        },
+        "absolute_errors": {
+          "Y_ovl": 0.013936436435150412,
+          "Y_cr": 0.00082795037775929,
+          "Y_df": 0.0025492458979806676,
+          "Y_bond": 0.010442413380103877
+        },
+        "case_pass": true
+      }
+    ]
+  },
+  "wafer_scaled_boundary_sensitivity": {
+    "description": "Sensitivity-only hybrid: May-2025 wafer/die radial scale plus August-2025 critical-layout boundaries, using Table-I parameters.",
+    "not_recovered_in_a_single_commit": true,
+    "passing_cases": 4,
+    "all_cases_pass": true,
+    "max_abs_error": 0.012862485235680676,
+    "cases": [
+      {
+        "layout": "full",
+        "actual_Y_ovl": 0.9274592082702613,
+        "paper_Y_ovl": 0.92,
+        "absolute_error": 0.007459208270261253,
+        "pass": true
+      },
+      {
+        "layout": "sparse",
+        "actual_Y_ovl": 0.9280175206859022,
+        "paper_Y_ovl": 0.92,
+        "absolute_error": 0.008017520685902113,
+        "pass": true
+      },
+      {
+        "layout": "peripheral",
+        "actual_Y_ovl": 0.9274592082702613,
+        "paper_Y_ovl": 0.92,
+        "absolute_error": 0.007459208270261253,
+        "pass": true
+      },
+      {
+        "layout": "centralized",
+        "actual_Y_ovl": 0.9528624852356806,
+        "paper_Y_ovl": 0.94,
+        "absolute_error": 0.012862485235680676,
+        "pass": true
+      }
+    ]
+  }
+}

@@ -1,0 +1,360 @@
+{
+  "archive": "/w/ee.00/puneet/zhichao/Desktop/YAPlus_Reproduce/YAPlus_1204/replica_distance.zip",
+  "archive_sha256": "50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b",
+  "exact_bar_source_member": "replica_distance/w2w_replica_dist_20_40_60_80.m",
+  "exact_bar_values": {
+    "w2w": {
+      "d1": [
+        0.332,
+        0.388,
+        0.5001,
+        0.6408,
+        0.778,
+        0.3326
+      ],
+      "d01": [
+        0.895,
+        0.9096,
+        0.933,
+        0.9564,
+        0.9752,
+        0.8957
+      ]
+    },
+    "d2w": {
+      "d1": [
+        0.6974,
+        0.88782,
+        0.93712,
+        0.99756,
+        0.99879,
+        0.69744
+      ],
+      "d01": [
+        0.9646,
+        0.988172,
+        0.99352,
+        0.99975628,
+        0.9998799,
+        0.96460761
+      ]
+    }
+  },
+  "exact_values_match_config": true,
+  "npy_distribution_count": 8,
+  "npy_distribution_scope": "W2W only; the two MATLAB plotting consumers are named w2w_replica_dist_across_die_size_{10,3d2}.m",
+  "npy_distributions": [
+    {
+      "member": "replica_distance/yield_dict_size_10000.0_dist_20.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 10000.0,
+      "distance_pitches_at_old_10um_pitch": 20.0,
+      "distance_um": 200.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.0156474814165802,
+        0.024484367468222266,
+        0.03831186849557289,
+        0.05994842503189409,
+        0.09380418666398145,
+        0.14677992676220697,
+        0.22967361763386362,
+        0.35938136638046275,
+        0.5623413251903491
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.5444817097935725,
+      "maximum": 0.9896325555460145,
+      "lambda_per_cm2_mean": 1.0638821353829173,
+      "lambda_per_cm2_std_across_layouts": 0.006555408583884848,
+      "max_lambda_drift_across_density_columns": 1.021405182655144e-14,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.8990757402065259,
+        "density_1_cm2": 0.3451208473354212
+      },
+      "fig19_exact_w2w_bar": {
+        "density_0.1_cm2": 0.9096,
+        "density_1_cm2": 0.388
+      }
+    },
+    {
+      "member": "replica_distance/yield_dict_size_10000.0_dist_40.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 10000.0,
+      "distance_pitches_at_old_10um_pitch": 40.0,
+      "distance_um": 400.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.0156474814165802,
+        0.024484367468222266,
+        0.03831186849557289,
+        0.05994842503189409,
+        0.09380418666398145,
+        0.14677992676220697,
+        0.22967361763386362,
+        0.35938136638046275,
+        0.5623413251903491
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.6148772005956847,
+      "maximum": 0.9918060402394819,
+      "lambda_per_cm2_mean": 0.8443111028186288,
+      "lambda_per_cm2_std_across_layouts": 0.0061894263233143055,
+      "max_lambda_drift_across_density_columns": 1.0103029524088925e-14,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.9190351412983404,
+        "density_1_cm2": 0.42986161751036367
+      },
+      "fig19_exact_w2w_bar": {
+        "density_0.1_cm2": 0.933,
+        "density_1_cm2": 0.5001
+      }
+    },
+    {
+      "member": "replica_distance/yield_dict_size_10000.0_dist_60.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 10000.0,
+      "distance_pitches_at_old_10um_pitch": 60.0,
+      "distance_um": 600.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.0156474814165802,
+        0.024484367468222266,
+        0.03831186849557289,
+        0.05994842503189409,
+        0.09380418666398145,
+        0.14677992676220697,
+        0.22967361763386362,
+        0.35938136638046275,
+        0.5623413251903491
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.726563916771867,
+      "maximum": 0.9945661904616049,
+      "lambda_per_cm2_mean": 0.5560686267830418,
+      "lambda_per_cm2_std_across_layouts": 0.003879019998884754,
+      "max_lambda_drift_across_density_columns": 9.43689570931383e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.9459110068581027,
+        "density_1_cm2": 0.5734634343777361
+      },
+      "fig19_exact_w2w_bar": {
+        "density_0.1_cm2": 0.9564,
+        "density_1_cm2": 0.6408
+      }
+    },
+    {
+      "member": "replica_distance/yield_dict_size_10000.0_dist_80.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 10000.0,
+      "distance_pitches_at_old_10um_pitch": 80.0,
+      "distance_um": 800.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.0156474814165802,
+        0.024484367468222266,
+        0.03831186849557289,
+        0.05994842503189409,
+        0.09380418666398145,
+        0.14677992676220697,
+        0.22967361763386362,
+        0.35938136638046275,
+        0.5623413251903491
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.8432209647604443,
+      "maximum": 0.9971501769202733,
+      "lambda_per_cm2_mean": 0.2953624741761723,
+      "lambda_per_cm2_std_across_layouts": 0.0026375609680968693,
+      "max_lambda_drift_across_density_columns": 9.547918011776346e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.970895718313478,
+        "density_1_cm2": 0.7442643518405845
+      },
+      "fig19_exact_w2w_bar": {
+        "density_0.1_cm2": 0.9752,
+        "density_1_cm2": 0.778
+      }
+    },
+    {
+      "member": "replica_distance/yield_dict_size_3200.0_dist_20.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 3200.0,
+      "distance_pitches_at_old_10um_pitch": 20.0,
+      "distance_um": 200.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.01969901198590981,
+        0.03880510732210184,
+        0.07644222742526002,
+        0.15058363542798409,
+        0.29663488391777315,
+        0.5843414133735175,
+        1.1510948505908407,
+        2.267543125870802,
+        4.466835921509632
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.514811821472077,
+      "maximum": 0.9986951091116739,
+      "lambda_per_cm2_mean": 0.14054511015091511,
+      "lambda_per_cm2_std_across_layouts": 0.0030640511201953,
+      "max_lambda_drift_across_density_columns": 8.576472865229334e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.986043838837678,
+        "density_1_cm2": 0.8688885481292831
+      },
+      "fig19_exact_w2w_bar": null
+    },
+    {
+      "member": "replica_distance/yield_dict_size_3200.0_dist_40.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 3200.0,
+      "distance_pitches_at_old_10um_pitch": 40.0,
+      "distance_um": 400.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.01969901198590981,
+        0.03880510732210184,
+        0.07644222742526002,
+        0.15058363542798409,
+        0.29663488391777315,
+        0.5843414133735175,
+        1.1510948505908407,
+        2.267543125870802,
+        4.466835921509632
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.6220254708362282,
+      "maximum": 0.9990787672905512,
+      "lambda_per_cm2_mean": 0.0996303417504466,
+      "lambda_per_cm2_std_across_layouts": 0.002367126744297053,
+      "max_lambda_drift_across_density_columns": 8.978928711655954e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.9900864601735279,
+        "density_1_cm2": 0.9051744967838228
+      },
+      "fig19_exact_w2w_bar": null
+    },
+    {
+      "member": "replica_distance/yield_dict_size_3200.0_dist_60.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 3200.0,
+      "distance_pitches_at_old_10um_pitch": 60.0,
+      "distance_um": 600.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.01969901198590981,
+        0.03880510732210184,
+        0.07644222742526002,
+        0.15058363542798409,
+        0.29663488391777315,
+        0.5843414133735175,
+        1.1510948505908407,
+        2.267543125870802,
+        4.466835921509632
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.741901904114323,
+      "maximum": 0.999434535568809,
+      "lambda_per_cm2_mean": 0.06205435827789447,
+      "lambda_per_cm2_std_across_layouts": 0.0015161675917272834,
+      "max_lambda_drift_across_density_columns": 9.152401059253634e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.993813789547672,
+        "density_1_cm2": 0.9398328780205993
+      },
+      "fig19_exact_w2w_bar": null
+    },
+    {
+      "member": "replica_distance/yield_dict_size_3200.0_dist_80.0_blkdim_200.npy",
+      "bonding_side": "w2w",
+      "die_size_um": 3200.0,
+      "distance_pitches_at_old_10um_pitch": 80.0,
+      "distance_um": 800.0,
+      "density_axis_cm2_from_matlab_consumer": [
+        0.01,
+        0.01969901198590981,
+        0.03880510732210184,
+        0.07644222742526002,
+        0.15058363542798409,
+        0.29663488391777315,
+        0.5843414133735175,
+        1.1510948505908407,
+        2.267543125870802,
+        4.466835921509632
+      ],
+      "dictionary_entries": 999,
+      "matrix_shape": [
+        999,
+        10
+      ],
+      "minimum": 0.8359534967247695,
+      "maximum": 0.999657661953764,
+      "lambda_per_cm2_mean": 0.037249896981539014,
+      "lambda_per_cm2_std_across_layouts": 0.0009412926915068972,
+      "max_lambda_drift_across_density_columns": 8.215650382226158e-15,
+      "inferred_population_mean_yield": {
+        "density_0.1_cm2": 0.9962819438832985,
+        "density_1_cm2": 0.9634357724980787
+      },
+      "fig19_exact_w2w_bar": null
+    }
+  ],
+  "exact_bar_poisson_residual": {
+    "w2w": {
+      "identity": "Y(1 cm^-2) - Y(0.1 cm^-2)^10",
+      "residuals": [
+        0.002215413903483565,
+        0.0002922192298864257,
+        0.00027676913929786107,
+        0.0004820531142134543,
+        7.643734879791975e-05,
+        0.0002269961022883238
+      ],
+      "max_absolute_residual": 0.002215413903483565
+    },
+    "d2w": {
+      "identity": "Y(1 cm^-2) - Y(0.1 cm^-2)^10",
+      "residuals": [
+        1.5041871527343709e-05,
+        -1.0530153136123488e-06,
+        6.27163280993992e-05,
+        -5.471238249565857e-06,
+        -9.648872615342086e-06,
+        2.1262501204155626e-08
+      ],
+      "max_absolute_residual": 6.27163280993992e-05
+    }
+  },
+  "conversion_notebook_role": "NPY-to-MAT conversion only",
+  "generation_script_recovered": false
+}

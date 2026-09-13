@@ -1,0 +1,21 @@
+{
+  "figure": 13,
+  "bonding_type": "D2W",
+  "paper_parameter_set": "Table I baseline",
+  "repository_commit": "ed0449becd4cbc517dc27bda1bd5e8b762dfc6d9",
+  "num_dies": 10000,
+  "seed": 20260911,
+  "component_yields": {
+    "overlay": 1.0,
+    "defect": 0.9034,
+    "cu_expansion": 0.9951127340643955
+  },
+  "product_of_component_yields": 0.8989848439537749,
+  "overall_joint_yield": 0.8989848439537749,
+  "absolute_difference": 0.0,
+  "approximations": [
+    "overlay evaluated at the four pad-field corners",
+    "full critical pad field treated as continuous for particle overlap"
+  ],
+  "simulator_magnification_std_ppm": 0.01
+}

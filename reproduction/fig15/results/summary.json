@@ -1,0 +1,742 @@
+{
+  "figure": 15,
+  "side": "W2W",
+  "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "reference_source": "Approximate readback from published Fig. 15 raster bars",
+  "component_names": [
+    "Y_ovl",
+    "Y_cr",
+    "Y_df",
+    "Y_bond"
+  ],
+  "pass_component_names": [
+    "Y_ovl",
+    "Y_cr",
+    "Y_df",
+    "Y_bond"
+  ],
+  "ignored_components_for_pass": [],
+  "pass_abs_tolerance": 0.015,
+  "best_eligible_profile_by_gating_rmse": "december_2025_modeling",
+  "plot_profile": "december_2025_modeling",
+  "passing_profiles": [
+    "paper_table_i",
+    "december_2025_modeling"
+  ],
+  "reproduction_pass": true,
+  "profiles": {
+    "paper_table_i": {
+      "source": "Published Table I plus Fig. 12/15 full-critical 400 um grid",
+      "eligible_for_pass": true,
+      "overrides": {
+        "critical_pad_ratio": 1.0,
+        "redundant_pad_ratio": 0.0,
+        "redundant_logical_pad_ratio": 0.0,
+        "pad_block_dim_um": 400.0,
+        "PAD_BOT_R_um_ratio": 0.5,
+        "PAD_TOP_R_um_ratio": 0.6,
+        "RANDOM_MISALIGNMENT_STD_um": 0.02,
+        "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+        "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+        "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+        "SYSTEM_ROTATION_STD_rad": 1e-08,
+        "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+        "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+        "k_mag": 0.09,
+        "num_samples": 10000
+      },
+      "rmse": 0.003943651580296316,
+      "max_abs_error": 0.013680186117994597,
+      "gating_rmse": 0.003943651580296316,
+      "gating_max_abs_error": 0.013680186117994597,
+      "passing_cases": 12,
+      "all_cases_pass": true,
+      "cases": [
+        {
+          "index": 1,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999999,
+            "Y_cr": 0.999510281214763,
+            "Y_df": 0.9839999222984915,
+            "Y_bond": 0.9835180390518702
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.999,
+            "Y_df": 0.98,
+            "Y_bond": 0.979
+          },
+          "absolute_errors": {
+            "Y_ovl": 1.1102230246251565e-16,
+            "Y_cr": 0.000510281214763042,
+            "Y_df": 0.003999922298491554,
+            "Y_bond": 0.004518039051870204
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 2,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999999,
+            "Y_cr": 0.9975534209117454,
+            "Y_df": 0.9382271982322566,
+            "Y_bond": 0.9359317511890297
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.997,
+            "Y_df": 0.929,
+            "Y_bond": 0.928
+          },
+          "absolute_errors": {
+            "Y_ovl": 1.1102230246251565e-16,
+            "Y_cr": 0.0005534209117453726,
+            "Y_df": 0.009227198232256595,
+            "Y_bond": 0.007931751189029668
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 3,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.9951127340643955,
+            "Y_df": 0.8841867797201637,
+            "Y_bond": 0.8798655237909255
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.995,
+            "Y_df": 0.884,
+            "Y_bond": 0.879
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0,
+            "Y_cr": 0.00011273406439549216,
+            "Y_df": 0.00018677972016367672,
+            "Y_bond": 0.0008655237909255264
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 4,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999999,
+            "Y_cr": 0.999510281214763,
+            "Y_df": 0.9983883540089702,
+            "Y_bond": 0.99789942447705
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 1.0,
+            "Y_df": 0.998,
+            "Y_bond": 0.997
+          },
+          "absolute_errors": {
+            "Y_ovl": 1.1102230246251565e-16,
+            "Y_cr": 0.0004897187852369589,
+            "Y_df": 0.0003883540089701931,
+            "Y_bond": 0.0008994244770500481
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 5,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999999,
+            "Y_cr": 0.9975534209117454,
+            "Y_df": 0.9936439711832912,
+            "Y_bond": 0.9912129426222237
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.997,
+            "Y_df": 0.994,
+            "Y_bond": 0.991
+          },
+          "absolute_errors": {
+            "Y_ovl": 1.1102230246251565e-16,
+            "Y_cr": 0.0005534209117453726,
+            "Y_df": 0.0003560288167088199,
+            "Y_bond": 0.00021294262222371074
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 6,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.9951127340643955,
+            "Y_df": 0.9877667471982247,
+            "Y_bond": 0.9829392684223199
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.995,
+            "Y_df": 0.988,
+            "Y_bond": 0.982
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0,
+            "Y_cr": 0.00011273406439549216,
+            "Y_df": 0.00023325280177532992,
+            "Y_bond": 0.0009392684223199499
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 7,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9638389920404827,
+            "Y_cr": 0.9945721317701602,
+            "Y_df": 0.9840040663784176,
+            "Y_bond": 0.9432735806414013
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.994,
+            "Y_df": 0.98,
+            "Y_bond": 0.934
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0038389920404827693,
+            "Y_cr": 0.0005721317701602446,
+            "Y_df": 0.004004066378417659,
+            "Y_bond": 0.009273580641401269
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 8,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9634478718531414,
+            "Y_cr": 0.973149538435458,
+            "Y_df": 0.9382466172617622,
+            "Y_bond": 0.8796801861179946
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.974,
+            "Y_df": 0.93,
+            "Y_bond": 0.866
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0034478718531414376,
+            "Y_cr": 0.0008504615645419378,
+            "Y_df": 0.008246617261762124,
+            "Y_bond": 0.013680186117994597
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 9,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9631003167713141,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8064884174825752
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.946,
+            "Y_df": 0.884,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.003100316771314171,
+            "Y_cr": 0.001020066424682331,
+            "Y_df": 0.00023444262302096952,
+            "Y_bond": 0.005488417482575114
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 10,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9638389920404827,
+            "Y_cr": 0.9945721317701602,
+            "Y_df": 0.9983887744758017,
+            "Y_bond": 0.9570628682847337
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.994,
+            "Y_df": 0.998,
+            "Y_bond": 0.952
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0038389920404827693,
+            "Y_cr": 0.0005721317701602446,
+            "Y_df": 0.00038877447580165647,
+            "Y_bond": 0.00506286828473379
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 11,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9634478718531414,
+            "Y_cr": 0.973149538435458,
+            "Y_df": 0.9936460277663784,
+            "Y_bond": 0.9316215018093377
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.974,
+            "Y_df": 0.994,
+            "Y_bond": 0.925
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0034478718531414376,
+            "Y_cr": 0.0008504615645419378,
+            "Y_df": 0.00035397223362154673,
+            "Y_bond": 0.0066215018093376266
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 12,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9631003167713141,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.9877720717167076,
+            "Y_bond": 0.9009225342875736
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.946,
+            "Y_df": 0.988,
+            "Y_bond": 0.896
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.003100316771314171,
+            "Y_cr": 0.001020066424682331,
+            "Y_df": 0.00022792828329243342,
+            "Y_bond": 0.00492253428757361
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        }
+      ]
+    },
+    "december_2025_modeling": {
+      "source": "Uploaded December-2025 W2W configs/config.yaml w2w_modeling",
+      "eligible_for_pass": true,
+      "overrides": {
+        "critical_pad_ratio": 1.0,
+        "redundant_pad_ratio": 0.0,
+        "redundant_logical_pad_ratio": 0.0,
+        "pad_block_dim_um": 400.0,
+        "PAD_BOT_R_um_ratio": 0.5,
+        "PAD_TOP_R_um_ratio": 0.6666666666666666,
+        "RANDOM_MISALIGNMENT_STD_um": 0.02,
+        "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+        "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+        "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+        "SYSTEM_ROTATION_STD_rad": 1e-08,
+        "BOW_DIFFERENCE_MEAN_um": 0.5,
+        "BOW_DIFFERENCE_STD_um": 0.1,
+        "k_mag": 0.1,
+        "M_0": 0.0,
+        "TOP_DISH_MEAN_nm": -10.0,
+        "TOP_DISH_STD_nm": 1.0,
+        "BOT_DISH_MEAN_nm": -10.0,
+        "BOT_DISH_STD_nm": 1.0,
+        "Adhesion_energy": 1.3,
+        "k_peel": 6660000000000000.0,
+        "num_samples": 10000
+      },
+      "rmse": 0.0030131189321766978,
+      "max_abs_error": 0.010309438010921546,
+      "gating_rmse": 0.0030131189321766978,
+      "gating_max_abs_error": 0.010309438010921546,
+      "passing_cases": 12,
+      "all_cases_pass": true,
+      "cases": [
+        {
+          "index": 1,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.999510281214763,
+            "Y_df": 0.9839999222984915,
+            "Y_bond": 0.9835180390518699
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.999,
+            "Y_df": 0.98,
+            "Y_bond": 0.979
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.000510281214763042,
+            "Y_df": 0.003999922298491554,
+            "Y_bond": 0.004518039051869871
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 2,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.9975534209117454,
+            "Y_df": 0.9382271982322566,
+            "Y_bond": 0.9359317511890295
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.997,
+            "Y_df": 0.929,
+            "Y_bond": 0.928
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.0005534209117453726,
+            "Y_df": 0.009227198232256595,
+            "Y_bond": 0.007931751189029446
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 3,
+          "density_cm2": 0.1,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.9951127340643955,
+            "Y_df": 0.8841867797201637,
+            "Y_bond": 0.8798655237909251
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.995,
+            "Y_df": 0.884,
+            "Y_bond": 0.879
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.00011273406439549216,
+            "Y_df": 0.00018677972016367672,
+            "Y_bond": 0.0008655237909250824
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 4,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.999510281214763,
+            "Y_df": 0.9983883540089702,
+            "Y_bond": 0.9978994244770497
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 1.0,
+            "Y_df": 0.998,
+            "Y_bond": 0.997
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.0004897187852369589,
+            "Y_df": 0.0003883540089701931,
+            "Y_bond": 0.0008994244770497151
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 5,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.9975534209117454,
+            "Y_df": 0.9936439711832912,
+            "Y_bond": 0.9912129426222234
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.997,
+            "Y_df": 0.994,
+            "Y_bond": 0.991
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.0005534209117453726,
+            "Y_df": 0.0003560288167088199,
+            "Y_bond": 0.00021294262222337768
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 6,
+          "density_cm2": 0.01,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9999999999999996,
+            "Y_cr": 0.9951127340643955,
+            "Y_df": 0.9877667471982247,
+            "Y_bond": 0.9829392684223195
+          },
+          "reference": {
+            "Y_ovl": 1.0,
+            "Y_cr": 0.995,
+            "Y_df": 0.988,
+            "Y_bond": 0.982
+          },
+          "absolute_errors": {
+            "Y_ovl": 4.440892098500626e-16,
+            "Y_cr": 0.00011273406439549216,
+            "Y_df": 0.00023325280177532992,
+            "Y_bond": 0.0009392684223195058
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 7,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9601806722802994,
+            "Y_cr": 0.9945721317701602,
+            "Y_df": 0.9840040663784176,
+            "Y_bond": 0.9396933183695733
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.994,
+            "Y_df": 0.98,
+            "Y_bond": 0.934
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00018067228029938764,
+            "Y_cr": 0.0005721317701602446,
+            "Y_df": 0.004004066378417659,
+            "Y_bond": 0.005693318369573208
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 8,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9597561437210759,
+            "Y_cr": 0.973149538435458,
+            "Y_df": 0.9382466172617622,
+            "Y_bond": 0.8763094380109215
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.974,
+            "Y_df": 0.93,
+            "Y_bond": 0.866
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00024385627892409278,
+            "Y_cr": 0.0008504615645419378,
+            "Y_df": 0.008246617261762124,
+            "Y_bond": 0.010309438010921546
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 9,
+          "density_cm2": 0.1,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9593806890770161,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8033736467774264
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.946,
+            "Y_df": 0.884,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00061931092298384,
+            "Y_cr": 0.001020066424682331,
+            "Y_df": 0.00023444262302096952,
+            "Y_bond": 0.0023736467774263525
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 10,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "actual": {
+            "Y_ovl": 0.9601806722802994,
+            "Y_cr": 0.9945721317701602,
+            "Y_df": 0.9983887744758017,
+            "Y_bond": 0.9534302677864166
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.994,
+            "Y_df": 0.998,
+            "Y_bond": 0.952
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00018067228029938764,
+            "Y_cr": 0.0005721317701602446,
+            "Y_df": 0.00038877447580165647,
+            "Y_bond": 0.001430267786416639
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 11,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "actual": {
+            "Y_ovl": 0.9597561437210759,
+            "Y_cr": 0.973149538435458,
+            "Y_df": 0.9936460277663784,
+            "Y_bond": 0.9280517255846507
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.974,
+            "Y_df": 0.994,
+            "Y_bond": 0.925
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00024385627892409278,
+            "Y_cr": 0.0008504615645419378,
+            "Y_df": 0.00035397223362154673,
+            "Y_bond": 0.003051725584650611
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        },
+        {
+          "index": 12,
+          "density_cm2": 0.01,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "actual": {
+            "Y_ovl": 0.9593806890770161,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.9877720717167076,
+            "Y_bond": 0.8974430458577625
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.946,
+            "Y_df": 0.988,
+            "Y_bond": 0.896
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.00061931092298384,
+            "Y_cr": 0.001020066424682331,
+            "Y_df": 0.00022792828329243342,
+            "Y_bond": 0.0014430458577624483
+          },
+          "overlay_adjusted_diagnostics": null,
+          "raw_all_components_pass": true,
+          "case_pass": true
+        }
+      ]
+    }
+  }
+}

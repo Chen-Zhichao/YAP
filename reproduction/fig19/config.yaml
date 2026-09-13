@@ -1,0 +1,87 @@
+experiment:
+  figure: 19
+  sides: [w2w, d2w]
+  pass_abs_tolerance: 0.03
+  expected_reproduction_pass: false
+  reference_source: >-
+    Exact numeric arrays recovered from the user-uploaded December-2025
+    replica_distance/w2w_replica_dist_20_40_60_80.m; the rendered bars agree
+    with published Fig. 19.
+  result_component: Y_df
+
+  # Fig. 19 explicitly states a 200 um x 200 um pad-block grid, 100%
+  # redundant physical pads, and 1:1 main/replica mapping for the dedicated
+  # cases. Parameters not overridden here come from Table I through
+  # reproduction/configs/paper_{w2w,d2w}.yaml.
+  common_overrides:
+    PITCH_um: 1.0
+    DIE_W_um: 10000.0
+    DIE_L_um: 10000.0
+    pad_block_dim_um: 200.0
+    t_0: 0.1
+
+  densities:
+    - tag: d1
+      density_cm2: 1.0
+      paper:
+        w2w: [0.332, 0.3880, 0.5001, 0.6408, 0.7780, 0.3326]
+        d2w: [0.6974, 0.88782, 0.93712, 0.99756, 0.99879, 0.69744]
+    - tag: d01
+      density_cm2: 0.1
+      paper:
+        w2w: [0.895, 0.9096, 0.9330, 0.9564, 0.9752, 0.8957]
+        d2w: [0.9646, 0.988172, 0.99352, 0.99975628, 0.9998799, 0.96460761]
+
+  configurations:
+    - {tag: spacing0,   label: "0",    layout: full,      replica_spacing_um: null, shared_ratio: null}
+    - {tag: spacing200, label: "200",  layout: redundant, replica_spacing_um: 200.0, shared_ratio: null}
+    - {tag: spacing400, label: "400",  layout: redundant, replica_spacing_um: 400.0, shared_ratio: null}
+    - {tag: spacing600, label: "600",  layout: redundant, replica_spacing_um: 600.0, shared_ratio: null}
+    - {tag: spacing800, label: "800",  layout: redundant, replica_spacing_um: 800.0, shared_ratio: null}
+    - {tag: shared20,   label: "20:1", layout: shared20,  replica_spacing_um: null, shared_ratio: 20}
+
+  current_code_profile:
+    source: >-
+      Published Table I and Fig. 19 text, evaluated by the current yap+
+      defect calculators. Dedicated block maps are constructed compactly by
+      reproduction/model_worker.py. The 20:1 case is the current 200-um-grid
+      same-block limiting surrogate documented in this package.
+    poisson_density_model: "Y_df = exp(-Lambda), Lambda proportional to D_t"
+
+  historical_20to1_audit:
+    source: "User-uploaded December-2025 YAP+ archive"
+    source_files:
+      - "YAPlus_1204/extracted/W2W/configs/config.yaml"
+      - "YAPlus_1204/extracted/D2W/configs/config.yaml"
+      - "YAPlus_1204/extracted/{W2W,D2W}/pad_bitmap_generation.py"
+    old_generator_fields: [multi2one_flag, multi2one_ratio]
+    w2w_config_multi2one_flag: false
+    w2w_config_multi2one_ratio: 20
+    d2w_config_multi2one_flag: false
+    d2w_config_multi2one_ratio: 80
+    recovered_d2w_20to1_run_override: false
+    old_main_copy_distance_pitches: 2.0
+    current_generator_supports_multi2one: false
+    current_grid_surrogate: >-
+      At 1 um pitch, the old 2-pitch shared group is far below the 200 um
+      modeling pixel. All 20 mains and their shared replica therefore occupy
+      one model block and have the same defect-sensitive block area as the
+      no-redundancy case, apart from the calculator's fine/coarse quadrature
+      branch.
+
+  uploaded_replica_distance_audit:
+    archive_relative_to_workspace: "YAPlus_1204/replica_distance.zip"
+    archive_sha256: "50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b"
+    exact_bar_source_member: "replica_distance/w2w_replica_dist_20_40_60_80.m"
+    conversion_notebook_member: "replica_distance/npy_to_mat.ipynb"
+    distribution_shapes:
+      die_10000_um: [999, 10]
+      die_3200_um: [999, 10]
+    distribution_scope: "W2W random-layout data used by the Fig. 18-style plots"
+    distribution_density_axes_cm2:
+      die_10000_um: "logspace(-2, -0.25, 10)"
+      die_3200_um: "logspace(-2, 0.65, 10)"
+    caveat: >-
+      The archive recovers exact plotted bar arrays and eight distribution
+      datasets, but not the Python simulation script that generated the NPY
+      dictionaries. The notebook only converts NPY dictionaries to MAT.

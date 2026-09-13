@@ -1,0 +1,980 @@
+{
+  "figure": 17,
+  "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "paper_reference_source": "Fig. 17c, digitized from YAP_plus_paper.pdf (plot resolution is about 0.005)",
+  "components": [
+    "Y_ovl",
+    "Y_cr",
+    "Y_df",
+    "Y_bond"
+  ],
+  "pass_abs_tolerance": 0.02,
+  "profiles": {
+    "paper_table_i": {
+      "source": "YAP+ Table I plus Fig. 17 text",
+      "overrides": {
+        "w2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "redundant_logical_pad_ratio": 0.0,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 400.0,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        },
+        "d2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "redundant_logical_pad_ratio": 0.0,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 100.0,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        }
+      },
+      "rmse": 0.02238199029851591,
+      "max_abs_error": 0.04660824145452125,
+      "passing_cases": 3,
+      "all_cases_pass": false,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9625135331198517,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8059970520347274
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.945,
+            "Y_df": 0.883,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0025135331198516964,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0012344426230209704,
+            "Y_bond": 0.004997052034727334
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9172258701475632,
+            "Y_bond": 0.8732832166820148
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.908,
+            "Y_bond": 0.86
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.009225870147563153,
+            "Y_bond": 0.01328321668201482
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9282869526380159,
+            "Y_bond": 0.8838143824631256
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.91,
+            "Y_bond": 0.864
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.01828695263801583,
+            "Y_bond": 0.019814382463125613
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9632611103898298,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9679016807655361,
+            "Y_bond": 0.9222466943341231
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.942,
+            "Y_bond": 0.893
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.005261110389829793,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.025901680765536117,
+            "Y_bond": 0.02924669433412308
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9665936648617085,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.8998611724940261,
+            "Y_bond": 0.8237181566109714
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.945,
+            "Y_df": 0.899,
+            "Y_bond": 0.783
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04659366486170846,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0008611724940260634,
+            "Y_bond": 0.040718156610971334
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9666082414545213,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9315903386771988,
+            "Y_bond": 0.8907325148781278
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.93,
+            "Y_bond": 0.848
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04660824145452125,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0015903386771987105,
+            "Y_bond": 0.04273251487812779
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9665949432328893,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9722047642434134,
+            "Y_bond": 0.929552878490007
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.972,
+            "Y_bond": 0.885
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04659494323288926,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.00020476424341342447,
+            "Y_bond": 0.044552878490007
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9673061390571916,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9781033985497328,
+            "Y_bond": 0.9358808229287672
+          },
+          "reference": {
+            "Y_ovl": 0.94,
+            "Y_cr": 0.99,
+            "Y_df": 0.978,
+            "Y_bond": 0.91
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.027306139057191703,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.00010339854973284712,
+            "Y_bond": 0.025880822928767144
+          },
+          "case_pass": false
+        }
+      ]
+    },
+    "august_2025_modeling": {
+      "source": "git 331ac05 configs/config.yaml modeling sections; D2W block overridden to the 100 um explicitly stated for Fig. 17",
+      "overrides": {
+        "w2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.667,
+          "redundant_logical_pad_ratio": 0.3,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "BOW_DIFFERENCE_MEAN_um": 0.5,
+          "BOW_DIFFERENCE_STD_um": 0.1,
+          "k_mag": 0.1,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 400.0,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        },
+        "d2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.667,
+          "redundant_logical_pad_ratio": 0.3,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "BOW_DIFFERENCE_MEAN_um": 0.5,
+          "BOW_DIFFERENCE_STD_um": 0.1,
+          "k_mag": 0.1,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 100.0,
+          "SYSTEM_ROTATION_MEAN_rad": 1e-06,
+          "SYSTEM_ROTATION_STD_rad": 5e-07,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        }
+      },
+      "rmse": 0.026484999569005005,
+      "max_abs_error": 0.0707297295258128,
+      "passing_cases": 3,
+      "all_cases_pass": false,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.958731495843409,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8028300203093474
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.945,
+            "Y_df": 0.883,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.001268504156590966,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0012344426230209704,
+            "Y_bond": 0.0018300203093473133
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.958731823671984,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.8895817242759555,
+            "Y_bond": 0.8436354714377837
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.908,
+            "Y_bond": 0.86
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0007318236719839888,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.01841827572404453,
+            "Y_bond": 0.016364528562216263
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.958731823671984,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.8874183370235724,
+            "Y_bond": 0.8415838215727282
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.91,
+            "Y_bond": 0.864
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0007318236719839888,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.022581662976427608,
+            "Y_bond": 0.022416178427271838
+          },
+          "case_pass": false
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9595357364164399,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.8936074173712126,
+            "Y_bond": 0.8481638441779663
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.942,
+            "Y_bond": 0.893
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0015357364164398923,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.04839258262878732,
+            "Y_bond": 0.04483615582203371
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9373540817852442,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.8998611724940242,
+            "Y_bond": 0.7988005760935508
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.945,
+            "Y_df": 0.899,
+            "Y_bond": 0.783
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.017354081785244113,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0008611724940241761,
+            "Y_bond": 0.01580057609355079
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9377422041775496,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9033086281649307,
+            "Y_bond": 0.8378985853445482
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.93,
+            "Y_bond": 0.848
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.01774220417754957,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.02669137183506931,
+            "Y_bond": 0.01010141465545178
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9373882769606208,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.906022858621567,
+            "Y_bond": 0.8400990799799944
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.972,
+            "Y_bond": 0.885
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.01738827696062073,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.06597714137843302,
+            "Y_bond": 0.044900920020005564
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.953948488593566,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9072702704741872,
+            "Y_bond": 0.8561176302020848
+          },
+          "reference": {
+            "Y_ovl": 0.94,
+            "Y_cr": 0.99,
+            "Y_df": 0.978,
+            "Y_bond": 0.91
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.01394848859356601,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0707297295258128,
+            "Y_bond": 0.053882369797915275
+          },
+          "case_pass": false
+        }
+      ]
+    },
+    "inferred_logical_mapping": {
+      "source": "Sensitivity profile: W2W redundant_logical_pad_ratio=0.05 inferred from Fig. 17 Y_df; D2W=0.005 from git 331ac05. Not a recovered historical configuration.",
+      "overrides": {
+        "w2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 400.0,
+          "redundant_logical_pad_ratio": 0.05,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        },
+        "d2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 100.0,
+          "redundant_logical_pad_ratio": 0.005,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        }
+      },
+      "rmse": 0.020287565376605268,
+      "max_abs_error": 0.04660824145452125,
+      "passing_cases": 4,
+      "all_cases_pass": false,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9625135331198517,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8059970520347274
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.945,
+            "Y_df": 0.883,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0025135331198516964,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0012344426230209704,
+            "Y_bond": 0.004997052034727334
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9088188820564983,
+            "Y_bond": 0.8652789923772736
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.908,
+            "Y_bond": 0.86
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0008188820564982713,
+            "Y_bond": 0.005278992377273584
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9102689114065585,
+            "Y_bond": 0.8666595534106211
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.91,
+            "Y_bond": 0.864
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0002689114065584919,
+            "Y_bond": 0.002659553410621074
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9632611103898298,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.940098400637891,
+            "Y_bond": 0.8957548680475049
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.942,
+            "Y_bond": 0.893
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.005261110389829793,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0019015993621089855,
+            "Y_bond": 0.0027548680475049103
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9665936648617085,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.8998611724940261,
+            "Y_bond": 0.8237181566109714
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.945,
+            "Y_df": 0.899,
+            "Y_bond": 0.783
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04659366486170846,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0008611724940260634,
+            "Y_bond": 0.040718156610971334
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9666082414545213,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9306351590547841,
+            "Y_bond": 0.8898192276617298
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.93,
+            "Y_bond": 0.848
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04660824145452125,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0006351590547840624,
+            "Y_bond": 0.04181922766172985
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9665949432328893,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9698100082408286,
+            "Y_bond": 0.9272631835436793
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.972,
+            "Y_bond": 0.885
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.04659494323288926,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.002189991759171339,
+            "Y_bond": 0.042263183543679306
+          },
+          "case_pass": false
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9673061390571916,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9754507541020193,
+            "Y_bond": 0.9333426873161678
+          },
+          "reference": {
+            "Y_ovl": 0.94,
+            "Y_cr": 0.99,
+            "Y_df": 0.978,
+            "Y_bond": 0.91
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.027306139057191703,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0025492458979806676,
+            "Y_bond": 0.023342687316167732
+          },
+          "case_pass": false
+        }
+      ]
+    },
+    "paper_era_wafer_scaled": {
+      "source": "Sensitivity reconstruction: Table-I inputs and inferred logical mapping, with source-attested May-2025 D2W wafer/die scaling combined with current layout-aware boundaries. No recovered commit contains both features.",
+      "overrides": {
+        "w2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 400.0,
+          "redundant_logical_pad_ratio": 0.05,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        },
+        "d2w": {
+          "PAD_BOT_R_um_ratio": 0.5,
+          "PAD_TOP_R_um_ratio": 0.6,
+          "RANDOM_MISALIGNMENT_MEAN_um": 0.0,
+          "RANDOM_MISALIGNMENT_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_X_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_X_STD_um": 0.02,
+          "SYSTEM_TRANSLATION_Y_MEAN_um": 0.0,
+          "SYSTEM_TRANSLATION_Y_STD_um": 0.02,
+          "SYSTEM_ROTATION_MEAN_rad": 5e-08,
+          "SYSTEM_ROTATION_STD_rad": 1e-08,
+          "BOW_DIFFERENCE_MEAN_um": 0.5555555555555556,
+          "BOW_DIFFERENCE_STD_um": 1.1111111111111112,
+          "k_mag": 0.09,
+          "M_0": 0.0,
+          "num_samples": 200000,
+          "pad_block_dim_um": 100.0,
+          "redundant_logical_pad_ratio": 0.005,
+          "scale_systematic_distortion_from_wafer": true,
+          "WAF_R_um": 150000.0,
+          "PITCH_um": 0.3,
+          "D0": 1e-09,
+          "DIE_W_um": 10000.0,
+          "DIE_L_um": 10000.0
+        }
+      },
+      "rmse": 0.004750749714718483,
+      "max_abs_error": 0.012880269365197483,
+      "passing_cases": 8,
+      "all_cases_pass": true,
+      "cases": [
+        {
+          "side": "w2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9625135331198517,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.884234442623021,
+            "Y_bond": 0.8059970520347274
+          },
+          "reference": {
+            "Y_ovl": 0.96,
+            "Y_cr": 0.945,
+            "Y_df": 0.883,
+            "Y_bond": 0.801
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0025135331198516964,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0012344426230209704,
+            "Y_bond": 0.004997052034727334
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9088188820564983,
+            "Y_bond": 0.8652789923772736
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.908,
+            "Y_bond": 0.86
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0008188820564982713,
+            "Y_bond": 0.005278992377273584
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9625138378647804,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9102689114065585,
+            "Y_bond": 0.8666595534106211
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.91,
+            "Y_bond": 0.864
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.0045138378647804345,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0002689114065584919,
+            "Y_bond": 0.002659553410621074
+          },
+          "case_pass": true
+        },
+        {
+          "side": "w2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9632611103898298,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.940098400637891,
+            "Y_bond": 0.8957548680475049
+          },
+          "reference": {
+            "Y_ovl": 0.958,
+            "Y_cr": 0.99,
+            "Y_df": 0.942,
+            "Y_bond": 0.893
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.005261110389829793,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0019015993621089855,
+            "Y_bond": 0.0027548680475049103
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "full",
+          "actual": {
+            "Y_ovl": 0.9274614538194216,
+            "Y_cr": 0.9470200664246823,
+            "Y_df": 0.8998611724940261,
+            "Y_bond": 0.790370211227452
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.945,
+            "Y_df": 0.899,
+            "Y_bond": 0.783
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.007461453819421537,
+            "Y_cr": 0.002020066424682332,
+            "Y_df": 0.0008611724940260634,
+            "Y_bond": 0.0073702112274519616
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "sparse",
+          "actual": {
+            "Y_ovl": 0.9280724465588279,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9306351590547841,
+            "Y_bond": 0.8543447822961302
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.93,
+            "Y_bond": 0.848
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.008072446558827884,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0006351590547840624,
+            "Y_bond": 0.006344782296130225
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "peripheral",
+          "actual": {
+            "Y_ovl": 0.9275153374702716,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9698100082408286,
+            "Y_bond": 0.8897737678326083
+          },
+          "reference": {
+            "Y_ovl": 0.92,
+            "Y_cr": 0.99,
+            "Y_df": 0.972,
+            "Y_bond": 0.885
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.007515337470271555,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.002189991759171339,
+            "Y_bond": 0.0047737678326083
+          },
+          "case_pass": true
+        },
+        {
+          "side": "d2w",
+          "layout": "centralized",
+          "actual": {
+            "Y_ovl": 0.9528802693651974,
+            "Y_cr": 0.9891720496222407,
+            "Y_df": 0.9754507541020193,
+            "Y_bond": 0.9194233297916492
+          },
+          "reference": {
+            "Y_ovl": 0.94,
+            "Y_cr": 0.99,
+            "Y_df": 0.978,
+            "Y_bond": 0.91
+          },
+          "absolute_errors": {
+            "Y_ovl": 0.012880269365197483,
+            "Y_cr": 0.00082795037775929,
+            "Y_df": 0.0025492458979806676,
+            "Y_bond": 0.009423329791649171
+          },
+          "case_pass": true
+        }
+      ]
+    }
+  }
+}

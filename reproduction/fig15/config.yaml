@@ -1,0 +1,71 @@
+experiment:
+  figure: 15
+  side: w2w
+  pass_abs_tolerance: 0.015
+  expected_reproduction_pass: true
+  reference_source: "Approximate readback from published Fig. 15 raster bars"
+  component_names: [Y_ovl, Y_cr, Y_df, Y_bond]
+  pass_component_names: [Y_ovl, Y_cr, Y_df, Y_bond]
+  plot_profile: december_2025_modeling
+
+  configurations:
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 10,  paper: [1.000, 0.999, 0.980, 0.979]}
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 50,  paper: [1.000, 0.997, 0.929, 0.928]}
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 100, paper: [1.000, 0.995, 0.884, 0.879]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 10,  paper: [1.000, 1.000, 0.998, 0.997]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 50,  paper: [1.000, 0.997, 0.994, 0.991]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 100, paper: [1.000, 0.995, 0.988, 0.982]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 10,  paper: [0.960, 0.994, 0.980, 0.934]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 50,  paper: [0.960, 0.974, 0.930, 0.866]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 100, paper: [0.960, 0.946, 0.884, 0.801]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 10,  paper: [0.960, 0.994, 0.998, 0.952]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 50,  paper: [0.960, 0.974, 0.994, 0.925]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 100, paper: [0.960, 0.946, 0.988, 0.896]}
+
+  profiles:
+    paper_table_i:
+      eligible_for_pass: true
+      source: "Published Table I plus Fig. 12/15 full-critical 400 um grid"
+      overrides:
+        critical_pad_ratio: 1.0
+        redundant_pad_ratio: 0.0
+        redundant_logical_pad_ratio: 0.0
+        pad_block_dim_um: 400.0
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+        BOW_DIFFERENCE_STD_um: 1.1111111111111112
+        k_mag: 0.09
+        num_samples: 10000
+
+    december_2025_modeling:
+      eligible_for_pass: true
+      source: "Uploaded December-2025 W2W configs/config.yaml w2w_modeling"
+      overrides:
+        critical_pad_ratio: 1.0
+        redundant_pad_ratio: 0.0
+        redundant_logical_pad_ratio: 0.0
+        pad_block_dim_um: 400.0
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6666666666666666
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5
+        BOW_DIFFERENCE_STD_um: 0.1
+        k_mag: 0.1
+        M_0: 0.0
+        TOP_DISH_MEAN_nm: -10.0
+        TOP_DISH_STD_nm: 1.0
+        BOT_DISH_MEAN_nm: -10.0
+        BOT_DISH_STD_nm: 1.0
+        Adhesion_energy: 1.3
+        k_peel: 6.66e15
+        num_samples: 10000

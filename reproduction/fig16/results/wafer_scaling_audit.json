@@ -1,0 +1,430 @@
+{
+  "figure": 16,
+  "audit_only": true,
+  "source_commit": "6cc2408",
+  "source_expression": "rotation and magnification samples multiplied by WAF_R / sqrt((DIE_W/2)^2 + (DIE_L/2)^2)",
+  "wafer_radius_um": 150000.0,
+  "interpretation": "The scale cancels die-radius dependence of rotation/magnification displacement and is tested as historical provenance, not fitted input.",
+  "profiles": {
+    "paper_table_i": {
+      "current_overlay_rmse": 0.022254286158981586,
+      "current_overlay_max_abs_error": 0.045410513183662404,
+      "radial_scale_overlay_rmse": 0.012600596101381535,
+      "radial_scale_overlay_max_abs_error": 0.02793453367480736,
+      "rows": [
+        {
+          "index": 1,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 2,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 3,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 4,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 5,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 6,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 1.0,
+          "may_2025_radial_scale_Y_ovl": 0.9999999999999989,
+          "current_absolute_error": 0.0,
+          "radial_scale_absolute_error": 1.1102230246251565e-15
+        },
+        {
+          "index": 7,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.9680287936222192,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.01166850762221916,
+          "radial_scale_absolute_error": 0.02793453367480736
+        },
+        {
+          "index": 8,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9675234383737977,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.02780738637379776,
+          "radial_scale_absolute_error": 0.011290299674807325
+        },
+        {
+          "index": 9,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.9671399161836624,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.045410513183662404,
+          "radial_scale_absolute_error": 0.006696349325192696
+        },
+        {
+          "index": 10,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.9680287936222192,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.01166850762221916,
+          "radial_scale_absolute_error": 0.02793453367480736
+        },
+        {
+          "index": 11,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9675234383737977,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.02780738637379776,
+          "radial_scale_absolute_error": 0.011290299674807325
+        },
+        {
+          "index": 12,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.9671399161836624,
+          "may_2025_radial_scale_Y_ovl": 0.9284257523251926,
+          "current_absolute_error": 0.045410513183662404,
+          "radial_scale_absolute_error": 0.006696349325192696
+        }
+      ]
+    },
+    "december_2025_modeling": {
+      "current_overlay_rmse": 0.007132798400462583,
+      "current_overlay_max_abs_error": 0.01576382061141357,
+      "radial_scale_overlay_rmse": 0.6271260763928084,
+      "radial_scale_overlay_max_abs_error": 0.8728850014283643,
+      "rows": [
+        {
+          "index": 1,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999963,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 3.6637359812630166e-15,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 2,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999925,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 7.549516567451064e-15,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 3,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999866,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 1.3433698597964394e-14,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 4,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999963,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 3.6637359812630166e-15,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 5,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999925,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 7.549516567451064e-15,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 6,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999866,
+          "may_2025_radial_scale_Y_ovl": 0.7676380341191736,
+          "current_absolute_error": 1.3433698597964394e-14,
+          "radial_scale_absolute_error": 0.23236196588082636
+        },
+        {
+          "index": 7,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.957700502611743,
+          "may_2025_radial_scale_Y_ovl": 0.0834752845716357,
+          "current_absolute_error": 0.0013402166117429948,
+          "radial_scale_absolute_error": 0.8728850014283643
+        },
+        {
+          "index": 8,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9471300021815584,
+          "may_2025_radial_scale_Y_ovl": 0.08347528457163571,
+          "current_absolute_error": 0.0074139501815584374,
+          "radial_scale_absolute_error": 0.8562407674283643
+        },
+        {
+          "index": 9,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.9374932236114135,
+          "may_2025_radial_scale_Y_ovl": 0.0834752845716357,
+          "current_absolute_error": 0.01576382061141357,
+          "radial_scale_absolute_error": 0.8382541184283643
+        },
+        {
+          "index": 10,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.957700502611743,
+          "may_2025_radial_scale_Y_ovl": 0.0834752845716357,
+          "current_absolute_error": 0.0013402166117429948,
+          "radial_scale_absolute_error": 0.8728850014283643
+        },
+        {
+          "index": 11,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9471300021815584,
+          "may_2025_radial_scale_Y_ovl": 0.08347528457163571,
+          "current_absolute_error": 0.0074139501815584374,
+          "radial_scale_absolute_error": 0.8562407674283643
+        },
+        {
+          "index": 12,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.9374932236114135,
+          "may_2025_radial_scale_Y_ovl": 0.0834752845716357,
+          "current_absolute_error": 0.01576382061141357,
+          "radial_scale_absolute_error": 0.8382541184283643
+        }
+      ]
+    },
+    "december_2025_notebook": {
+      "current_overlay_rmse": 0.011805120519887774,
+      "current_overlay_max_abs_error": 0.02355477587631416,
+      "radial_scale_overlay_rmse": 0.9107226696649571,
+      "radial_scale_overlay_max_abs_error": 0.9556840115762946,
+      "rows": [
+        {
+          "index": 1,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999926,
+          "may_2025_radial_scale_Y_ovl": 0.11814056548360605,
+          "current_absolute_error": 7.438494264988549e-15,
+          "radial_scale_absolute_error": 0.8818594345163939
+        },
+        {
+          "index": 2,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999648,
+          "may_2025_radial_scale_Y_ovl": 0.11814056548360612,
+          "current_absolute_error": 3.519406988061746e-14,
+          "radial_scale_absolute_error": 0.8818594345163939
+        },
+        {
+          "index": 3,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999998851,
+          "may_2025_radial_scale_Y_ovl": 0.118140565483606,
+          "current_absolute_error": 1.149080830487037e-13,
+          "radial_scale_absolute_error": 0.881859434516394
+        },
+        {
+          "index": 4,
+          "pitch_um": 1.0,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999926,
+          "may_2025_radial_scale_Y_ovl": 0.11814056548360605,
+          "current_absolute_error": 7.438494264988549e-15,
+          "radial_scale_absolute_error": 0.8818594345163939
+        },
+        {
+          "index": 5,
+          "pitch_um": 1.0,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999999648,
+          "may_2025_radial_scale_Y_ovl": 0.11814056548360612,
+          "current_absolute_error": 3.519406988061746e-14,
+          "radial_scale_absolute_error": 0.8818594345163939
+        },
+        {
+          "index": 6,
+          "pitch_um": 1.0,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 1.0,
+          "current_no_radial_scale_Y_ovl": 0.9999999999998851,
+          "may_2025_radial_scale_Y_ovl": 0.118140565483606,
+          "current_absolute_error": 1.149080830487037e-13,
+          "radial_scale_absolute_error": 0.881859434516394
+        },
+        {
+          "index": 7,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.9499455044647244,
+          "may_2025_radial_scale_Y_ovl": 0.000676274423705442,
+          "current_absolute_error": 0.006414781535275638,
+          "radial_scale_absolute_error": 0.9556840115762946
+        },
+        {
+          "index": 8,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9242180413468307,
+          "may_2025_radial_scale_Y_ovl": 0.0006762744237054422,
+          "current_absolute_error": 0.015498010653169247,
+          "radial_scale_absolute_error": 0.9390397775762945
+        },
+        {
+          "index": 9,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.8981746271236858,
+          "may_2025_radial_scale_Y_ovl": 0.0006762744237054419,
+          "current_absolute_error": 0.02355477587631416,
+          "radial_scale_absolute_error": 0.9210531285762945
+        },
+        {
+          "index": 10,
+          "pitch_um": 0.3,
+          "area_mm2": 10.0,
+          "wafer_to_die_radial_scale": 67.08203932499369,
+          "paper_Y_ovl": 0.956360286,
+          "current_no_radial_scale_Y_ovl": 0.9499455044647244,
+          "may_2025_radial_scale_Y_ovl": 0.000676274423705442,
+          "current_absolute_error": 0.006414781535275638,
+          "radial_scale_absolute_error": 0.9556840115762946
+        },
+        {
+          "index": 11,
+          "pitch_um": 0.3,
+          "area_mm2": 50.0,
+          "wafer_to_die_radial_scale": 29.999999999999993,
+          "paper_Y_ovl": 0.939716052,
+          "current_no_radial_scale_Y_ovl": 0.9242180413468307,
+          "may_2025_radial_scale_Y_ovl": 0.0006762744237054422,
+          "current_absolute_error": 0.015498010653169247,
+          "radial_scale_absolute_error": 0.9390397775762945
+        },
+        {
+          "index": 12,
+          "pitch_um": 0.3,
+          "area_mm2": 100.0,
+          "wafer_to_die_radial_scale": 21.213203435596427,
+          "paper_Y_ovl": 0.921729403,
+          "current_no_radial_scale_Y_ovl": 0.8981746271236858,
+          "may_2025_radial_scale_Y_ovl": 0.0006762744237054419,
+          "current_absolute_error": 0.02355477587631416,
+          "radial_scale_absolute_error": 0.9210531285762945
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "D0_per_um2": 1e-09,
+  "Y_bond": 0.9432735806414013,
+  "Y_cr": 0.9945721317701602,
+  "Y_df": 0.9840040663784176,
+  "Y_ovl": 0.9638389920404827,
+  "bottom_pad_diameter_um": 0.15,
+  "case": "fig15_pkg_paper_table_i_c7",
+  "configured_critical_pad_ratio": 1.0,
+  "configured_redundant_logical_pad_ratio": 0.0,
+  "configured_redundant_pad_ratio": 0.0,
+  "die_area_mm2": 10.000000000000002,
+  "effective_pad_block_dim_um": 399.9,
+  "layout": "full",
+  "magnification_mean_ppm": 0.05,
+  "magnification_std_ppm": 0.010000000000000002,
+  "num_dies_on_wafer": 3985,
+  "pad_block_dim_um": 400.0,
+  "pad_block_grid_cols": 7,
+  "pad_block_grid_rows": 7,
+  "pad_block_size_pads": 1333,
+  "paired_block_fraction": 0.0,
+  "particle_density_per_cm2": 0.1,
+  "particle_yield_model": "Poisson exp(-Lambda); analytical run has no sampled particle count",
+  "physical_critical_ratio": 1.0,
+  "physical_dummy_ratio": 0.0,
+  "physical_redundant_ratio": 0.0,
+  "pitch_um": 0.3,
+  "replica_spacing_um": null,
+  "side": "w2w",
+  "top_pad_diameter_um": 0.09,
+  "figure": 15,
+  "historical_parameter_profile": "paper_table_i",
+  "historical_parameter_source": "Published Table I plus Fig. 12/15 full-critical 400 um grid",
+  "paper_reference": {
+    "Y_ovl": 0.96,
+    "Y_cr": 0.994,
+    "Y_df": 0.98,
+    "Y_bond": 0.934
+  },
+  "absolute_errors": {
+    "Y_ovl": 0.0038389920404827693,
+    "Y_cr": 0.0005721317701602446,
+    "Y_df": 0.004004066378417659,
+    "Y_bond": 0.009273580641401269
+  },
+  "component_pass": {
+    "Y_ovl": true,
+    "Y_cr": true,
+    "Y_df": true,
+    "Y_bond": true
+  },
+  "pass_component_names": [
+    "Y_ovl",
+    "Y_cr",
+    "Y_df",
+    "Y_bond"
+  ],
+  "overlay_adjusted_diagnostics": null,
+  "raw_all_components_pass": true,
+  "case_pass": true
+}

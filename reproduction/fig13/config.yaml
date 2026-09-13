@@ -1,0 +1,44 @@
+experiment:
+  points: 300
+  seed: 20260911
+  yield_window: [0.5, 1.0]
+
+  # Fixed values assigned by the December 2025 simulator_main.py sweeps.
+  common:
+    pitch_um: 1.0
+    die_w_um: 10000.0
+    die_l_um: 10000.0
+    pad_bottom_ratio: 0.5
+    pad_top_to_bottom_ratio: 0.6666666666666666
+    t_0_um: 0.1
+    roughness_sigma_m: 1.0e-9
+    bow_difference_mean_um: 0.5
+    system_translation_x_mean_um: 0.0
+    system_translation_y_mean_um: 0.0
+    top_dishing_mean_nm: -10.0
+    bottom_dishing_mean_nm: -10.0
+
+  w2w:
+    particle_density_per_um2:
+      spacing: logspace
+      start_exponent: -10.5
+      stop_exponent: -8.8
+    cu_dishing_std_nm: [0.97, 1.105]
+    rotation_mean_rad: [1.45e-6, 1.70e-6]
+    rotation_std_rad: 1.0e-8
+    model_samples: 768
+    effective_observations_per_point: 2000
+    wafer_position_stride: 1
+    paper_mse: 1.188e-4
+
+  d2w:
+    particle_density_per_um2:
+      spacing: linear
+      start: 3.1622776601683794e-11  # 10**(-10.5)
+      stop: 1.9952623149688828e-9    # 10**(-8.7)
+    cu_dishing_std_nm: [1.0, 1.105]
+    rotation_mean_rad: [1.30e-5, 1.43e-5]
+    rotation_std_rad: 5.0e-7
+    model_samples: 4096
+    effective_observations_per_point: 10000
+    paper_mse: 1.449e-5

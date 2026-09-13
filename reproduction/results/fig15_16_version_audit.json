@@ -1,0 +1,375 @@
+{
+  "scope": "all six fine-pitch cases; true rightmost three are density=0.01 cm^-2, pitch=0.3 um, area=10/50/100 mm^2",
+  "paper_plot_readback": {
+    "fig15_w2w": [
+      [
+        0.96,
+        0.994,
+        0.98,
+        0.934
+      ],
+      [
+        0.96,
+        0.974,
+        0.93,
+        0.866
+      ],
+      [
+        0.96,
+        0.946,
+        0.884,
+        0.801
+      ],
+      [
+        0.96,
+        0.994,
+        0.998,
+        0.952
+      ],
+      [
+        0.96,
+        0.974,
+        0.994,
+        0.925
+      ],
+      [
+        0.96,
+        0.946,
+        0.988,
+        0.896
+      ]
+    ],
+    "fig16_d2w": [
+      [
+        0.956,
+        0.994,
+        0.989,
+        0.939
+      ],
+      [
+        0.939,
+        0.974,
+        0.945,
+        0.864
+      ],
+      [
+        0.92,
+        0.946,
+        0.9,
+        0.784
+      ],
+      [
+        0.956,
+        0.994,
+        0.999,
+        0.95
+      ],
+      [
+        0.939,
+        0.974,
+        0.994,
+        0.909
+      ],
+      [
+        0.92,
+        0.946,
+        0.988,
+        0.864
+      ]
+    ]
+  },
+  "latest_with_table_I_parameters": {
+    "fig15_w2w": [
+      [
+        0.9641267392259285,
+        0.9945721317701602,
+        0.9840040663784176,
+        0.9435551881714725
+      ],
+      [
+        0.9640964142407907,
+        0.973149538435458,
+        0.9382466172617622,
+        0.8802723405094671
+      ],
+      [
+        0.9640212181868016,
+        0.9470200664246823,
+        0.884234442623021,
+        0.8072595690566123
+      ],
+      [
+        0.9641267392259285,
+        0.9945721317701602,
+        0.9983887744758017,
+        0.9573485925072625
+      ],
+      [
+        0.9640964142407907,
+        0.973149538435458,
+        0.9936460277663784,
+        0.9322486203601388
+      ],
+      [
+        0.9640212181868016,
+        0.9470200664246823,
+        0.9877720717167076,
+        0.9017839822827849
+      ]
+    ],
+    "fig16_d2w": [
+      [
+        0.9684288738340984,
+        0.9945721317701602,
+        0.9891564592252676,
+        0.952728170655002
+      ],
+      [
+        0.968419731788314,
+        0.973149538435458,
+        0.9489993640639847,
+        0.8943533377194584
+      ],
+      [
+        0.9684091916777042,
+        0.9470200664246823,
+        0.8998611724940261,
+        0.8252653242125341
+      ],
+      [
+        0.9684288738340984,
+        0.9945721317701602,
+        0.9989103180897083,
+        0.9621228180093994
+      ],
+      [
+        0.968419731788314,
+        0.973149538435458,
+        0.9947789621965041,
+        0.9374968190953992
+      ],
+      [
+        0.9684091916777042,
+        0.9470200664246823,
+        0.9895039935365253,
+        0.9074770186741654
+      ]
+    ]
+  },
+  "verified_500k_sample_effective_fit_all_six_fine_pitch_cases": {
+    "fig16_d2w": [
+      [
+        0.955579066434859,
+        0.9945721317701602,
+        0.9891564592252676,
+        0.9400866914224821
+      ],
+      [
+        0.9403130844708534,
+        0.973149538435458,
+        0.9489993640639847,
+        0.8683963347636684
+      ],
+      [
+        0.920069002744955,
+        0.9470200664246823,
+        0.8998611724940261,
+        0.7840704635741631
+      ],
+      [
+        0.955579066434859,
+        0.9945721317701602,
+        0.9989103180897083,
+        0.9493566838720645
+      ],
+      [
+        0.9403130844708534,
+        0.973149538435458,
+        0.9947789621965041,
+        0.910287653905325
+      ],
+      [
+        0.920069002744955,
+        0.9470200664246823,
+        0.9895039935365253,
+        0.8621783877732758
+      ]
+    ],
+    "max_abs_error_vs_plot_readback": 0.004396334763668408
+  },
+  "d2w_overlay_scenarios": {
+    "paper_table_I": [
+      0.9678452566382753,
+      0.967834551875286,
+      0.967822768255096
+    ],
+    "paper_table_I_with_may_to_september_2025_corner_aggregation": [
+      0.9674411121559969,
+      0.9669291876302356,
+      0.9665406834146337
+    ],
+    "pre_summer_d2w_modeling_config": [
+      0.963860831192626,
+      0.9618292282210533,
+      0.959270499433206
+    ],
+    "2025_config_with_may_to_september_2025_corner_aggregation": [
+      0.9574868579299313,
+      0.9469054214912286,
+      0.9372616992270489
+    ],
+    "pre_summer_calculator_notebook": [
+      0.9626542632133627,
+      0.9557251241252087,
+      0.9467307017871723
+    ],
+    "2025_notebook_with_may_to_september_2025_corner_aggregation": [
+      0.9497064099731404,
+      0.9239418212694542,
+      0.8978771333130833
+    ],
+    "paper_plot_readback": [
+      0.956,
+      0.939,
+      0.92
+    ],
+    "diagnostic_2025_legacy_single_parameter_fit": {
+      "rotation_mean_rad": 1.4560605092787923e-06,
+      "yield": [
+        0.954112295652426,
+        0.9373700751431495,
+        0.9213438853873501
+      ],
+      "warning": "Inverse fit only; bracketed by the 2025 config (1e-6) and later notebook (2e-6), but not committed in git."
+    },
+    "diagnostic_effective_input_fit": {
+      "mean_rad": 3.0331570605484688e-06,
+      "std_rad": 2.9831571076849285e-08,
+      "translation_std_um": 0.02138207133974166,
+      "yield": [
+        0.955409681410382,
+        0.9399843578587583,
+        0.9195888255172102
+      ],
+      "warning": "Inverse fit only; these values are not present in git history."
+    }
+  },
+  "w2w_overlay_scenarios": {
+    "paper_table_I_current_corner_aggregation": [
+      0.9631625954505619,
+      0.9631318453367463,
+      0.963055540138407
+    ],
+    "paper_table_I_with_may_to_september_2025_corner_aggregation": [
+      0.9628686468327771,
+      0.9624692705661765,
+      0.9621147304108747
+    ],
+    "paper_plot_readback": [
+      0.96,
+      0.96,
+      0.96
+    ]
+  },
+  "overlay_solver_check": {
+    "pre_summer_fsolve_limit_um": 0.07029941522931978,
+    "latest_brentq_limit_um": 0.07029941522928687,
+    "absolute_difference_um": 3.290423489232808e-14
+  },
+  "historical_evidence": {
+    "paper_pdf_created": "2026-01-20",
+    "paper_table_rotation_rad": [
+      5e-08,
+      1e-08
+    ],
+    "commit_b6f9651_config_rotation_rad": [
+      1e-06,
+      5e-07
+    ],
+    "commit_b6f9651_notebook_rotation_mean_rad": 2e-06,
+    "commit_b6f9651_notebook_top_ratio": 0.6666666666666666,
+    "commit_b6f9651_simulator_notebook_rotation_mean_rad": 1e-07,
+    "simulator_notebook_contains_fig15_16_case_study_save_paths": false,
+    "commit_6e80bc8_same_as_b6f9651": true,
+    "latest_config_rotation_rad": [
+      1e-06,
+      5e-07
+    ],
+    "latest_notebook_rotation_mean_rad": 2e-06,
+    "d2w_corner_aggregation_change": {
+      "commit": "742f4cc (2025-10-06)",
+      "before": "mean(random-yield(max(corner systematic misalignment per sample)))",
+      "after": "min(mean(random-yield(corner systematic misalignment)))",
+      "reason_in_commit": "Support D2W pad-level yield calculation"
+    },
+    "2025_w2w_critical_ratio_timeline": {
+      "331ac05_2025_08_28": 1.0,
+      "a5ae68a_2025_10_09": 1.0,
+      "b6f9651_2025_10_21": 0.9
+    },
+    "fine_pitch_bitmap_history": {
+      "stable_commits": "the per-side file loaded by calculator_main.ipynb is absent",
+      "transitional_commit_0a209f2": "root pad_bitmap/bitmap_collection.npy exists: 1000x1000 pads, 25x25 full-critical blocks, block size 40 pads",
+      "interpretation": "the surviving file is the 10 mm / 10 um pitch / 400 um-grid baseline, not a complete set of 0.3 um and 10/50/100 mm2 inputs"
+    }
+  },
+  "particle_count_model_audit": {
+    "paper_and_analytical_model": "Poisson yield, Y_df = exp(-Lambda), paper equations 23 and 29",
+    "pre_summer_simulator": "one fixed total followed by multinomial allocation across wafers/dies",
+    "latest_simulator": "independent Poisson count per wafer/die",
+    "change_commit": "badf7a9 (2026-08-28)",
+    "same_per_unit_mean": true,
+    "old_marginal_variance_relative_to_poisson": {
+      "w2w_NUM_WAFERS_10": 0.9,
+      "d2w_NUM_DIES_10000": 0.9999
+    },
+    "old_cross_unit_covariance": "negative; Cov(N_i,N_j)=-lambda/M",
+    "fig15_16_analytical_mean_impact": "none: these runs use exp(-Lambda), not simulator particle-count sampling",
+    "simulation_impact": "D2W marginal effect is negligible at M=10000; W2W variance and cross-wafer correlation can change materially at M=10"
+  },
+  "critical_pad_and_grid_audit": {
+    "paper_fig15_16": {
+      "critical_ratio": 1.0,
+      "redundant_ratio": 0.0,
+      "w2w_grid_um": 400.0,
+      "d2w_grid_um": 100.0
+    },
+    "this_reproduction": {
+      "critical_ratio": 1.0,
+      "redundant_ratio": 0.0,
+      "w2w_grid_um": 400.0,
+      "d2w_grid_um": 100.0,
+      "derived_block_sizes_in_pads": {
+        "w2w_pitch_1": 400,
+        "w2w_pitch_0p3": 1333,
+        "d2w_pitch_1": 100,
+        "d2w_pitch_0p3": 333
+      }
+    },
+    "pre_summer_modeling_config": {
+      "w2w": {
+        "critical_ratio": 0.9,
+        "redundant_ratio": 0.1,
+        "grid_um": 400.0
+      },
+      "d2w": {
+        "critical_ratio": 1.0,
+        "redundant_ratio": 0.0,
+        "grid_um": 400.0
+      }
+    },
+    "latest_default_modeling_config": {
+      "w2w": {
+        "critical_ratio": 0.2,
+        "redundant_ratio": 0.5,
+        "grid_um": 400.0
+      },
+      "d2w": {
+        "critical_ratio": 1.0,
+        "redundant_ratio": 0.0,
+        "grid_um": 400.0
+      }
+    },
+    "interpretation": "repository defaults are general demos and do not reproduce Fig.15/16 without paper overrides"
+  }
+}

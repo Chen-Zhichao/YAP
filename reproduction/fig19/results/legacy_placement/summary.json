@@ -1,0 +1,329 @@
+{
+  "figure": 19,
+  "scope": "paper-era placement evaluated by current defect calculators",
+  "die_size_um": [
+    10000,
+    10000
+  ],
+  "block_dim_um": 200,
+  "density_cm2": 1.0,
+  "layout_seed": 20260120,
+  "placement": "December-2025 randomized greedy algorithm including local/global-ID bug",
+  "profiles": [
+    {
+      "tag": "w2w_baseline10mm_r0p3",
+      "side": "w2w",
+      "die_size_um": 10000.0,
+      "die_size_status": "paper Table-I baseline",
+      "redundant_logical_pad_ratio": 0.3,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.35376347439796224,
+          "paper_reference": 0.388,
+          "absolute_error": 0.03423652560203777,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5108,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p3_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.43895302065515235,
+          "paper_reference": 0.5001,
+          "absolute_error": 0.06114697934484764,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5096,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p3_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.5804623986333773,
+          "paper_reference": 0.6408,
+          "absolute_error": 0.060337601366622695,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5332,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p3_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.7475430898653925,
+          "paper_reference": 0.778,
+          "absolute_error": 0.030456910134607496,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5108,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p3_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "w2w_baseline10mm_r0p5",
+      "side": "w2w",
+      "die_size_um": 10000.0,
+      "die_size_status": "paper Table-I baseline",
+      "redundant_logical_pad_ratio": 0.5,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.3244763767885731,
+          "paper_reference": 0.388,
+          "absolute_error": 0.0635236232114269,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7596,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p5_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.37910771693030326,
+          "paper_reference": 0.5001,
+          "absolute_error": 0.12099228306969673,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7652,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p5_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.49546069905797285,
+          "paper_reference": 0.6408,
+          "absolute_error": 0.14533930094202718,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7948,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p5_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.6821972951943605,
+          "paper_reference": 0.778,
+          "absolute_error": 0.09580270480563957,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7604,
+          "output": "results/legacy_placement/w2w_baseline10mm_r0p5_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "d2w_baseline10mm_r0p3",
+      "side": "d2w",
+      "die_size_um": 10000.0,
+      "die_size_status": "paper Table-I baseline",
+      "redundant_logical_pad_ratio": 0.3,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.8457868159092777,
+          "paper_reference": 0.88782,
+          "absolute_error": 0.04203318409072232,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5108,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p3_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.9114238934170584,
+          "paper_reference": 0.93712,
+          "absolute_error": 0.025696106582941525,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5096,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p3_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.997918772886579,
+          "paper_reference": 0.99756,
+          "absolute_error": 0.0003587728865790396,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5332,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p3_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.9997037079497154,
+          "paper_reference": 0.99879,
+          "absolute_error": 0.0009137079497154588,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5108,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p3_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "d2w_baseline10mm_r0p5",
+      "side": "d2w",
+      "die_size_um": 10000.0,
+      "die_size_status": "paper Table-I baseline",
+      "redundant_logical_pad_ratio": 0.5,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.7846607717033856,
+          "paper_reference": 0.88782,
+          "absolute_error": 0.1031592282966145,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7596,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p5_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.8726657607047877,
+          "paper_reference": 0.93712,
+          "absolute_error": 0.06445423929521221,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7652,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p5_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.9969741506208135,
+          "paper_reference": 0.99756,
+          "absolute_error": 0.0005858493791864872,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7948,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p5_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.9996731855048415,
+          "paper_reference": 0.99879,
+          "absolute_error": 0.000883185504841566,
+          "pair_count_fraction": 1.0,
+          "unique_paired_block_fraction": 0.7604,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p5_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "d2w_baseline10mm_r0p005",
+      "side": "d2w",
+      "die_size_um": 10000.0,
+      "die_size_status": "paper Table-I baseline",
+      "redundant_logical_pad_ratio": 0.005,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.9964441131660695,
+          "paper_reference": 0.88782,
+          "absolute_error": 0.10862411316606946,
+          "pair_count_fraction": 0.0104,
+          "unique_paired_block_fraction": 0.0104,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p005_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.9981885182012632,
+          "paper_reference": 0.93712,
+          "absolute_error": 0.061068518201263244,
+          "pair_count_fraction": 0.0104,
+          "unique_paired_block_fraction": 0.0104,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p005_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.9999354850951783,
+          "paper_reference": 0.99756,
+          "absolute_error": 0.0023754850951782647,
+          "pair_count_fraction": 0.0104,
+          "unique_paired_block_fraction": 0.0104,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p005_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.9999764079057263,
+          "paper_reference": 0.99879,
+          "absolute_error": 0.0011864079057263277,
+          "pair_count_fraction": 0.0104,
+          "unique_paired_block_fraction": 0.0104,
+          "output": "results/legacy_placement/d2w_baseline10mm_r0p005_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "fitted_no_redundancy_9p5mm_r0p3",
+      "side": "w2w",
+      "die_size_um": 9500.0,
+      "die_size_status": "diagnostic fit to current no-redundancy yield; not a paper input",
+      "redundant_logical_pad_ratio": 0.3,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.3943294329603188,
+          "paper_reference": 0.388,
+          "absolute_error": 0.006329432960318793,
+          "pair_count_fraction": 0.6002716161158895,
+          "unique_paired_block_fraction": 0.5074694431869624,
+          "output": "results/legacy_placement/fitted_no_redundancy_9p5mm_r0p3_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.48054604541655266,
+          "paper_reference": 0.5001,
+          "absolute_error": 0.01955395458344733,
+          "pair_count_fraction": 0.6002716161158895,
+          "unique_paired_block_fraction": 0.5115436849253056,
+          "output": "results/legacy_placement/fitted_no_redundancy_9p5mm_r0p3_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.6149327730939483,
+          "paper_reference": 0.6408,
+          "absolute_error": 0.0258672269060517,
+          "pair_count_fraction": 0.6002716161158895,
+          "unique_paired_block_fraction": 0.5273879583521955,
+          "output": "results/legacy_placement/fitted_no_redundancy_9p5mm_r0p3_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.7748896226032664,
+          "paper_reference": 0.778,
+          "absolute_error": 0.003110377396733588,
+          "pair_count_fraction": 0.6002716161158895,
+          "unique_paired_block_fraction": 0.5119963784517881,
+          "output": "results/legacy_placement/fitted_no_redundancy_9p5mm_r0p3_spacing800.json"
+        }
+      ]
+    },
+    {
+      "tag": "fitted_no_redundancy_6mm_r0p3",
+      "side": "d2w",
+      "die_size_um": 6000.0,
+      "die_size_status": "diagnostic fit to current no-redundancy yield; not a paper input",
+      "redundant_logical_pad_ratio": 0.3,
+      "cases": [
+        {
+          "spacing_um": 200.0,
+          "yield": 0.9762611053788882,
+          "paper_reference": 0.88782,
+          "absolute_error": 0.08844110537888816,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5111111111111111,
+          "output": "results/legacy_placement/fitted_no_redundancy_6mm_r0p3_spacing200.json"
+        },
+        {
+          "spacing_um": 400.0,
+          "yield": 0.9868344242337863,
+          "paper_reference": 0.93712,
+          "absolute_error": 0.04971442423378636,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5111111111111111,
+          "output": "results/legacy_placement/fitted_no_redundancy_6mm_r0p3_spacing400.json"
+        },
+        {
+          "spacing_um": 600.0,
+          "yield": 0.9992153046764585,
+          "paper_reference": 0.99756,
+          "absolute_error": 0.001655304676458469,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5166666666666667,
+          "output": "results/legacy_placement/fitted_no_redundancy_6mm_r0p3_spacing600.json"
+        },
+        {
+          "spacing_um": 800.0,
+          "yield": 0.9998048285278132,
+          "paper_reference": 0.99879,
+          "absolute_error": 0.0010148285278132052,
+          "pair_count_fraction": 0.6,
+          "unique_paired_block_fraction": 0.5122222222222222,
+          "output": "results/legacy_placement/fitted_no_redundancy_6mm_r0p3_spacing800.json"
+        }
+      ]
+    }
+  ]
+}

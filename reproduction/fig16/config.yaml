@@ -1,0 +1,97 @@
+experiment:
+  figure: 16
+  side: d2w
+  pass_abs_tolerance: 0.015
+  expected_reproduction_pass: false
+  reference_source: "Values transcribed from the user-provided original spreadsheet screenshot"
+  component_names: [Y_ovl, Y_cr, Y_df, Y_bond, Y_sys_1000mm2]
+  # The paper-era sample-wise worst-corner reduction is authoritative. Every
+  # plotted component, including overlay and its dependent yields, is gated.
+  pass_component_names: [Y_ovl, Y_cr, Y_df, Y_bond, Y_sys_1000mm2]
+  overlay_adjusted_diagnostics: false
+  plot_profile: december_2025_modeling
+
+  configurations:
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 10,  paper: [1.0, 0.999498565, 0.988704905, 0.988209134, 0.30541221]}
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 50,  paper: [1.0, 0.997463941, 0.946095276, 0.943695922, 0.313791785]}
+    - {density_cm2: 0.1,  pitch_um: 1.0, area_mm2: 100, paper: [1.0, 0.995113222, 0.899671028, 0.895274535, 0.330797576]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 10,  paper: [1.0, 0.999498565, 0.998864708, 0.998363843, 0.84895446]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 50,  paper: [1.0, 0.997463941, 0.994474124, 0.991952079, 0.850773279]}
+    - {density_cm2: 0.01, pitch_um: 1.0, area_mm2: 100, paper: [1.0, 0.995113222, 0.989483083, 0.984647698, 0.856660418]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 10,  paper: [0.956360286, 0.994443608, 0.988794613, 0.940389531, 0.002141798]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 50,  paper: [0.939716052, 0.972180276, 0.946200082, 0.864423236, 0.054266105]}
+    - {density_cm2: 0.1,  pitch_um: 0.3, area_mm2: 100, paper: [0.921729403, 0.947025222, 0.899861172, 0.785489710, 0.089413893]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 10,  paper: [0.956360286, 0.994443608, 0.998873771, 0.949975277, 0.005905141]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 50,  paper: [0.939716052, 0.972180276, 0.994485140, 0.908535181, 0.146836825]}
+    - {density_cm2: 0.01, pitch_um: 0.3, area_mm2: 100, paper: [0.921729403, 0.947025222, 0.989503994, 0.863739018, 0.231113537]}
+
+  profiles:
+    paper_table_i:
+      eligible_for_pass: true
+      source: "Published Table I plus Fig. 12/16 full-critical 100 um grid"
+      overrides:
+        critical_pad_ratio: 1.0
+        redundant_pad_ratio: 0.0
+        redundant_logical_pad_ratio: 0.0
+        pad_block_dim_um: 100.0
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+        BOW_DIFFERENCE_STD_um: 1.1111111111111112
+        k_mag: 0.09
+        num_samples: 10000
+
+    december_2025_modeling:
+      eligible_for_pass: true
+      source: "Uploaded December-2025 D2W configs/config.yaml d2w_modeling, including its 50 um grid"
+      overrides:
+        critical_pad_ratio: 1.0
+        redundant_pad_ratio: 0.0
+        redundant_logical_pad_ratio: 0.0
+        pad_block_dim_um: 50.0
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6666666666666666
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 1.0e-6
+        SYSTEM_ROTATION_STD_rad: 5.0e-7
+        BOW_DIFFERENCE_MEAN_um: 0.5
+        BOW_DIFFERENCE_STD_um: 0.1
+        k_mag: 0.1
+        M_0: 0.0
+        TOP_DISH_MEAN_nm: -10.0
+        TOP_DISH_STD_nm: 1.0
+        BOT_DISH_MEAN_nm: -10.0
+        BOT_DISH_STD_nm: 1.0
+        num_samples: 100000
+
+    december_2025_notebook:
+      eligible_for_pass: true
+      source: "Uploaded December-2025 D2W calculator notebook overrides on its 50 um modeling grid"
+      overrides:
+        critical_pad_ratio: 1.0
+        redundant_pad_ratio: 0.0
+        redundant_logical_pad_ratio: 0.0
+        pad_block_dim_um: 50.0
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6666666666666666
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 2.0e-6
+        SYSTEM_ROTATION_STD_rad: 5.0e-7
+        BOW_DIFFERENCE_MEAN_um: 0.5
+        BOW_DIFFERENCE_STD_um: 0.1
+        k_mag: 0.1
+        M_0: 0.0
+        TOP_DISH_MEAN_nm: -10.0
+        TOP_DISH_STD_nm: 1.0
+        BOT_DISH_MEAN_nm: -10.0
+        BOT_DISH_STD_nm: 1.0
+        num_samples: 100000

@@ -1,0 +1,436 @@
+{
+  "audit_scope": "December-2025 random main-block and dedicated replica-block placement",
+  "samples_per_case": 1000,
+  "paper_constraints": {
+    "die_size_um": [
+      10000,
+      10000
+    ],
+    "die_size_basis": "Table I baseline; Fig. 19 does not state an override",
+    "block_dim_um": [
+      200,
+      200
+    ],
+    "physical_redundant_ratio": 1.0,
+    "main_replica_mapping": "1:1",
+    "target_main_fraction": 0.5,
+    "target_replica_fraction": 0.5
+  },
+  "historical_algorithm": {
+    "main_placement": "np.random.permutation of assign_pad_blocks('center') redundant block order",
+    "replica_search_band_blocks": "distance - 0.1 < Euclidean distance <= distance + 0.5",
+    "replica_choice": "nearest candidate; KDTree-local index breaks equal-distance ties",
+    "identified_bug": "availability is tested with the KDTree-local neighbor index, but the selected copy and used-set updates use the global block ID"
+  },
+  "interpretation": "The historical implementation can report the requested N/2 pairs while reusing physical blocks. Correcting only the local/global-ID test makes the randomized greedy algorithm generally unable to form a complete non-overlapping N/2 pairing. A maximum-matching algorithm fixes completeness but is not placement-equivalent to the paper-era code.",
+  "cases": [
+    {
+      "die_size_um": 10000,
+      "block_dim_um": 200,
+      "grid_shape": [
+        50,
+        50
+      ],
+      "spacing_um": 200,
+      "distance_blocks": 1,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 1250,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 1250,
+          "mean": 1250.0,
+          "maximum": 1250
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 1879,
+          "mean": 1918.618,
+          "maximum": 1963
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 537,
+          "mean": 581.382,
+          "maximum": 621
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 1250,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 1165,
+          "mean": 1178.685,
+          "maximum": 1193
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 2330,
+          "mean": 2357.37,
+          "maximum": 2386
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 10000,
+      "block_dim_um": 200,
+      "grid_shape": [
+        50,
+        50
+      ],
+      "spacing_um": 400,
+      "distance_blocks": 2,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 1250,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 1250,
+          "mean": 1250.0,
+          "maximum": 1250
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 1890,
+          "mean": 1922.283,
+          "maximum": 1958
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 542,
+          "mean": 577.717,
+          "maximum": 610
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 1250,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 1184,
+          "mean": 1195.7,
+          "maximum": 1208
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 2368,
+          "mean": 2391.4,
+          "maximum": 2416
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 10000,
+      "block_dim_um": 200,
+      "grid_shape": [
+        50,
+        50
+      ],
+      "spacing_um": 600,
+      "distance_blocks": 3,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 1250,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 1250,
+          "mean": 1250.0,
+          "maximum": 1250
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 1944,
+          "mean": 1977.191,
+          "maximum": 2007
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 493,
+          "mean": 522.809,
+          "maximum": 556
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 1250,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 1180,
+          "mean": 1195.13,
+          "maximum": 1210
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 2360,
+          "mean": 2390.26,
+          "maximum": 2420
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 10000,
+      "block_dim_um": 200,
+      "grid_shape": [
+        50,
+        50
+      ],
+      "spacing_um": 800,
+      "distance_blocks": 4,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 1250,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 1250,
+          "mean": 1250.0,
+          "maximum": 1250
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 1893,
+          "mean": 1924.575,
+          "maximum": 1962
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 538,
+          "mean": 575.425,
+          "maximum": 607
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 1250,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 1206,
+          "mean": 1216.344,
+          "maximum": 1227
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 2412,
+          "mean": 2432.688,
+          "maximum": 2454
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 3200,
+      "block_dim_um": 200,
+      "grid_shape": [
+        16,
+        16
+      ],
+      "spacing_um": 200,
+      "distance_blocks": 1,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 128,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 128,
+          "mean": 128.0,
+          "maximum": 128
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 189,
+          "mean": 200.298,
+          "maximum": 212
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 44,
+          "mean": 55.702,
+          "maximum": 67
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 128,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 115,
+          "mean": 120.508,
+          "maximum": 125
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 230,
+          "mean": 241.016,
+          "maximum": 250
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 3200,
+      "block_dim_um": 200,
+      "grid_shape": [
+        16,
+        16
+      ],
+      "spacing_um": 400,
+      "distance_blocks": 2,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 128,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 128,
+          "mean": 128.0,
+          "maximum": 128
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 190,
+          "mean": 200.325,
+          "maximum": 210
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 46,
+          "mean": 55.675,
+          "maximum": 66
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 128,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 117,
+          "mean": 121.658,
+          "maximum": 126
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 234,
+          "mean": 243.316,
+          "maximum": 252
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 3200,
+      "block_dim_um": 200,
+      "grid_shape": [
+        16,
+        16
+      ],
+      "spacing_um": 600,
+      "distance_blocks": 3,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 128,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 128,
+          "mean": 128.0,
+          "maximum": 128
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 192,
+          "mean": 203.382,
+          "maximum": 215
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 41,
+          "mean": 52.618,
+          "maximum": 64
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 128,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 116,
+          "mean": 121.201,
+          "maximum": 126
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 232,
+          "mean": 242.402,
+          "maximum": 252
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    },
+    {
+      "die_size_um": 3200,
+      "block_dim_um": 200,
+      "grid_shape": [
+        16,
+        16
+      ],
+      "spacing_um": 800,
+      "distance_blocks": 4,
+      "block_order_is_natural_id_order": false,
+      "historical_local_global_id_mixup": {
+        "target_pair_count": 128,
+        "completion_count": 1000,
+        "completion_fraction": 1.0,
+        "pair_count": {
+          "minimum": 128,
+          "mean": 128.0,
+          "maximum": 128
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 191,
+          "mean": 202.306,
+          "maximum": 217
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 39,
+          "mean": 53.694,
+          "maximum": 65
+        }
+      },
+      "same_greedy_algorithm_with_id_test_corrected": {
+        "target_pair_count": 128,
+        "completion_count": 0,
+        "completion_fraction": 0.0,
+        "pair_count": {
+          "minimum": 120,
+          "mean": 123.846,
+          "maximum": 127
+        },
+        "unique_physical_blocks_used": {
+          "minimum": 240,
+          "mean": 247.692,
+          "maximum": 254
+        },
+        "duplicate_physical_block_uses": {
+          "minimum": 0,
+          "mean": 0.0,
+          "maximum": 0
+        }
+      }
+    }
+  ]
+}

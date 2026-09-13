@@ -1,0 +1,23 @@
+# Diagnostic compatibility overrides for the true rightmost three bars of Fig. 16
+# (density 0.01 cm^-2, pitch 0.3 um). The overlay fit also applies to columns
+# 7-9 because particle density does not enter the overlay calculation.
+#
+# These values were inverse-fitted to the published raster bars after the
+# paper-era and pre-summer configs/notebooks failed to reproduce all three
+# D2W overlay yields.  They are NOT claimed to be author-source parameters.
+# Keep the Table-I baseline in paper_d2w.yaml for provenance-correct runs.
+
+fig16_right3_effective_fit:
+  PITCH_um: 0.3
+  D0: 1.0e-10
+  PAD_BOT_R_um_ratio: 0.5
+  PAD_TOP_R_um_ratio: 0.6
+  RANDOM_MISALIGNMENT_MEAN_um: 0.0
+  RANDOM_MISALIGNMENT_STD_um: 0.02
+  SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+  SYSTEM_TRANSLATION_X_STD_um: 0.02138207133974166
+  SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+  SYSTEM_TRANSLATION_Y_STD_um: 0.02138207133974166
+  SYSTEM_ROTATION_MEAN_rad: 3.0331570605484688e-6
+  SYSTEM_ROTATION_STD_rad: 2.9831571076849285e-8
+  num_samples: 500000

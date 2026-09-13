@@ -1,0 +1,80 @@
+# YAP+ paper baseline for die-to-wafer hybrid bonding.
+# Source: Table I of YAP+: Pad-Layout-Aware Yield Modeling and Simulation
+# for Hybrid Bonding (j88.pdf). Particle density uses 1/cm^2 = 1e-8/um^2.
+
+paper_d2w_common: &paper_d2w_common
+  MODE: "D2W_Hybrid_Bonding"
+  DEBUG: false
+  USE_RANDOM_SEED: true
+  RANDOM_SEED: 20260120
+  pad_layout_pattern: "center"
+  PITCH_um: 1.0
+  DIE_W_um: 10000.0
+  DIE_L_um: 10000.0
+  PAD_BOT_R_um_ratio: 0.5
+  PAD_TOP_R_um_ratio: 0.6
+  VOID_SHAPE: "circle"
+  dice_width: 1000.0
+  pad_yield_flag: false
+  pad_yield_map_sub_factor: 25
+  redundant_flag: true
+  critical_pad_ratio: 1.0
+  redundant_pad_ratio: 0.0
+  redundant_survival_ratio: 0.75
+  # Table I specifies a 100 x 100 um D2W modeling grid.
+  pad_block_dim_um: 100.0
+  redundant_logical_pad_ratio: 0.0
+  redundant_logical_pad_copy: 2
+  redundant_logical_pad_dist: 800.0
+  CONTACT_AREA_CONSTRAINT: 0.5
+  CRITICAL_DIST_CONSTRAINT: 0.5
+  RANDOM_MISALIGNMENT_MEAN_um: 0.0
+  RANDOM_MISALIGNMENT_STD_um: 0.02
+  SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+  SYSTEM_TRANSLATION_X_STD_um: 0.02
+  SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+  SYSTEM_TRANSLATION_Y_STD_um: 0.02
+  SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+  SYSTEM_ROTATION_STD_rad: 1.0e-8
+  BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+  BOW_DIFFERENCE_STD_um: 1.1111111111111112
+  k_mag: 0.09
+  M_0: 0.0
+  D0: 1.0e-9
+  z: 3.0
+  t_0: 0.1
+  k_r: 1.8e-4
+  k_r0: 230.0
+  k_L: 6.2e-2
+  k_n: 9.0e-5
+  k_S: 2.7
+  TOP_DISH_MEAN_nm: -10.0
+  TOP_DISH_STD_nm: 1.0
+  BOT_DISH_MEAN_nm: -10.0
+  BOT_DISH_STD_nm: 1.0
+  k_et: 0.053
+  k_eb: 0.053
+  T_R: 25.0
+  T_anl: 300.0
+  Asperity_R_m: 2.0e-6
+  Roughness_sigma_m: 1.0e-9
+  eta_s: 4.0e13
+  Roughness_constant: 0.07
+  Adhesion_energy: 1.2
+  Young_modulus_Pa: 7.3e10
+  Dielectric_thickness: 1.5e-6
+  DISH_0_m: 7.5e-8
+  k_peel: 6.55e15
+
+d2w_modeling:
+  <<: *paper_d2w_common
+  MODE: "D2W_Hybrid_Bonding_Modeling"
+  reuse_dilation: false
+  num_samples: 10000
+
+d2w_simulation:
+  <<: *paper_d2w_common
+  MODE: "D2W_Hybrid_Bonding_Simulation"
+  NUM_DIES: 10000
+  simulation_times: 1
+  approximate_set: 1

@@ -1,0 +1,144 @@
+experiment:
+  figure: 17
+  pitch_um: 0.3
+  density_cm2: 0.1
+  die_width_um: 10000.0
+  die_length_um: 10000.0
+  layouts: [full, sparse, peripheral, centralized]
+  components: [Y_ovl, Y_cr, Y_df, Y_bond]
+  paper_reference_source: "Fig. 17c, digitized from YAP_plus_paper.pdf (plot resolution is about 0.005)"
+  pass_abs_tolerance: 0.02
+  paper:
+    w2w:
+      full:        [0.960, 0.945, 0.883, 0.801]
+      sparse:      [0.958, 0.990, 0.908, 0.860]
+      peripheral:  [0.958, 0.990, 0.910, 0.864]
+      centralized: [0.958, 0.990, 0.942, 0.893]
+    d2w:
+      full:        [0.920, 0.945, 0.899, 0.783]
+      sparse:      [0.920, 0.990, 0.930, 0.848]
+      peripheral:  [0.920, 0.990, 0.972, 0.885]
+      centralized: [0.940, 0.990, 0.978, 0.910]
+
+  # The physical ratios are stated in the paper.  The paper does not state
+  # redundant_logical_pad_ratio, so it is audited as a separate profile input.
+  profiles:
+    paper_table_i:
+      source: "YAP+ Table I plus Fig. 17 text"
+      plot: true
+      common:
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6
+        redundant_logical_pad_ratio: 0.0
+        RANDOM_MISALIGNMENT_MEAN_um: 0.0
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+        BOW_DIFFERENCE_STD_um: 1.1111111111111112
+        k_mag: 0.09
+        M_0: 0.0
+        num_samples: 200000
+      w2w:
+        pad_block_dim_um: 400.0
+      d2w:
+        pad_block_dim_um: 100.0
+
+    august_2025_modeling:
+      source: "git 331ac05 configs/config.yaml modeling sections; D2W block overridden to the 100 um explicitly stated for Fig. 17"
+      plot: false
+      common:
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.667
+        redundant_logical_pad_ratio: 0.3
+        RANDOM_MISALIGNMENT_MEAN_um: 0.0
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        BOW_DIFFERENCE_MEAN_um: 0.5
+        BOW_DIFFERENCE_STD_um: 0.1
+        k_mag: 0.1
+        M_0: 0.0
+        num_samples: 200000
+      w2w:
+        pad_block_dim_um: 400.0
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+      d2w:
+        pad_block_dim_um: 100.0
+        SYSTEM_ROTATION_MEAN_rad: 1.0e-6
+        SYSTEM_ROTATION_STD_rad: 5.0e-7
+
+    inferred_logical_mapping:
+      source: "Sensitivity profile: W2W redundant_logical_pad_ratio=0.05 inferred from Fig. 17 Y_df; D2W=0.005 from git 331ac05. Not a recovered historical configuration."
+      plot: true
+      common:
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6
+        RANDOM_MISALIGNMENT_MEAN_um: 0.0
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+        BOW_DIFFERENCE_STD_um: 1.1111111111111112
+        k_mag: 0.09
+        M_0: 0.0
+        num_samples: 200000
+      w2w:
+        pad_block_dim_um: 400.0
+        redundant_logical_pad_ratio: 0.05
+      d2w:
+        pad_block_dim_um: 100.0
+        redundant_logical_pad_ratio: 0.005
+
+    paper_era_wafer_scaled:
+      source: "Sensitivity reconstruction: Table-I inputs and inferred logical mapping, with source-attested May-2025 D2W wafer/die scaling combined with current layout-aware boundaries. No recovered commit contains both features."
+      plot: true
+      common:
+        PAD_BOT_R_um_ratio: 0.5
+        PAD_TOP_R_um_ratio: 0.6
+        RANDOM_MISALIGNMENT_MEAN_um: 0.0
+        RANDOM_MISALIGNMENT_STD_um: 0.02
+        SYSTEM_TRANSLATION_X_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_X_STD_um: 0.02
+        SYSTEM_TRANSLATION_Y_MEAN_um: 0.0
+        SYSTEM_TRANSLATION_Y_STD_um: 0.02
+        SYSTEM_ROTATION_MEAN_rad: 5.0e-8
+        SYSTEM_ROTATION_STD_rad: 1.0e-8
+        BOW_DIFFERENCE_MEAN_um: 0.5555555555555556
+        BOW_DIFFERENCE_STD_um: 1.1111111111111112
+        k_mag: 0.09
+        M_0: 0.0
+        num_samples: 200000
+      w2w:
+        pad_block_dim_um: 400.0
+        redundant_logical_pad_ratio: 0.05
+      d2w:
+        pad_block_dim_um: 100.0
+        redundant_logical_pad_ratio: 0.005
+        scale_systematic_distortion_from_wafer: true
+        WAF_R_um: 150000.0
+
+  legacy_overlay_profiles:
+    may_2025_git_exact:
+      source_commit: 6cc2408
+      description: "pre-layout-aware D2W code: max corner per sample; D2W also scales rotation/magnification by wafer-radius/die-half-diagonal"
+      parameter_profile: paper_table_i
+      d2w_radial_scale: true
+      use_critical_boundaries: false
+    august_2025_git_exact:
+      source_commit: 331ac05
+      description: "layout-aware boundaries and max corner per sample; no D2W radial scale"
+      parameter_profile: august_2025_modeling
+      d2w_radial_scale: false
+      use_critical_boundaries: true

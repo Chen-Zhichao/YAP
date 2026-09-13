@@ -1,0 +1,62 @@
+{
+  "D0_per_um2": 1e-09,
+  "Y_bond": 0.9359317511890295,
+  "Y_cr": 0.9975534209117454,
+  "Y_df": 0.9382271982322566,
+  "Y_ovl": 0.9999999999999996,
+  "bottom_pad_diameter_um": 0.5,
+  "case": "fig15_pkg_december_2025_modeling_c2",
+  "configured_critical_pad_ratio": 1.0,
+  "configured_redundant_logical_pad_ratio": 0.0,
+  "configured_redundant_pad_ratio": 0.0,
+  "die_area_mm2": 50.00000000000001,
+  "effective_pad_block_dim_um": 400.0,
+  "layout": "full",
+  "magnification_mean_ppm": 0.05,
+  "magnification_std_ppm": 0.00010000000000000005,
+  "num_dies_on_wafer": 1020,
+  "pad_block_dim_um": 400.0,
+  "pad_block_grid_cols": 17,
+  "pad_block_grid_rows": 17,
+  "pad_block_size_pads": 400,
+  "paired_block_fraction": 0.0,
+  "particle_density_per_cm2": 0.1,
+  "particle_yield_model": "Poisson exp(-Lambda); analytical run has no sampled particle count",
+  "physical_critical_ratio": 1.0,
+  "physical_dummy_ratio": 0.0,
+  "physical_redundant_ratio": 0.0,
+  "pitch_um": 1.0,
+  "replica_spacing_um": null,
+  "side": "w2w",
+  "top_pad_diameter_um": 0.3333333333333333,
+  "figure": 15,
+  "historical_parameter_profile": "december_2025_modeling",
+  "historical_parameter_source": "Uploaded December-2025 W2W configs/config.yaml w2w_modeling",
+  "paper_reference": {
+    "Y_ovl": 1.0,
+    "Y_cr": 0.997,
+    "Y_df": 0.929,
+    "Y_bond": 0.928
+  },
+  "absolute_errors": {
+    "Y_ovl": 4.440892098500626e-16,
+    "Y_cr": 0.0005534209117453726,
+    "Y_df": 0.009227198232256595,
+    "Y_bond": 0.007931751189029446
+  },
+  "component_pass": {
+    "Y_ovl": true,
+    "Y_cr": true,
+    "Y_df": true,
+    "Y_bond": true
+  },
+  "pass_component_names": [
+    "Y_ovl",
+    "Y_cr",
+    "Y_df",
+    "Y_bond"
+  ],
+  "overlay_adjusted_diagnostics": null,
+  "raw_all_components_pass": true,
+  "case_pass": true
+}
