@@ -26,13 +26,11 @@ and 100 mm²). The three rightmost columns are included.
 
 ## Rerun
 
-Run from the repository root:
+Follow the environment setup in `reproduction/README.md`, then run from the
+repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-fig15 \
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig15/run.sh --jobs 4
+python reproduction/run_all.py --figures 15 --jobs 4
 ```
 
 The workflow evaluates both qualifying historical profiles, generates 24

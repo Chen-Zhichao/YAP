@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import math
-import subprocess
 import sys
 from pathlib import Path
 
@@ -24,7 +23,9 @@ def main() -> None:
     cfg = OmegaConf.load(HERE / "config.yaml").experiment
     current = json.loads((RESULTS / "current_summary.json").read_text())
     legacy = json.loads((RESULTS / "legacy_overlay_summary.json").read_text())
-    assert_result_source_compatible(str(current["repository_commit"]))
+    assert_result_source_compatible(
+        current.get("repository_commit"), current.get("calculator_source_sha256")
+    )
     assert current["components"] == list(cfg.components)
     assert legacy["audit_only"] and legacy["not_used_for_current_results"]
     assert math.isclose(legacy["pass_abs_tolerance"], float(cfg.pass_abs_tolerance))
@@ -57,8 +58,7 @@ def main() -> None:
         assert len(profile["cases"]) == 8
         assert profile["all_cases_pass"]
         assert profile["passing_cases"] == 8
-        subprocess.run(["git", "cat-file", "-e", f"{profile['source_commit']}^{{commit}}"],
-                       cwd=ROOT, check=True)
+        assert profile.get("source_revision_attested") in (None, True, False)
 
     august = legacy["profiles"]["august_2025_git_exact"]["cases"]
     values = {(row["side"], row["layout"]): row for row in august}

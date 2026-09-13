@@ -1,6 +1,7 @@
 {
   "figure": 17,
   "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "calculator_source_sha256": "f15d828d7217dd973a706f5b21a84333c7e6cd1308f6165fcadbdb6920394c0a",
   "paper_reference_source": "Fig. 17c, digitized from YAP_plus_paper.pdf (plot resolution is about 0.005)",
   "components": [
     "Y_ovl",

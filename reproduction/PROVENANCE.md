@@ -119,8 +119,9 @@ new validation deliberately exposes that stale-state problem.
 ## Fig. 17 overlay compatibility audit
 
 `fig17/legacy_overlay.py` reconstructs the scalar overlay implementations from
-commits `6cc2408` (May 2025) and `331ac05` (August 2025), and asserts the
-defining source expressions with `git show` before evaluating them. Both old
+commits `6cc2408` (May 2025) and `331ac05` (August 2025), and, when those
+revisions are available, attests the defining source expressions with
+`git show`. Both old
 implementations first take the maximum systematic corner displacement for each
 Monte Carlo sample and then apply one scalar random-error CDF. Local commit
 `cc35068` now uses that same order. With identical August-2025 parameters,
@@ -149,7 +150,7 @@ would erase the die-area trend required by Fig.16.
 
 ## Fig. 19 recovered data audit
 
-The user-uploaded `YAPlus_1204/replica_distance.zip` has SHA-256
+The user-uploaded `replica_distance.zip` has SHA-256
 `50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b`.
 Its MATLAB script `w2w_replica_dist_20_40_60_80.m` contains exact numeric arrays
 for all 24 published Fig. 19 bars. The archive also contains eight NPY

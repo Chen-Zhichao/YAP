@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -173,11 +172,10 @@ def main() -> None:
     result = {
         "figure": 13,
         "bonding_type": args.side.upper(),
-        "repository_commit": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
-        ).strip(),
+        "repository_commit": model_worker.repository_revision(),
+        "calculator_source_sha256": model_worker.calculator_source_sha256(),
         "method": "December-2025 legacy sweep vectors evaluated by current yap+ analytical calculators plus deterministic Bernoulli interaction experiment",
-        "config": str(args.config.resolve()),
+        "config": os.path.relpath(args.config.resolve(), ROOT),
         "requested_points": points,
         "output_points": len(rows),
         "points_in_yield_window": len(in_range),

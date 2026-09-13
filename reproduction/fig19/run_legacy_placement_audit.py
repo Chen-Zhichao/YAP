@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -49,7 +50,10 @@ def main() -> None:
     RESULTS.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env.setdefault("MPLCONFIGDIR", "/tmp/mpl-yap-fig19-legacy")
+    env.setdefault("MPLBACKEND", "Agg")
+    env.setdefault(
+        "MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "mpl-yap-fig19-legacy")
+    )
 
     jobs = []
     profiles = []

@@ -114,26 +114,29 @@ not been recovered.
 
 ## Rerun
 
-Run from the repository root:
+Follow the environment setup in `reproduction/README.md`, then run from the
+repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-fig17 \
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig17/run.sh --jobs 4
+python reproduction/run_all.py --figures 17 --jobs 4
 ```
+
+The historical-overlay compatibility calculation is self-contained. If the
+named historical Git revisions are available, the script additionally attests
+its embedded equations against them; a shallow clone or source archive still
+reproduces the numerical result.
 
 ## Files
 
 - `config.yaml`: eight paper readbacks, four current parameter profiles, and
   two historical overlay profiles.
 - `run_cases.py`: calls the current `model_worker.py` and current calculators.
-- `legacy_overlay.py`: audits historical algorithm compatibility and uses
-  `git show` to verify the formulas in history.
+- `legacy_overlay.py`: audits historical algorithm compatibility and optionally
+  uses `git show` to attest the embedded formulas when history is available.
 - `make_plot.py`: generates the current breakdown and historical
   parameter/scaling audit plots, with a yield-axis maximum of 1.00.
-- `verify.py`: checks case coverage, physical ratios, yield products, commit,
-  historical formulas, and the D2W layout trend.
+- `verify.py`: checks case coverage, physical ratios, yield products, calculator
+  fingerprint, historical formulas, and the D2W layout trend.
 - `results/current_summary.json`: current-code per-case results and errors.
 - `results/legacy_overlay_summary.json`: historical-formula results and errors.
 - `results/fig17_all.png` and `.pdf`: complete current W2W/D2W result.

@@ -31,7 +31,9 @@ def main() -> None:
     if len(summary["profiles"]) == len(config.profiles):
         assert summary["plot_profile"] == str(config.plot_profile)
     assert math.isclose(summary["pass_abs_tolerance"], float(config.pass_abs_tolerance))
-    assert_result_source_compatible(str(summary["repository_commit"]))
+    assert_result_source_compatible(
+        summary.get("repository_commit"), summary.get("calculator_source_sha256")
+    )
     eligible_pass = []
     for profile_name, profile in summary["profiles"].items():
         assert len(profile["cases"]) == 12

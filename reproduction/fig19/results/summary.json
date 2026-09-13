@@ -1,6 +1,7 @@
 {
   "figure": 19,
   "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "calculator_source_sha256": "f15d828d7217dd973a706f5b21a84333c7e6cd1308f6165fcadbdb6920394c0a",
   "reference_source": "Exact numeric arrays recovered from the user-uploaded December-2025 replica_distance/w2w_replica_dist_20_40_60_80.m; the rendered bars agree with published Fig. 19.",
   "result_component": "Y_df",
   "pass_abs_tolerance": 0.03,
@@ -20,9 +21,9 @@
   "historical_20to1_audit": {
     "source": "User-uploaded December-2025 YAP+ archive",
     "source_files": [
-      "YAPlus_1204/extracted/W2W/configs/config.yaml",
-      "YAPlus_1204/extracted/D2W/configs/config.yaml",
-      "YAPlus_1204/extracted/{W2W,D2W}/pad_bitmap_generation.py"
+      "replica_distance.zip::W2W/configs/config.yaml",
+      "replica_distance.zip::D2W/configs/config.yaml",
+      "replica_distance.zip::{W2W,D2W}/pad_bitmap_generation.py"
     ],
     "old_generator_fields": [
       "multi2one_flag",
@@ -38,7 +39,7 @@
     "current_grid_surrogate": "At 1 um pitch, the old 2-pitch shared group is far below the 200 um modeling pixel. All 20 mains and their shared replica therefore occupy one model block and have the same defect-sensitive block area as the no-redundancy case, apart from the calculator's fine/coarse quadrature branch."
   },
   "uploaded_replica_distance_audit": {
-    "archive_relative_to_workspace": "YAPlus_1204/replica_distance.zip",
+    "optional_archive_filename": "replica_distance.zip",
     "archive_sha256": "50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b",
     "exact_bar_source_member": "replica_distance/w2w_replica_dist_20_40_60_80.m",
     "conversion_notebook_member": "replica_distance/npy_to_mat.ipynb",

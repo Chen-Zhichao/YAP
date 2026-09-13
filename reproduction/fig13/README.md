@@ -18,13 +18,11 @@ mechanisms. Both W2W and D2W contain 300 points. Both axes are fixed to
 
 ## One-command rerun
 
-Run from the repository root:
+Follow the environment setup in `reproduction/README.md`, then run from the
+repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-fig13 \
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig13/run.sh
+python reproduction/run_all.py --figures 13
 ```
 
 The individual stages can also be run from this directory:

@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-PYTHON="${PYTHON:-/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python}"
-export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl-yap-fig17}"
-export PYTHONDONTWRITEBYTECODE=1
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd -- "${script_dir}/../.." && pwd)"
+python_bin="${PYTHON:-python3}"
+export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
+export MPLBACKEND="${MPLBACKEND:-Agg}"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/mpl-yap-fig17}"
 
-cd "$REPO_ROOT"
-"$PYTHON" reproduction/fig17/run_cases.py "$@"
-"$PYTHON" reproduction/fig17/legacy_overlay.py
-"$PYTHON" reproduction/fig17/make_plot.py
-"$PYTHON" reproduction/fig17/verify.py
+cd "${repo_root}"
+"${python_bin}" "${script_dir}/run_cases.py" "$@"
+"${python_bin}" "${script_dir}/legacy_overlay.py"
+"${python_bin}" "${script_dir}/make_plot.py"
+"${python_bin}" "${script_dir}/verify.py"

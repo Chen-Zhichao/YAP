@@ -3,6 +3,9 @@ set -euo pipefail
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 python_bin="${PYTHON:-python3}"
+export PYTHONDONTWRITEBYTECODE="${PYTHONDONTWRITEBYTECODE:-1}"
+export MPLBACKEND="${MPLBACKEND:-Agg}"
+export MPLCONFIGDIR="${MPLCONFIGDIR:-${TMPDIR:-/tmp}/mpl-yap-fig13}"
 
 if ! "${python_bin}" -c 'import cv2, matplotlib, numpy, omegaconf, scipy' >/dev/null 2>&1; then
     echo "ERROR: ${python_bin} does not contain all YAP dependencies." >&2

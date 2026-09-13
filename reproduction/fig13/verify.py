@@ -69,6 +69,7 @@ def verify_side(side: str) -> dict[str, float | int | str]:
         "mse": recomputed_mse,
         "paper_mse": result["paper_mse"],
         "repository_commit": result["repository_commit"],
+        "calculator_source_sha256": result.get("calculator_source_sha256"),
     }
 
 
@@ -90,14 +91,16 @@ def main() -> None:
     assert float(config.common.bottom_dishing_mean_nm) == -10.0
     report = {side: verify_side(side) for side in ("w2w", "d2w")}
     for side, metrics in report.items():
-        assert_result_source_compatible(str(metrics["repository_commit"]))
+        assert_result_source_compatible(
+            metrics["repository_commit"], metrics["calculator_source_sha256"]
+        )
     for name in ("fig13_current_code.png", "fig13_current_code.pdf"):
         if not (RESULTS / name).is_file():
             raise FileNotFoundError(f"Missing {RESULTS / name}; run make_plot.py")
     print(json.dumps(report, indent=2))
     print(
         "PASS: legacy 300-point sweep vectors, current-code W2W/D2W yields, "
-        "MSEs, commit, and plots verified."
+        "MSEs, calculator fingerprint, and plots verified."
     )
 
 

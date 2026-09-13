@@ -16,13 +16,16 @@ from omegaconf import OmegaConf
 
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parents[1]
-DEFAULT_ARCHIVE = ROOT.parent / "YAPlus_1204" / "replica_distance.zip"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--archive", type=Path, default=DEFAULT_ARCHIVE)
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        required=True,
+        help="Path to the optional historical replica_distance.zip archive.",
+    )
     return parser.parse_args()
 
 
@@ -125,7 +128,7 @@ def main() -> None:
         )
 
     output = {
-        "archive": str(args.archive),
+        "archive": args.archive.name,
         "archive_sha256": digest,
         "exact_bar_source_member": member,
         "exact_bar_values": exact,

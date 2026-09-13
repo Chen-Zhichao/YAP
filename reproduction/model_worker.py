@@ -10,6 +10,7 @@ The yield equations themselves are imported from the latest YAP+ source tree.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -39,18 +40,61 @@ CALCULATOR_SOURCE_PATHS = (
 )
 
 
-def assert_result_source_compatible(result_commit: str) -> None:
+def calculator_source_sha256() -> str:
+    """Hash the exact W2W/D2W calculator sources used by this package."""
+    digest = hashlib.sha256()
+    for relative_path in CALCULATOR_SOURCE_PATHS:
+        path = ROOT / relative_path
+        digest.update(relative_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(path.read_bytes())
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def repository_revision() -> str | None:
+    """Return HEAD when Git metadata is available, otherwise return ``None``."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+
+def assert_result_source_compatible(
+    result_commit: str | None,
+    result_calculator_sha256: str | None = None,
+) -> None:
     """Accept stored results when their calculator sources are still unchanged.
 
     Reproduction-only documentation commits necessarily come after generated
-    outputs. Requiring an exact HEAD match would make a clean checked-in package
-    fail immediately. Instead, require the recorded commit to be an ancestor
-    and reject any intervening change to a calculator used by this package.
+    outputs. A content fingerprint works both in a Git checkout and in a source
+    archive copied to a review server. Older results without a fingerprint use
+    Git ancestry as a compatibility fallback.
     """
+    if result_calculator_sha256 is not None:
+        current = calculator_source_sha256()
+        if current != result_calculator_sha256:
+            raise AssertionError(
+                "Calculator sources differ from those used for the stored results; "
+                "rerun the figure package."
+            )
+        return
+
+    if not result_commit:
+        raise AssertionError(
+            "Stored results provide neither a calculator fingerprint nor a Git revision."
+        )
     ancestor = subprocess.run(
         ["git", "merge-base", "--is-ancestor", result_commit, "HEAD"],
         cwd=ROOT,
         check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     if ancestor.returncode != 0:
         raise AssertionError(

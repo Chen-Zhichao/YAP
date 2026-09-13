@@ -2,6 +2,7 @@
   "figure": 15,
   "side": "W2W",
   "repository_commit": "1d4772beac8fbb5aa6b91d7d7135c7508114774d",
+  "calculator_source_sha256": "f15d828d7217dd973a706f5b21a84333c7e6cd1308f6165fcadbdb6920394c0a",
   "reference_source": "Approximate readback from published Fig. 15 raster bars",
   "component_names": [
     "Y_ovl",

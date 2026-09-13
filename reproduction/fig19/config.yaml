@@ -51,9 +51,9 @@ experiment:
   historical_20to1_audit:
     source: "User-uploaded December-2025 YAP+ archive"
     source_files:
-      - "YAPlus_1204/extracted/W2W/configs/config.yaml"
-      - "YAPlus_1204/extracted/D2W/configs/config.yaml"
-      - "YAPlus_1204/extracted/{W2W,D2W}/pad_bitmap_generation.py"
+      - "replica_distance.zip::W2W/configs/config.yaml"
+      - "replica_distance.zip::D2W/configs/config.yaml"
+      - "replica_distance.zip::{W2W,D2W}/pad_bitmap_generation.py"
     old_generator_fields: [multi2one_flag, multi2one_ratio]
     w2w_config_multi2one_flag: false
     w2w_config_multi2one_ratio: 20
@@ -70,7 +70,7 @@ experiment:
       branch.
 
   uploaded_replica_distance_audit:
-    archive_relative_to_workspace: "YAPlus_1204/replica_distance.zip"
+    optional_archive_filename: "replica_distance.zip"
     archive_sha256: "50a128d6b1c273e292a7bc09d37c522919d83f500381c3331446ed4f2efb6c2b"
     exact_bar_source_member: "replica_distance/w2w_replica_dist_20_40_60_80.m"
     conversion_notebook_member: "replica_distance/npy_to_mat.ipynb"

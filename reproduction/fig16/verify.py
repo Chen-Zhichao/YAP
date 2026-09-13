@@ -32,7 +32,9 @@ def main() -> None:
         assert summary["plot_profile"] == str(config.plot_profile)
     assert summary["ignored_components_for_pass"] == []
     assert math.isclose(summary["pass_abs_tolerance"], float(config.pass_abs_tolerance))
-    assert_result_source_compatible(str(summary["repository_commit"]))
+    assert_result_source_compatible(
+        summary.get("repository_commit"), summary.get("calculator_source_sha256")
+    )
     scaling = json.loads((RESULTS / "wafer_scaling_audit.json").read_text())
     assert scaling["source_commit"] == "6cc2408"
     table_i_scaling = scaling["profiles"]["paper_table_i"]

@@ -160,18 +160,23 @@ as a native full-resolution mapping from the current generator.
 
 ## Rerun
 
-Run from the repository root:
+Follow the environment setup in `reproduction/README.md`, then run from the
+repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-fig19 \
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig19/run.sh --jobs 4
+python reproduction/run_all.py --figures 19 --jobs 4
 ```
 
 The workflow regenerates 24 case JSON files, summarizes errors, creates the
-plot, and verifies coverage, commit, parameters, the Poisson density identity,
-and the declared scientific status.
+plot, and verifies coverage, calculator-source fingerprint, parameters, the
+Poisson density identity, and the declared scientific status. The external
+historical archive is not required. If it is available and its provenance is
+to be re-audited, run:
+
+```bash
+python reproduction/fig19/audit_uploaded_archive.py \
+  --archive /path/to/replica_distance.zip
+```
 
 ## Files
 

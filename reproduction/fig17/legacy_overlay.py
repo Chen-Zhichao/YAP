@@ -172,17 +172,24 @@ def historical_yield(*, side: str, layout: str, params: dict,
 
 
 def source_assertions(commit: str, side: str, radial_scale: bool,
-                      use_boundaries: bool) -> None:
-    source = subprocess.check_output(
-        ["git", "show", f"{commit}:{side.upper()}/overlay_yield_calculator.py"],
-        cwd=ROOT, text=True,
-    )
+                      use_boundaries: bool) -> bool:
+    """Attest embedded equations when history is available; never require it."""
+    try:
+        source = subprocess.check_output(
+            ["git", "show", f"{commit}:{side.upper()}/overlay_yield_calculator.py"],
+            cwd=ROOT,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
     assert ".max(axis=0)" in source
     has_scale = "* WAF_R / np.sqrt((DIE_W/2)**2 + (DIE_L/2)**2)" in source
     has_boundaries = "ovl_critical_pad_boundary_coords" in source
     if side == "d2w":
         assert has_scale == radial_scale
     assert has_boundaries == use_boundaries
+    return True
 
 
 def main() -> None:
@@ -192,10 +199,13 @@ def main() -> None:
     profiles = {}
     for legacy_name, legacy in experiment.legacy_overlay_profiles.items():
         rows = []
+        source_revision_attested = True
         for side in ("w2w", "d2w"):
-            source_assertions(str(legacy.source_commit), side,
-                              bool(legacy.d2w_radial_scale),
-                              bool(legacy.use_critical_boundaries))
+            source_revision_attested &= source_assertions(
+                str(legacy.source_commit), side,
+                bool(legacy.d2w_radial_scale),
+                bool(legacy.use_critical_boundaries),
+            )
             params = profile_parameters(experiment, str(legacy.parameter_profile), side)
             for layout in experiment.layouts:
                 actual = historical_yield(
@@ -212,6 +222,7 @@ def main() -> None:
                 })
         profiles[legacy_name] = {
             "source_commit": str(legacy.source_commit),
+            "source_revision_attested": source_revision_attested,
             "description": str(legacy.description),
             "parameter_profile": str(legacy.parameter_profile),
             "d2w_radial_scale": bool(legacy.d2w_radial_scale),

@@ -43,9 +43,10 @@ cannot currently be claimed as a full reproduction.
 ## Wafer-dimension scaling audit
 
 Commit `6cc2408` multiplied D2W rotation and magnification samples by
-`WAF_R / hypot(DIE_W/2, DIE_L/2)`. `wafer_scaling_audit.py` uses `git show` to
-verify that this expression exists in history and then evaluates all 12 cases
-independently. The audit shows:
+`WAF_R / hypot(DIE_W/2, DIE_L/2)`. `wafer_scaling_audit.py` evaluates all 12
+cases from its self-contained implementation. When the historical revision is
+available, it also verifies the embedded expression with `git show`; history
+is not required to run the audit. The audit shows:
 
 - With Table-I parameters, overlay RMSE decreases from `0.022254` to
   `0.012601`, but the maximum error remains `0.027935`, above the 0.015 gate.
@@ -73,13 +74,11 @@ columns.
 
 ## Rerun
 
-Run from the repository root:
+Follow the environment setup in `reproduction/README.md`, then run from the
+repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-fig16 \
-PYTHONDONTWRITEBYTECODE=1 \
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig16/run.sh --jobs 4
+python reproduction/run_all.py --figures 16 --jobs 4
 ```
 
 ## Files

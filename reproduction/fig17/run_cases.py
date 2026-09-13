@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -19,6 +20,9 @@ HERE = Path(__file__).resolve().parent
 REPRODUCTION = HERE.parent
 ROOT = REPRODUCTION.parent
 RESULTS = HERE / "results"
+sys.path.insert(0, str(REPRODUCTION))
+
+from model_worker import calculator_source_sha256, repository_revision  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -59,7 +63,8 @@ def main() -> None:
     RESULTS.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env.setdefault("MPLCONFIGDIR", "/tmp/mpl-yap-fig17")
+    env.setdefault("MPLBACKEND", "Agg")
+    env.setdefault("MPLCONFIGDIR", str(Path(tempfile.gettempdir()) / "mpl-yap-fig17"))
 
     jobs = []
     for profile_name in selected:
@@ -128,8 +133,8 @@ def main() -> None:
 
     summary = {
         "figure": 17,
-        "repository_commit": subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "repository_commit": repository_revision(),
+        "calculator_source_sha256": calculator_source_sha256(),
         "paper_reference_source": str(experiment.paper_reference_source),
         "components": components,
         "pass_abs_tolerance": tolerance,

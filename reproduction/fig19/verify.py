@@ -27,7 +27,9 @@ def main() -> None:
     assert summary["total_cases"] == 24
     assert summary["reproduction_pass"] == bool(exp.expected_reproduction_pass)
     assert math.isclose(summary["pass_abs_tolerance"], float(exp.pass_abs_tolerance))
-    assert_result_source_compatible(str(summary["repository_commit"]))
+    assert_result_source_compatible(
+        summary.get("repository_commit"), summary.get("calculator_source_sha256")
+    )
     audit_path = RESULTS / "historical_source_audit.json"
     if audit_path.exists():
         audit = json.loads(audit_path.read_text())

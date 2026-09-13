@@ -40,7 +40,9 @@ def parameters(profile) -> dict:
 
 def main() -> None:
     legacy = load_legacy_module()
-    legacy.source_assertions("6cc2408", "d2w", True, False)
+    source_revision_attested = legacy.source_assertions(
+        "6cc2408", "d2w", True, False
+    )
     config = OmegaConf.load(HERE / "config.yaml").experiment
     current = json.loads((RESULTS / "summary.json").read_text())
     output_profiles = {}
@@ -92,6 +94,7 @@ def main() -> None:
         "figure": 16,
         "audit_only": True,
         "source_commit": "6cc2408",
+        "source_revision_attested": source_revision_attested,
         "source_expression": (
             "rotation and magnification samples multiplied by "
             "WAF_R / sqrt((DIE_W/2)^2 + (DIE_L/2)^2)"

@@ -7,7 +7,8 @@ repository.
 
 No historical output is used as a current result. Historical source revisions
 are consulted only to recover parameters or audit an implementation difference.
-Each generated JSON records its calculation commit and provenance.
+Each generated summary records a SHA-256 fingerprint of the calculator sources;
+it also records the Git revision when Git metadata is available.
 
 ## Package layout
 
@@ -42,42 +43,68 @@ conclusion in that figure's README. Temporary work directories, Python caches,
 the former duplicate top-level result set, and superseded compatibility drivers
 are intentionally excluded.
 
-## Environment
+## Fresh-server setup
 
-The tested environment is:
+Python 3.12 is recommended and is the version used for the checked-in results
+(Python 3.11--3.13 is supported by the pinned dependencies). No
+machine-specific path, pre-existing Conda
+environment, display server, historical Git checkout, or external data archive
+is required for the formal runs. Starting from a fresh checkout:
 
-```text
-/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python
+```bash
+git clone --branch yap+ https://github.com/Chen-Zhichao/YAP.git
+cd YAP
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r reproduction/requirements.txt
 ```
 
-The required packages are listed in `requirements.txt`. To use another Python
-environment, install those dependencies and pass its interpreter through
-`PYTHON` or `--python`.
+If the repository is supplied as a source archive, extract it and start at the
+`cd YAP` step. Git metadata is optional. The runners resolve all source,
+configuration, output, and work paths relative to their own locations and use
+Matplotlib's noninteractive `Agg` backend.
+
+For review, use the repository commit or release archive supplied with these
+materials rather than an independently updated moving branch. The checked-in
+calculator fingerprint deliberately rejects results if the W2W/D2W source has
+changed.
 
 ## Reproduce all figures
 
 Run from the YAP repository root:
 
 ```bash
-MPLCONFIGDIR=/tmp/mpl-yap-reproduction \
-PYTHONDONTWRITEBYTECODE=1 \
-/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/run_all.py --jobs 4
+python reproduction/run_all.py --jobs 4
 ```
 
 To run selected figures:
 
 ```bash
-/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/run_all.py --figures 13 17 --jobs 4
+python reproduction/run_all.py --figures 13 17 --jobs 4
 ```
 
 Each figure can also be run independently. For example:
 
 ```bash
-PYTHON=/u1/ee/zhichao/anaconda3/envs/yap_env/bin/python \
-reproduction/fig16/run.sh --jobs 4
+bash reproduction/fig16/run.sh --jobs 4
 ```
+
+`--jobs` controls concurrent case workers; reduce it on a small server. To use
+an interpreter without activating its environment, pass
+`--python /path/to/python` to `run_all.py`, or set `PYTHON=/path/to/python` for
+an individual `run.sh`.
+
+To validate the checked-in data and source fingerprints without rerunning the
+Monte Carlo calculations:
+
+```bash
+python reproduction/run_all.py --verify-only
+```
+
+A successful verifier means that the files are internally consistent with the
+declared status. It does not turn a figure labeled `NOT PASS` into a successful
+paper match.
 
 ## Current result summary
 
