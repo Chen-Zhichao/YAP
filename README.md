@@ -175,9 +175,17 @@ than sampling an initial-warpage distribution.
 
 Run the commands in this section from the **Git checkout root**, not from inside
 `D2W/` or `W2W/`. Use Linux and Python 3.11 or 3.12, and install the dependencies
-in your own environment:
+in your own environment. Configure an approved writable work disk **before**
+installing dependencies or starting Python; neither setup nor execution should
+write to `/tmp`. Replace the example work path for your account/host:
 
 ```bash
+export YAP_WORK_DIR=/data/puneet/$USER/yap-work
+mkdir -p "$YAP_WORK_DIR/temp"
+export TMPDIR="$YAP_WORK_DIR/temp" TMP="$YAP_WORK_DIR/temp" TEMP="$YAP_WORK_DIR/temp"
+export NUMBA_CACHE_DIR="$YAP_WORK_DIR/numba" MPLCONFIGDIR="$YAP_WORK_DIR/matplotlib"
+export PIP_CACHE_DIR="$YAP_WORK_DIR/pip" PYTHONDONTWRITEBYTECODE=1
+unset PYTHONPYCACHEPREFIX
 python -m pip install -r requirements.txt
 ```
 
@@ -188,8 +196,16 @@ p2 runtime, including its bow-to-magnification implementation:
 ```bash
 export YAP_NATIVE_RUNTIME_DIR=/app/nanocad/projects/personal/zchen/YAP_STACK/distribution/yap_assembly_p2_20261004_v2/YAP/runtime/native
 export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1
-export NUMBA_CACHE_DIR=/tmp/yap-numba-$USER
 ```
+
+YAP validates temporary/cache overrides and output destinations, including
+symlink targets, and rejects `/tmp` paths. Python temporary files and mechanics
+subprocesses use the configured directory. Without overrides, small caches
+use the Git-ignored `.cache/yap/` in the checkout. Large mechanics builds require
+an explicit host-local `YAP_WORK_DIR`, not shared-home `/w` or `/u1`. Check the
+executing host's mount and available storage before running; accepted results
+belong in your shared project, separate from temporary files. Never use the
+native operator directory as a work directory.
 
 The checked-in designs use logical operator references. Keep these references
 and the other mechanics settings unchanged:

@@ -4,6 +4,15 @@ import argparse
 import csv
 import json
 from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+try:
+    from YAP.mechanics_runtime import configure_runtime_storage, validate_write_path
+except ModuleNotFoundError:
+    from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 
 import matplotlib
 matplotlib.use("Agg")
@@ -79,6 +88,7 @@ def _plot(path, rows):
 
 
 def run(output_dir):
+    output_dir = validate_write_path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     # source_sign=-1 chooses positive center-minus-mid-edge bow for this layer order.
     calibration = calibrate_fabrication_source(

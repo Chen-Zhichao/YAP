@@ -22,11 +22,13 @@ DEFAULT_OUTPUT = (
     REPO_ROOT
     / "D2W/output/case_studies/magnification_correction_sensitivity"
 )
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl-yap-mag-correction-sensitivity")
 sys.path.insert(0, str(STACK_ROOT))
 sys.path.insert(0, str(VALIDATION_ROOT))
 sys.path.insert(0, str(REPO_ROOT))
-from mechanics_runtime import resource_directory
+sys.dont_write_bytecode = True
+from mechanics_runtime import resource_directory, configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 
 
 def d2d_source():
@@ -499,6 +501,7 @@ def main(argv=None) -> None:
         ),
     )
     args = parser.parse_args(argv)
+    args.output = validate_write_path(args.output)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
 

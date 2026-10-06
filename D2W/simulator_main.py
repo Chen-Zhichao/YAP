@@ -1,7 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+import sys
+
+sys.dont_write_bytecode = True
 import os
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 import shutil
 import numpy as np
 from utils.util import *
@@ -41,13 +50,14 @@ def _resolve_module_output_dir(output_dir: str) -> str:
     output_dir = os.fspath(output_dir)
     if not os.path.isabs(output_dir):
         output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), output_dir)
-    output_dir = os.path.normpath(output_dir)
+    output_dir = str(validate_write_path(output_dir))
     return output_dir + os.sep
 
 
 def _anchor_output_dirs_to_module(cfg_dict: dict) -> None:
     for cfg in cfg_dict.values():
         cfg.OUTPUT_DIR = _resolve_module_output_dir(cfg.OUTPUT_DIR)
+        validate_write_path(os.path.join(cfg.OUTPUT_DIR, cfg.DESIGN, cfg.INTERFACE))
 
 
 def _resolve_design_root_and_layout_dir(ds_dir: str) -> tuple[str, str]:

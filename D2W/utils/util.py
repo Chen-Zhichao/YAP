@@ -2,6 +2,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
+
 from omegaconf import OmegaConf
 import numpy as np
 import matplotlib.pyplot as plt
@@ -161,7 +170,7 @@ def build_runtime_cache_tag(input_args: dict | None) -> str:
 def get_runtime_temp_dir(cfg, input_args: dict | None) -> str:
     input_args = input_args or {}
     ds_name = str(input_args.get("ds_name", getattr(cfg, "DESIGN", cfg.INTERFACE)))
-    temp_dir = os.path.join(cfg.OUTPUT_DIR, ds_name, "temp")
+    temp_dir = str(validate_write_path(os.path.join(cfg.OUTPUT_DIR, ds_name, "temp")))
     os.makedirs(temp_dir, exist_ok=True)
     return temp_dir
 
@@ -398,7 +407,7 @@ def get_config_dict(cfg_folder: str,
     for interface_name, cfg in cfg_dict.items():
         cfg = finalize_cfg_for_mode(cfg, ds_name=ds_name, mode=mode)
         # Save updated config file for reference
-        OmegaConf.save(cfg, cfg_folder + f"/{interface_name}{suffix}.yaml")
+        OmegaConf.save(cfg, validate_write_path(cfg_folder + f"/{interface_name}{suffix}.yaml"))
 
     if debug:
         cfg.DEBUG = True
@@ -448,7 +457,7 @@ def get_single_interface_config_dict(cfg_folder: str,
 
     cfg = finalize_cfg_for_mode(cfg, ds_name=ds_name, mode=mode)
     suffix = file_suffix or ""
-    OmegaConf.save(cfg, cfg_folder + f"/{cfg.INTERFACE}{suffix}.yaml")
+    OmegaConf.save(cfg, validate_write_path(cfg_folder + f"/{cfg.INTERFACE}{suffix}.yaml"))
 
     if debug:
         cfg.DEBUG = True
@@ -1002,7 +1011,8 @@ def sort_pads_bmap(input_path, output_path):
     idx = np.lexsort((data[:,0].astype(float), - data[:,1].astype(float)))
     sorted_data = data[idx]
 
-    temp_output_path = f"{output_path}.tmp.{os.getpid()}"
+    output_path = str(validate_write_path(output_path))
+    temp_output_path = str(validate_write_path(f"{output_path}.tmp.{os.getpid()}"))
     with open(temp_output_path, 'w') as f:
         for _, _, line in sorted_data:
             f.write(line + '\n')
@@ -1173,7 +1183,7 @@ def convert_3dblox_to_pad_bitmap(cfg,
     # Create output directory if not exist
     input_args = input_args or {}
     ds_name = str(input_args.get('ds_name', getattr(cfg, 'DESIGN', cfg.INTERFACE)))
-    output_path = os.path.join(cfg.OUTPUT_DIR, ds_name, cfg.INTERFACE)
+    output_path = str(validate_write_path(os.path.join(cfg.OUTPUT_DIR, ds_name, cfg.INTERFACE)))
     os.makedirs(output_path, exist_ok=True)
     bitmap_collection_path = os.path.join(
         output_path,

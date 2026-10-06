@@ -2,6 +2,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
+
 from omegaconf import OmegaConf
 import hashlib
 import json
@@ -268,7 +277,7 @@ def get_config_dict(
             print(OmegaConf.to_yaml(cfg))
 
         # Save updated config file for reference
-        OmegaConf.save(cfg, cfg_folder + f"/{interface_name}.yaml")
+        OmegaConf.save(cfg, validate_write_path(cfg_folder + f"/{interface_name}.yaml"))
     return cfg_dict
 
 
@@ -561,7 +570,7 @@ def sort_pads_bmap(input_path, output_path):
     idx = np.lexsort((data[:,0].astype(float), - data[:,1].astype(float)))
     sorted_data = data[idx]
 
-    with open(output_path, 'w') as f:
+    with validate_write_path(output_path).open('w') as f:
         for _, _, line in sorted_data:
             f.write(line + '\n')
 
@@ -669,7 +678,7 @@ def convert_3dblox_to_pad_bitmap(cfg,
         return compact_regular_collection(cfg)
 
     # Create output directory if not exist
-    output_path = os.path.join(cfg.OUTPUT_DIR, cfg.DESIGN, cfg.INTERFACE)
+    output_path = str(validate_write_path(os.path.join(cfg.OUTPUT_DIR, cfg.DESIGN, cfg.INTERFACE)))
     os.makedirs(output_path, exist_ok=True)
     bitmap_collection_path = os.path.join(
         output_path,
@@ -873,7 +882,7 @@ def result_wrapper(
     """
     Wrap up the results, plot them and save the figures.
     """
-    save_path = cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE
+    save_path = str(validate_write_path(cfg.OUTPUT_DIR + cfg.DESIGN + "/" + cfg.INTERFACE))
     # make directory if not exist
     if not os.path.exists(save_path):
         os.makedirs(save_path)

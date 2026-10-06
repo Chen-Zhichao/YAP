@@ -15,6 +15,11 @@ from W2W.assembly_order import (
     main, parse_order, tree_text, load_stack_input,
 )
 from history_bow_yield import PrebondBody, paired_magnification
+from mechanics_runtime import configure_runtime_storage
+
+
+def temporary_directory():
+    return tempfile.TemporaryDirectory(dir=configure_runtime_storage()["TMPDIR"])
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "W2W/input/design_6_4hi_p2/stack.yaml"
@@ -358,7 +363,7 @@ class ArchiveScoringTests(unittest.TestCase):
 
 class CommandTests(unittest.TestCase):
     def test_cli_imported_scoring_roundtrip(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             (path / "input.json").write_text(json.dumps(config()))
             plan = build_plan(config())
@@ -372,7 +377,7 @@ class CommandTests(unittest.TestCase):
             self.assertFalse(result["physical_readiness"])
 
     def test_cli_duplicate_json_keys_and_null_archive(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             (path / "bad.json").write_text('{"schema":"a", "schema":"b"}')
             with self.assertRaises(SystemExit) as failure:
@@ -388,7 +393,7 @@ class CommandTests(unittest.TestCase):
             self.assertFalse((path / "out.json").exists())
 
     def test_plan_command_and_refuse_overwrite(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             args = ["--config", str(EXAMPLE), "--plan-only", "--output", str(path / "plan.json"),
                     "--archive-template", str(path / "template.json")]
@@ -399,7 +404,7 @@ class CommandTests(unittest.TestCase):
             self.assertEqual(exc.exception.code, 2)
 
     def test_failed_scoring_publishes_no_report(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             (path / "input.json").write_text(json.dumps(config()))
             plan = build_plan(config())
@@ -420,7 +425,7 @@ class StackYamlTests(unittest.TestCase):
             "room_temperature_c", "anneal_temperature_c", "ramp_up_s", "dwell_s", "cool_down_s"})
         explicit = load_stack_input(EXAMPLE)
         self.assertEqual(Path(explicit["mechanics"]["operator_package"]).name, "BI2_50.json")
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory) / "stack.yaml"
             OmegaConf.save(OmegaConf.create(explicit), path)
             reloaded = load_stack_input(path)
@@ -429,7 +434,7 @@ class StackYamlTests(unittest.TestCase):
 
     def test_internal_defaults_do_not_accept_unsupported_explicit_values(self):
         original = OmegaConf.to_container(OmegaConf.load(EXAMPLE), resolve=False)
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             for key in ("recipe_id", "prebond_policy", "waiting_policy", "anneal_support",
                         "bonding_support", "material_clock_policy"):
@@ -446,7 +451,7 @@ class StackYamlTests(unittest.TestCase):
     def test_default_expansion_still_requires_explicit_numeric_process_inputs(self):
         design = OmegaConf.to_container(OmegaConf.load(EXAMPLE), resolve=False)
         del design["stack"]["process"]["dwell_s"]
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory) / "stack.yaml"
             OmegaConf.save(OmegaConf.create(design), path)
             with self.assertRaises(ValueError):
@@ -463,7 +468,7 @@ class StackYamlTests(unittest.TestCase):
             "27dd98c4108f97c802fc236d90ff3f9b157e64d3dac5ba875e2533cc2c4bfdea"])
 
     def test_yaml_and_legacy_json_plans_are_identical_without_assets(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             design = load_stack_input(EXAMPLE)
             design["mechanics"]["operator_package"] = "missing/operator.json"
@@ -478,7 +483,7 @@ class StackYamlTests(unittest.TestCase):
                              str(path / "missing/operator.json"))
 
     def test_inline_overlay_scores_imported_archive(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             design = load_stack_input(EXAMPLE)
             design["overlay"] = overlay_input()
@@ -491,7 +496,7 @@ class StackYamlTests(unittest.TestCase):
                              evaluate_archive(build_plan(config()), archive, overlay_input()))
 
     def test_yaml_rejects_invalid_structure_and_ambiguous_settings(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             original = load_stack_input(EXAMPLE)
             changes = [lambda d: d.__setitem__("schema", "wrong"),
@@ -523,7 +528,7 @@ class StackYamlTests(unittest.TestCase):
                     main(["--config", str(EXAMPLE), *flags, "--output", str(path / "out.json")])
 
     def test_missing_inline_mechanics_and_legacy_bare_flag_fail(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             OmegaConf.save(OmegaConf.create(dict(schema="yap.w2w_stack_input.v1", stack=config())),
                            path / "stack.yaml")
@@ -534,7 +539,7 @@ class StackYamlTests(unittest.TestCase):
             self.assertFalse((path / "out.json").exists())
 
     def test_inline_native_settings_and_scoring_without_large_operator_load(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with temporary_directory() as directory:
             path = Path(directory)
             design = load_stack_input(EXAMPLE)
             design["mechanics"].update(operator_package="operators/package.json",

@@ -8,6 +8,11 @@ import json
 from pathlib import Path
 import sys
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.colors import TwoSlopeNorm
@@ -150,6 +155,7 @@ def add_floorplan(axis: plt.Axes, patch: dict[str, float], *, label: bool) -> No
 
 def main() -> int:
     args = parse_args()
+    args.output = validate_write_path(args.output)
     model, mapdl, period_mm, patch = load_maps()
     model_clean = period_low_pass(detrend_rigid_plane(model), period_mm)
     mapdl_clean = period_low_pass(detrend_rigid_plane(mapdl), period_mm)

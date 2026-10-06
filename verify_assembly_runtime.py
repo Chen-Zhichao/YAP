@@ -7,6 +7,8 @@ import os
 from pathlib import Path
 import sys
 
+sys.dont_write_bytecode = True
+from mechanics_runtime import configure_runtime_storage
 
 ROOT = Path(__file__).resolve().parent
 
@@ -34,6 +36,7 @@ def isolate_original_storage():
 
 
 def verify(*, load_operators=False):
+    configure_runtime_storage()
     if "YAP_NATIVE_RUNTIME_DIR" in os.environ or "YAP_RUNTIME_RESOURCES" in os.environ:
         raise ValueError("delivery verification rejects external runtime/resource overrides")
     if (ROOT / ".runtime_resources.json").exists():

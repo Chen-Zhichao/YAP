@@ -35,7 +35,11 @@ CONFIGS_BY_MAX_HEIGHT = {
     ),
 }
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl-yap-w2w-spatial-compounding")
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(REPO_ROOT))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 
 import matplotlib
 
@@ -87,6 +91,7 @@ def parse_args() -> argparse.Namespace:
         help="Stack height shown in the two wafer maps; defaults to the tallest bar.",
     )
     args = parser.parse_args()
+    args.output = validate_write_path(args.output)
     if str(args.input).startswith("resource:"):
         sys.path.insert(0, str(REPO_ROOT))
         from mechanics_runtime import resolve_resource

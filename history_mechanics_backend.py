@@ -14,10 +14,12 @@ from itertools import product
 
 try:
     from YAP.manufacturing_bow import FabricationBirthBatch, exp12_initial_q6_payload
-    from YAP.mechanics_runtime import NATIVE_ROOT, PORTABLE_RUNTIME, resolve_native_input, relocate_geometry_paths
+    from YAP.mechanics_runtime import (NATIVE_ROOT, PORTABLE_RUNTIME, resolve_native_input,
+                                      relocate_geometry_paths, configure_runtime_storage, validate_write_path)
 except ModuleNotFoundError:  # Direct execution from the YAP source directory.
     from manufacturing_bow import FabricationBirthBatch, exp12_initial_q6_payload
-    from mechanics_runtime import NATIVE_ROOT, PORTABLE_RUNTIME, resolve_native_input, relocate_geometry_paths
+    from mechanics_runtime import (NATIVE_ROOT, PORTABLE_RUNTIME, resolve_native_input,
+                                  relocate_geometry_paths, configure_runtime_storage, validate_write_path)
 
 
 ROOT = Path(__file__).resolve().parent
@@ -235,6 +237,7 @@ def resolve_mechanics_package(geometry, *, fidelity="native",
 
 
 def _import_mechanics_module(name):
+    configure_runtime_storage()
     location = str(ANSYS_VALIDATION)
     project = str(ROOT.parent)
     if project not in sys.path:
@@ -285,18 +288,14 @@ def _geometry_ledger(geometry, *, die_count):
 
 
 def _configure_mechanics_runtime_environment(*, layer_workers):
-    cache_root = Path("/tmp") / f"yap_history_mechanics_{os.getuid()}"
+    configure_runtime_storage()
     defaults = {
         "NUMBA_THREADING_LAYER": "omp",
         "NUMBA_NUM_THREADS": str(layer_workers),
         "OMP_NUM_THREADS": str(layer_workers),
-        "NUMBA_CACHE_DIR": str(cache_root / "numba"),
-        "MPLCONFIGDIR": str(cache_root / "matplotlib"),
     }
     for key, value in defaults.items():
         os.environ.setdefault(key, value)
-    for key in ("NUMBA_CACHE_DIR", "MPLCONFIGDIR"):
-        Path(os.environ[key]).mkdir(parents=True, exist_ok=True)
 
 
 def load_mechanics_geometry_model(geometry, *, die_count, footprint_mm=(10.0, 10.0),
@@ -487,7 +486,7 @@ def write_birth_snapshot(path, batch):
     """Create, but never replace, one provenance-bound full-q6 input file."""
     if not isinstance(batch, FabricationBirthBatch):
         raise TypeError("batch must be a FabricationBirthBatch")
-    path = Path(path).resolve()
+    path = validate_write_path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = (json.dumps(exp12_initial_q6_payload(batch), indent=2,
                           allow_nan=False) + "\n").encode("ascii")
@@ -614,8 +613,9 @@ def run_mechanics_history(name, output_dir, batch, *, footprint_mm=(10.0, 10.0),
         raise ValueError("fabrication birth scope does not match the backend")
     if len(batch.source_amplitude) != maximum_cycle + 1:
         raise ValueError("one persistent birth state is required for every die")
-    output = Path(output_dir).resolve()
-    snapshot = output.parent / f"{output.name}.initial_q6.json"
+    configure_runtime_storage()
+    output = validate_write_path(output_dir)
+    snapshot = validate_write_path(output.parent / f"{output.name}.initial_q6.json")
     write_birth_snapshot(snapshot, batch)
     command = [
         sys.executable, "-B", str(backend["profile"]), "run",
@@ -625,7 +625,6 @@ def run_mechanics_history(name, output_dir, batch, *, footprint_mm=(10.0, 10.0),
         "--initial-bow-json", str(snapshot),
     ]
     env = dict(os.environ)
-    env.setdefault("NUMBA_CACHE_DIR", "/tmp/yap_stack_numba_cache")
     completed = subprocess.run(command, cwd=ANSYS_VALIDATION, env=env, check=False)
     if completed.returncode:
         raise RuntimeError(f"mechanics backend exited with code {completed.returncode}")

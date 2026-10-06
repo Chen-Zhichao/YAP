@@ -12,6 +12,10 @@ from pathlib import Path
 import sys
 import time
 
+sys.dont_write_bytecode = True
+from mechanics_runtime import configure_runtime_storage, mechanics_work_directory, validate_write_path
+
+configure_runtime_storage()
 import numpy as np
 
 
@@ -40,14 +44,10 @@ def _write(path, value):
 
 
 def _safe_output(path):
-    path = Path(path).expanduser().resolve()
-    if {"#snapshot", ".snapshot"}.intersection(path.parts):
-        raise ValueError("snapshot paths are forbidden")
-    allowed = path.is_relative_to("/tmp") or path.is_relative_to(
-        ROOT / "D2W" / "output"
-    )
-    if not allowed:
-        raise ValueError("output must be under /tmp or YAP/D2W/output")
+    path = validate_write_path(path)
+    work = mechanics_work_directory().parent
+    if not path.is_relative_to(work):
+        raise ValueError("candidate output must be under the approved YAP_WORK_DIR")
     return path
 
 

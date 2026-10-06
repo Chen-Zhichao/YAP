@@ -111,13 +111,14 @@ was 0.00234 um for C1. For the four-die/C3 history, final edge-bow error was
 0.00488 um (0.0133%) and total online runtime improved from 1933.64 s to
 152.48 s (12.68x). This is a limited `BI6/BEOL10/TSV6/total50`
 qualification, not permission to extrapolate the basis to another geometry.
-The retained training capture can rebuild the temporary candidate with:
+The retained training capture can rebuild the temporary candidate with an
+explicit `YAP_WORK_DIR` on approved host-local scratch (see README setup):
 
 ```bash
 python build_corrected_compact_mechanics.py \
   --capture D2W/output/case_studies/history_mechanics_backend/corrected_native_c1_seed7_coordinates \
   --native-package /path/to/private/operators/BI6_50.json \
-  --output /tmp/yap_corrected_p48_b32 --port-rank 48 --bubble-rank 32
+  --output "$YAP_WORK_DIR/yap_corrected_p48_b32" --port-rank 48 --bubble-rank 32
 ```
 
 Layer datasets remain bound to their port basis. The theoretical 67 physical

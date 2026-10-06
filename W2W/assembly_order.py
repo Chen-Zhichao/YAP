@@ -27,7 +27,7 @@ try:
         PrebondBody, paired_magnification, affine_overlay_um,
         worst_critical_pad_survival, compound_site_yield,
     )
-    from YAP.mechanics_runtime import validate_resource_reference
+    from YAP.mechanics_runtime import validate_resource_reference, configure_runtime_storage, validate_write_path
 except ModuleNotFoundError:
     from manufacturing_bow import (
         ManufacturingLayer, clpt_source_response,
@@ -37,7 +37,7 @@ except ModuleNotFoundError:
         PrebondBody, paired_magnification, affine_overlay_um,
         worst_critical_pad_survival, compound_site_yield,
     )
-    from mechanics_runtime import validate_resource_reference
+    from mechanics_runtime import validate_resource_reference, configure_runtime_storage, validate_write_path
 
 
 INPUT_SCHEMA = "yap.w2w_assembly_order_input.v1"
@@ -700,11 +700,12 @@ def load_stack_input(path, *, stack_schema=STACK_SCHEMA, input_schema=INPUT_SCHE
 def _write_new(path, value):
     # A failed evaluation never publishes a partial report or replaces a prior run.
     encoded = json.dumps(value, indent=2, allow_nan=False) + "\n"
-    with Path(path).open("x", encoding="utf-8") as stream:
+    with validate_write_path(path).open("x", encoding="utf-8") as stream:
         stream.write(encoded)
 
 
 def main(argv=None):
+    configure_runtime_storage()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", required=True, help="Design-local stack.yaml (or legacy assembly JSON)")
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -743,7 +744,7 @@ def main(argv=None):
             raise ValueError("--archive-template is only used in plan-only mode")
         if args.mechanics_output and not (native_requested and overlay is not None):
             raise ValueError("--mechanics-output requires native mechanics and overlay scoring")
-        paths = [Path(p).resolve() for p in (args.output, args.archive_template, args.mechanics_output) if p]
+        paths = [validate_write_path(p) for p in (args.output, args.archive_template, args.mechanics_output) if p]
         if len(set(paths)) != len(paths) or any(p.exists() for p in paths):
             raise ValueError("all output paths must be new and distinct")
         plan = build_plan(config)

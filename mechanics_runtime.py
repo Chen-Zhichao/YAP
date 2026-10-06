@@ -1,10 +1,12 @@
-"""Locate native mechanics and relocate frozen references without editing data."""
+"""Configure working storage and relocate frozen native references."""
 
 import json
 import os
 from pathlib import Path
 import re
 import stat
+import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parent
@@ -14,6 +16,65 @@ HISTORICAL_NATIVE_ROOTS = tuple(Path(value) for value in (
     "/u1/ee/zhichao/Desktop/YAP_STACK/Ansys_Verify/12_stack_model_validation",
     "/app/nanocad/projects/personal/zchen/YAP_STACK/Ansys_Verify/12_stack_model_validation",
 ))
+
+
+def validate_write_path(value, *, label="output"):
+    """Reject forbidden destinations, including aliases, without creating files."""
+    if not os.fspath(value):
+        raise ValueError(f"{label} must not be empty")
+    path = Path(value).expanduser().absolute()
+    resolved = path.resolve()
+    for candidate in (path, resolved):
+        if {"#snapshot", ".snapshot"}.intersection(candidate.parts):
+            raise ValueError(f"{label}: snapshot paths are not allowed")
+        if candidate.is_relative_to("/tmp"):
+            raise ValueError(f"{label}: /tmp storage is not allowed; choose a working directory")
+    return resolved
+
+
+def configure_runtime_storage():
+    """Initialize caches and Python temporary storage before third-party imports."""
+    override = os.environ.get("YAP_WORK_DIR")
+    if override is not None and (not override or not Path(override).expanduser().is_absolute()):
+        raise ValueError("YAP_WORK_DIR must be a nonempty absolute path")
+    work = validate_write_path(override if override is not None else ROOT / ".cache/yap",
+                               label="YAP_WORK_DIR")
+    temporary = next((os.environ[key] for key in ("TMPDIR", "TEMP", "TMP")
+                      if key in os.environ), str(work / "temp"))
+    defaults = {"TMPDIR": temporary, "TMP": temporary, "TEMP": temporary,
+                "MPLCONFIGDIR": str(work / "matplotlib"),
+                "NUMBA_CACHE_DIR": str(work / "numba")}
+    directories = {}
+    for key, default in defaults.items():
+        value = os.environ.get(key, default)
+        if not value or not Path(value).expanduser().is_absolute():
+            raise ValueError(f"{key} must be a nonempty absolute path")
+        directories[key] = validate_write_path(value, label=key)
+    if "PYTHONPYCACHEPREFIX" in os.environ:
+        validate_write_path(os.environ["PYTHONPYCACHEPREFIX"], label="PYTHONPYCACHEPREFIX")
+    # Validate every override before any mkdir; never probe tempfile's fallback paths.
+    for directory in set(directories.values()) | {work}:
+        directory.mkdir(parents=True, exist_ok=True)
+        if not os.access(directory, os.W_OK | os.X_OK):
+            raise PermissionError(f"working directory is not writable: {directory}")
+    os.environ.update({key: str(directory) for key, directory in directories.items()})
+    os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+    sys.dont_write_bytecode = True
+    tempfile.tempdir = str(directories["TMPDIR"])
+    return {"work": work, **directories}
+
+
+def mechanics_work_directory():
+    """Large temporary mechanics jobs require an explicit host-local work disk."""
+    if "YAP_WORK_DIR" not in os.environ:
+        raise ValueError("set YAP_WORK_DIR to approved host-local scratch for mechanics builds")
+    work = validate_write_path(os.environ["YAP_WORK_DIR"], label="YAP_WORK_DIR")
+    if any(work.is_relative_to(prefix) for prefix in ("/w", "/u1")):
+        raise ValueError("large mechanics work must not use shared-home /w or /u1 storage")
+    configure_runtime_storage()
+    path = validate_write_path(work / "mechanics", label="mechanics scratch")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def select_native_root(root=ROOT):

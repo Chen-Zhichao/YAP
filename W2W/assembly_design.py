@@ -183,6 +183,9 @@ def write_summary(path, result):
 
 def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None, config_path=None,
                design_loader=None, operator_loader=None):
+    from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+    configure_runtime_storage()
     from threadpoolctl import threadpool_limits
     from .assembly_mechanics import run_native, _recipe, _check_metric_policy
     from .assembly_operator_library import load_assembly_library
@@ -201,8 +204,8 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
     if output_dir is None and not root.is_absolute():
         domain = "D2W" if is_die_plan(plan) else "W2W"
         root = Path(__file__).resolve().parents[1] / domain / root
-    root = root.resolve()
-    run = root / design_name / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8])
+    root = validate_write_path(root)
+    run = validate_write_path(root / design_name / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]))
     run.mkdir(parents=True, exist_ok=False)
     print(f"Assembly-order run: {run}", flush=True)
     if config_path:

@@ -6,8 +6,13 @@ import hashlib
 import json
 import os
 import shutil
-import tempfile
+from pathlib import Path
+import sys
 from collections import OrderedDict
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -194,10 +199,8 @@ def _raw_interface_signature_cache_path(cfg, bmap_path, criticality_path):
         separators=(",", ":"),
     )
     digest = hashlib.sha1(cache_key.encode("utf-8")).hexdigest()
-    return os.path.join(
-        tempfile.gettempdir(),
-        f"d2w_raw_interface_signature__{digest}.json",
-    )
+    root = configure_runtime_storage()["work"]
+    return str(validate_write_path(root / f"d2w_raw_interface_signature__{digest}.json"))
 
 
 def _file_stat_signature(path):

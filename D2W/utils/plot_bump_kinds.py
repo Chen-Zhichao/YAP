@@ -2,6 +2,14 @@ import argparse
 import os
 from collections import Counter
 
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -90,6 +98,7 @@ def build_kind_bitmap(bumps):
 
 
 def draw_bitmap(bitmap, title, output_path):
+    output_path = validate_write_path(output_path)
     cmap = ListedColormap(
         [
             (0.92, 0.92, 0.92),  # non-pad

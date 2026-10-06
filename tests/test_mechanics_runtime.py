@@ -6,12 +6,167 @@ from pathlib import Path
 from types import SimpleNamespace
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
 import mechanics_runtime as runtime
 from W2W.assembly_operator_library import _bound_reference_factory
 from package_assembly_runtime import replace_yaml_scalar
+
+
+@pytest.fixture
+def storage_environment(tmp_path, monkeypatch):
+    for key in ("YAP_WORK_DIR", "TMPDIR", "TMP", "TEMP", "MPLCONFIGDIR",
+                "NUMBA_CACHE_DIR", "PYTHONPYCACHEPREFIX"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("YAP_WORK_DIR", str(tmp_path / "work"))
+    monkeypatch.setattr(tempfile, "tempdir", None)
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "1")
+    # Restore the parent test environment after configure_runtime_storage changes it.
+    for key in ("TMPDIR", "TMP", "TEMP", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        monkeypatch.setenv(key, str(tmp_path / "work" / key.lower()))
+        monkeypatch.delenv(key)
+    return tmp_path / "work"
+
+
+def test_storage_sets_safe_defaults_and_replaces_cached_tempdir(storage_environment, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", "/tmp")
+    directories = runtime.configure_runtime_storage()
+    work = storage_environment
+    assert directories["work"] == work
+    assert tempfile.tempdir == str(work / "temp")
+    assert tempfile.gettempdir() == str(work / "temp")
+    for key in ("TMPDIR", "TMP", "TEMP", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        assert Path(os.environ[key]).is_relative_to(work)
+        assert Path(os.environ[key]).is_dir()
+    assert runtime.configure_runtime_storage() == directories
+    with tempfile.TemporaryDirectory(dir=directories["TMPDIR"]) as temporary:
+        assert Path(temporary).is_relative_to(work)
+
+
+@pytest.mark.parametrize("key", ["YAP_WORK_DIR", "TMPDIR", "TMP", "TEMP",
+                                  "MPLCONFIGDIR", "NUMBA_CACHE_DIR", "PYTHONPYCACHEPREFIX"])
+def test_storage_rejects_unsafe_overrides_before_creation(storage_environment, monkeypatch, key):
+    monkeypatch.setenv(key, "/tmp/yap-forbidden-test")
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        runtime.configure_runtime_storage()
+    assert not storage_environment.exists()
+
+
+@pytest.mark.parametrize("value", ["", "relative/cache"])
+def test_storage_rejects_empty_or_relative_work_directory(storage_environment, monkeypatch, value):
+    monkeypatch.setenv("YAP_WORK_DIR", value)
+    with pytest.raises(ValueError, match="absolute"):
+        runtime.configure_runtime_storage()
+
+
+def test_storage_preserves_safe_overrides(storage_environment, tmp_path, monkeypatch):
+    for key in ("TMPDIR", "TMP", "TEMP", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        monkeypatch.setenv(key, str(tmp_path / key.lower()))
+    runtime.configure_runtime_storage()
+    assert tempfile.tempdir == str(tmp_path / "tmpdir")
+    for key in ("TMPDIR", "TMP", "TEMP", "MPLCONFIGDIR", "NUMBA_CACHE_DIR"):
+        assert os.environ[key] == str(tmp_path / key.lower())
+
+
+def test_storage_rejects_symlink_to_tmp(tmp_path):
+    alias = tmp_path / "alias"
+    alias.symlink_to("/tmp", target_is_directory=True)
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        runtime.validate_write_path(alias / "forbidden")
+
+
+@pytest.mark.parametrize("value", ["/tmp/yap", "/tmp/../yap", "/some/.snapshot/yap", "/some/#snapshot/yap"])
+def test_forbidden_output_paths_are_rejected(value):
+    with pytest.raises(ValueError):
+        runtime.validate_write_path(value)
+
+
+def test_storage_unwritable_directory_does_not_fallback(storage_environment, monkeypatch):
+    monkeypatch.setattr(runtime.os, "access", lambda *_args: False)
+    with pytest.raises(PermissionError, match="not writable"):
+        runtime.configure_runtime_storage()
+    assert tempfile.tempdir is None
+
+
+def test_large_mechanics_requires_explicit_non_home_scratch(storage_environment, monkeypatch):
+    monkeypatch.delenv("YAP_WORK_DIR")
+    with pytest.raises(ValueError, match="approved host-local"):
+        runtime.mechanics_work_directory()
+    monkeypatch.setenv("YAP_WORK_DIR", "/w/yap-forbidden-test")
+    with pytest.raises(ValueError, match="shared-home"):
+        runtime.mechanics_work_directory()
+
+
+def test_history_child_inherits_validated_storage(storage_environment, tmp_path, monkeypatch):
+    import history_mechanics_backend as backend
+
+    monkeypatch.setattr(backend, "_backend", lambda _name: {
+        "maximum_cycles": [1], "body_scope": "die", "profile": tmp_path / "profile.py"})
+    captured = {}
+    monkeypatch.setattr(backend, "write_birth_snapshot", lambda path, _batch: captured.update(snapshot=path))
+    def launch(command, **kwargs):
+        captured.update(command=command, **kwargs)
+        return SimpleNamespace(returncode=0)
+    monkeypatch.setattr(backend.subprocess, "run", launch)
+    monkeypatch.setattr(backend, "verify_completed_history", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(backend, "load_prebond_events", lambda *_args, **_kwargs: ((), ()))
+    batch = SimpleNamespace(body_scope="die", source_amplitude=[1., 1.])
+    backend.run_mechanics_history("test", tmp_path / "output", batch, maximum_cycle=1)
+    assert captured["snapshot"] == tmp_path / "output.initial_q6.json"
+    assert captured["env"]["TMPDIR"] == str(storage_environment / "temp")
+    assert captured["env"]["NUMBA_CACHE_DIR"] == str(storage_environment / "numba")
+    assert captured["env"]["MPLCONFIGDIR"] == str(storage_environment / "matplotlib")
+    assert captured["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert "-B" in captured["command"]
+    captured.clear()
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        backend.run_mechanics_history("test", "/tmp/yap-forbidden-output", batch, maximum_cycle=1)
+    assert not captured
+
+
+@pytest.mark.parametrize("entry", ["D2W/calculator_main.py", "D2W/simulator_main.py",
+                                   "W2W/calculator_main.py", "W2W/simulator_main.py"])
+def test_cli_rejects_tmp_before_third_party_imports(tmp_path, entry):
+    env = dict(os.environ)
+    env.update(TMPDIR="/tmp/yap-forbidden-test", PYTHONDONTWRITEBYTECODE="1")
+    env.pop("PYTHONPYCACHEPREFIX", None)
+    result = subprocess.run([sys.executable, "-B", str(runtime.ROOT / entry), "--help"],
+                            cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
+    assert result.returncode != 0
+    assert "/tmp storage is not allowed" in result.stderr
+    assert "matplotlib" not in result.stderr
+
+
+def test_legacy_d2w_temporary_output_validates_final_join(tmp_path):
+    from D2W.utils.util import get_runtime_temp_dir
+
+    cfg = SimpleNamespace(OUTPUT_DIR=str(tmp_path), INTERFACE="I1")
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        get_runtime_temp_dir(cfg, {"ds_name": "/tmp/yap-forbidden-design"})
+    alias = tmp_path / "design"
+    alias.symlink_to("/tmp", target_is_directory=True)
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        get_runtime_temp_dir(cfg, {"ds_name": "design"})
+
+
+@pytest.mark.parametrize("domain", ["D2W", "W2W"])
+def test_legacy_generated_configs_reject_tmp_before_saving(tmp_path, monkeypatch, domain):
+    import importlib
+    util = importlib.import_module(f"{domain}.utils.util")
+    cfg = SimpleNamespace(WAF_R_um=150000)
+    monkeypatch.setattr(util, "update_config_with_3dblox_params", lambda **_kwargs: {"I1": cfg})
+    if domain == "D2W":
+        monkeypatch.setattr(util, "finalize_cfg_for_mode", lambda value, **_kwargs: value)
+    saved = []
+    monkeypatch.setattr(util.OmegaConf, "save", lambda *_args: saved.append(True))
+    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+        util.get_config_dict(cfg_folder="/tmp/yap-forbidden-config", cfg_skeleton=None,
+                             ds_name="test", input_ds_dir=str(tmp_path), _3dbv_path="unused",
+                             _3dbx_path="unused", mode="w2w_modeling")
+    assert not saved
 
 
 @pytest.mark.parametrize("root", runtime.HISTORICAL_NATIVE_ROOTS)

@@ -3,6 +3,14 @@ import os
 import re
 from collections import Counter, defaultdict
 
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import FancyArrowPatch, Rectangle
@@ -75,6 +83,7 @@ def _short_instance_label(instance_name):
 
 
 def plot_design(design_dir, shared_root, output_path):
+    output_path = validate_write_path(output_path)
     chiplet_defs = _load_yaml(os.path.join(design_dir, "generated_chiplet_definitions.3dbv"))["ChipletDef"]
     stack_cfg = _load_yaml(os.path.join(design_dir, "generated_stack_config.3dbx"))
     chiplet_insts = stack_cfg["ChipletInst"]

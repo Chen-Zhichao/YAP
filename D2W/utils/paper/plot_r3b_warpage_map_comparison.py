@@ -9,6 +9,11 @@ import json
 from pathlib import Path
 import sys
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
 from matplotlib.colors import TwoSlopeNorm
@@ -124,6 +129,7 @@ def configure_fonts() -> str:
 
 def main() -> int:
     args = parse_args()
+    args.output = validate_write_path(args.output)
     contract = json.loads(
         (VALIDATION_ROOT / "R3B_MESH_MATCHED_SCORE_CONTRACT.json").read_text(
             encoding="utf-8"

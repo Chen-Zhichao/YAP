@@ -11,6 +11,7 @@ from omegaconf import OmegaConf
 
 from mechanics_runtime import (
     HISTORICAL_NATIVE_ROOTS, P2_COMPACT_MANIFEST_SHA256, resolve_resource, resource_directory,
+    validate_write_path,
 )
 
 
@@ -109,7 +110,7 @@ def replace_yaml_scalar(text, key, value):
 
 
 def export(destination, native_root, *, source_root=ROOT, map_path=None):
-    destination, native_root = Path(destination).absolute(), Path(native_root).absolute()
+    destination, native_root = validate_write_path(destination), Path(native_root).absolute()
     if {"#snapshot", ".snapshot"}.intersection(destination.parts + native_root.parts):
         raise ValueError("snapshot paths are not allowed")
     native_root = native_root.resolve()

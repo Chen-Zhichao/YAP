@@ -22,10 +22,10 @@ By default it processes:
 Examples
 --------
 Dry-run a single copied file:
-  python D2W/utils/assign_bump_names.py --file /tmp/test.bmap --dry-run
+  python D2W/utils/assign_bump_names.py --file input/test.bmap --dry-run
 
 Overwrite one file:
-  python D2W/utils/assign_bump_names.py --file /tmp/test.bmap
+  python D2W/utils/assign_bump_names.py --file input/test.bmap
 
 Overwrite all default designs with custom ratios:
   python D2W/utils/assign_bump_names.py --critical-ratio 0.15 --redundant-ratio 0.10 --pg-ratio 0.75 --dummy-ratio 0.00

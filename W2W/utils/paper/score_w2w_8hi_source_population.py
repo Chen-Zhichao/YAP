@@ -14,6 +14,11 @@ import sys
 import tempfile
 from time import perf_counter
 
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from mechanics_runtime import configure_runtime_storage, mechanics_work_directory, validate_write_path
+
+configure_runtime_storage()
 import numpy as np
 
 
@@ -49,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force-anchors", action="store_true")
     parser.add_argument("--anchor-indices", type=int, nargs="*")
     args = parser.parse_args()
+    args.output = validate_write_path(args.output)
     if not 0.0 <= args.gamma <= 1.0:
         parser.error("--gamma must lie in [0, 1]")
     return args
@@ -336,7 +342,8 @@ def build_affine_tensors(
     requested = set(range(WAFER_COUNT + 1)) if anchor_indices is None else set(anchor_indices)
     if any(index < 0 or index > WAFER_COUNT for index in requested):
         raise ValueError(f"anchor indices must lie in [0, {WAFER_COUNT}]")
-    ANCHOR_DIR.mkdir(parents=True, exist_ok=True)
+    scratch = mechanics_work_directory()
+    validate_write_path(ANCHOR_DIR).mkdir(parents=True, exist_ok=True)
     if force:
         for index in requested:
             path = ANCHOR_DIR / f"anchor_{index}.npz"
@@ -354,7 +361,7 @@ def build_affine_tensors(
         from threadpoolctl import threadpool_limits
 
         _install_generalized_process(api, runner, wafer_count=WAFER_COUNT)
-        with tempfile.TemporaryDirectory(prefix="yap_w2w8_package_") as temporary:
+        with tempfile.TemporaryDirectory(prefix="yap_w2w8_package_", dir=scratch) as temporary:
             package_root = Path(temporary)
             package = runner.package_for(
                 TARGET_TOTAL_UM, package_root, lambda **_values: None
@@ -378,7 +385,7 @@ def build_affine_tensors(
                     flush=True,
                 )
                 with tempfile.TemporaryDirectory(
-                    prefix=f"yap_w2w8_anchor{anchor_index}_"
+                    prefix=f"yap_w2w8_anchor{anchor_index}_", dir=scratch
                 ) as run_dir:
                     started = perf_counter()
                     with threadpool_limits(limits=1, user_api="blas"):

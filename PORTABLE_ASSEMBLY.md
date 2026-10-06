@@ -9,11 +9,16 @@ not a reproduction of a population-yield benchmark.
 Use Linux with Python 3.11 or 3.12. From the exported `YAP` directory:
 
 ```bash
+export YAP_WORK_DIR=/path/to/approved/work-disk/yap-work
+mkdir -p "$YAP_WORK_DIR/temp"
+export TMPDIR="$YAP_WORK_DIR/temp" TMP="$YAP_WORK_DIR/temp" TEMP="$YAP_WORK_DIR/temp"
+export NUMBA_CACHE_DIR="$YAP_WORK_DIR/numba" MPLCONFIGDIR="$YAP_WORK_DIR/matplotlib"
+export PIP_CACHE_DIR="$YAP_WORK_DIR/pip" PYTHONDONTWRITEBYTECODE=1
+unset PYTHONPYCACHEPREFIX
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 unset YAP_NATIVE_RUNTIME_DIR YAP_RUNTIME_RESOURCES
-export NUMBA_CACHE_DIR=/tmp/yap-numba-$USER
 
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
 python W2W/calculator_main.py \
@@ -21,6 +26,12 @@ python W2W/calculator_main.py \
   --mode w2w_modeling --ds_name design_6_4hi_p2 \
   --ds_dir W2W/input/design_6_4hi_p2 --mechanism-filter overlay
 ```
+
+Replace the work-disk placeholder before setup. No temporary files or caches
+may use `/tmp`; unsafe overrides and output paths are rejected. Small caches
+default to the Git-ignored `.cache/yap/` when no override is set. Large mechanics
+builds require explicit host-local scratch. Keep accepted results separately
+under your shared project and check the executing host's storage before a run.
 
 For D2W, replace every `W2W` with `D2W` and use `--mode d2w_modeling`.
 Both `stack.yaml` files select all five fixed-layer-order assembly trees.

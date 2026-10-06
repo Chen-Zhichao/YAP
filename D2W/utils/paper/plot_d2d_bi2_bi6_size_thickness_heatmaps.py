@@ -18,7 +18,11 @@ STACK_ROOT = REPO_ROOT.parent
 VALIDATION_ROOT = STACK_ROOT / "Ansys_Verify/12_stack_model_validation"
 DEFAULT_OUTPUT = REPO_ROOT / "D2W/output/case_studies/d2d_size_thickness_heatmaps"
 
-os.environ.setdefault("MPLCONFIGDIR", "/tmp/mpl-yap-d2d-size-thickness")
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(REPO_ROOT))
+from mechanics_runtime import configure_runtime_storage, validate_write_path
+
+configure_runtime_storage()
 sys.path.insert(0, str(STACK_ROOT))
 sys.path.insert(0, str(VALIDATION_ROOT))
 
@@ -457,6 +461,7 @@ def main(argv=None) -> None:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--recompute", action="store_true")
     args = parser.parse_args(argv)
+    args.output = validate_write_path(args.output)
     if not 0.0 < args.critical_fraction <= 1.0:
         parser.error("--critical-fraction must lie in (0, 1]")
     if not 0.0 <= args.color_min < 100.0:
