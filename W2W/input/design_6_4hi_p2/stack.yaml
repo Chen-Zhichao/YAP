@@ -1,0 +1,50 @@
+# Four-wafer F2B assembly study. Replace the illustrative bows with known values.
+stack:
+  # Fixed signed center-minus-mid-edge bows, ordered bottom to top. Not re-sampled.
+  initial_bows_um: [10.0, -10.0, 20.0, -20.0]
+  # Also accepts one quoted tree or a list of quoted trees.
+  # assembly_orders: ["(((1,2),3),4)", "((1,2),(3,4))"]
+  assembly_orders: all
+  geometry:
+    diameter_mm: 300.0
+    initial_total_thickness_um: 775.0
+    target_total_thickness_um: 50.0
+    front_bi_thickness_um: 1.5
+    back_bi_thickness_um: 1.5
+    beol_thickness_um: 10.0
+  # Existing BEOL-only fabrication source, not a validated thick-wafer material model.
+  fabrication_layers:
+    - name: front_BI
+      thickness_um: 1.5
+      e_mpa: 84388.273369263
+      nu: 0.20337942194439157
+      eigenstrain_per_amplitude: 0.0
+    - name: BEOL
+      thickness_um: 10.0
+      e_mpa: 93300.0
+      nu: 0.2295
+      eigenstrain_per_amplitude: 1.0
+    - name: Si
+      thickness_um: 763.5
+      e_mpa: 99496.90200129498
+      nu: 0.2917809724509618
+      eigenstrain_per_amplitude: 0.0
+  process:
+    # Native execution currently supports only this existing reference thermal recipe.
+    room_temperature_c: 25.0
+    anneal_temperature_c: 350.0
+    ramp_up_s: 650.0
+    dwell_s: 3600.0
+    cool_down_s: 650.0
+
+mechanics:
+  # Relative to this YAML, not the shell working directory. Operator data stays external.
+  # Existing BI2/P24 preview: 2-um pitch and prepared TOTAL50, retaining 37-um Si/TSV.
+  operator_package: resource:compact_p2/packages/BI2_50.json
+  temporal_profile: distilled26
+  layer_workers: 1
+  metric: {model: disk}
+  frozen_preview: true
+
+# The normal calculator reads pad/placement/overlay parameters from this design's
+# config and compact_layout.yaml. Do not duplicate them in an inline overlay section.

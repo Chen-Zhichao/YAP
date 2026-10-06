@@ -1,0 +1,45 @@
+stack:
+  initial_bows_um:
+  - 10.0
+  - -10.0
+  - 20.0
+  - -20.0
+  assembly_orders: all
+  geometry:
+    diameter_mm: 300.0
+    initial_total_thickness_um: 775.0
+    target_total_thickness_um: 51.5
+    front_bi_thickness_um: 1.5
+    back_bi_thickness_um: 1.5
+    beol_thickness_um: 10.0
+  fabrication_layers:
+  - name: front_BI
+    thickness_um: 1.5
+    e_mpa: 84388.273369263
+    nu: 0.20337942194439157
+    eigenstrain_per_amplitude: 0.0
+  - name: BEOL
+    thickness_um: 10.0
+    e_mpa: 93300.0
+    nu: 0.2295
+    eigenstrain_per_amplitude: 1.0
+  - name: Si
+    thickness_um: 763.5
+    e_mpa: 99496.90200129498
+    nu: 0.2917809724509618
+    eigenstrain_per_amplitude: 0.0
+  process:
+    room_temperature_c: 25.0
+    anneal_temperature_c: 350.0
+    ramp_up_s: 650.0
+    dwell_s: 3600.0
+    cool_down_s: 650.0
+  description: New fixed-bow tree capability experiment using reference p6/P32; pre-merge
+    lower-wafer thinning, not original sequential reference process.
+mechanics:
+  operator_package: resource:compact_p6/packages/BI6_50.json
+  temporal_profile: distilled101
+  layer_workers: 1
+  metric:
+    model: disk
+  frozen_preview: true

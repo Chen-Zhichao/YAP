@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# Wafers and Dies intialization for the yield model for hybrid bonding
+#### Author: Zhichao Chen
+#### Date: Feb 3, 2026
+
+import os
+import time
+import numpy as np
+from wafer_die_stack_initialization import WaferStack
+from overlay_yield_calculator import stack_overlay_yield_calculator
+from defect_yield_calculator import stack_defect_yield_calculator
+from Cu_expansion_yield_calculator import stack_stress_yield_calculator
+from esd_yield_calculator import stack_esd_yield_calculator
+from warpage_yield_calculator import stack_warpage_yield_calculator
+from chiplet_yield import chiplet_yield_records, print_chiplet_yield_table
+from yield_mechanism_policy import (
+    active_failure_mechanisms,
+    disabled_requested_mechanisms,
+)
+
+
+def _set_skipped_mechanism_yield_to_one(waf_stack, mechanism):
+    for interface_name in waf_stack.die_yield_list_per_interface_dict:
+        waf_stack.die_yield_list_per_interface_dict[interface_name][mechanism] = np.ones(
+            waf_stack.num_dies_per_wafer,
+            dtype=float,
+        )
+
+
+def Assembly_Yield_Calculator(
+    input_args: dict,
+    cfg_dict: dict,
+    pad_bitmap_collection_dict: dict,
+):
+    start_time = time.time()
+
+    # Initialize the wafer stack with dies and pads
+    waf_stack = WaferStack(
+        cfg_dict=cfg_dict,
+        pad_bitmap_collection_dict=pad_bitmap_collection_dict,
+        mode=input_args['mode'],
+    )
+    waf_stack_init_time = time.time() - start_time
+    print("Wafer stack initialization time: {:.2f} seconds.".format(waf_stack_init_time))
+    active_mechanisms = active_failure_mechanisms(input_args)
+    disabled_requested = disabled_requested_mechanisms(input_args)
+    if disabled_requested:
+        print(
+            "Temporarily disabled yield mechanisms ignored: {}. "
+            "Warpage remains enabled only as an overlay-error input.".format(
+                ", ".join(sorted(disabled_requested))
+            )
+        )
+    print("Active yield mechanisms: {}.".format(", ".join(sorted(active_mechanisms))))
+    
+    # Calculate the overlay yield
+    _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
+    if "overlay" in active_mechanisms:
+        stack_overlay_yield_calculator(
+            cfg_dict                    =   cfg_dict,
+            waf_stack                   =   waf_stack,
+            _3dbx_path                  =   _3dbx_path,
+        )
+    else:
+        _set_skipped_mechanism_yield_to_one(waf_stack, "overlay")
+    overlay_yield_time = time.time() - start_time - waf_stack_init_time
+    print("Overlay yield calculation time: {:.2f} seconds.".format(overlay_yield_time))
+
+    # Calculate the defect distribution
+    if "particle" in active_mechanisms:
+        stack_defect_yield_calculator(
+            cfg_dict                    =   cfg_dict,
+            waf_stack                   =   waf_stack,
+        )
+    else:
+        _set_skipped_mechanism_yield_to_one(waf_stack, "particle")
+    defect_yield_time = time.time() - start_time - waf_stack_init_time - overlay_yield_time
+    print("Defect yield calculation time: {:.2f} seconds.".format(defect_yield_time))
+
+    # Calculate the Cu expansion yield
+    if "mechanical" in active_mechanisms:
+        stack_stress_yield_calculator(
+            cfg_dict                    =   cfg_dict,
+            waf_stack                   =   waf_stack,
+        )
+    else:
+        _set_skipped_mechanism_yield_to_one(waf_stack, "mechanical")
+
+
+    Cu_expansion_yield_time = time.time() - start_time - waf_stack_init_time - overlay_yield_time - defect_yield_time
+    print("Cu expansion yield calculation time: {:.2f} seconds.".format(Cu_expansion_yield_time))
+
+    # Calculate the ESD yield
+    if "ESD" in active_mechanisms:
+        stack_esd_yield_calculator(
+            cfg_dict                    =   cfg_dict,
+            waf_stack                   =   waf_stack,
+            pad_bitmap_collection_dict  =   pad_bitmap_collection_dict,
+        )
+    else:
+        _set_skipped_mechanism_yield_to_one(waf_stack, "ESD")
+    esd_yield_time = time.time() - start_time - waf_stack_init_time - overlay_yield_time - defect_yield_time - Cu_expansion_yield_time
+    print("ESD yield calculation time: {:.2f} seconds.".format(esd_yield_time))
+
+    # Calculate final stack warpage yield
+    if "warpage" in active_mechanisms:
+        stack_warpage_yield_calculator(
+            cfg_dict                    =   cfg_dict,
+            waf_stack                   =   waf_stack,
+            _3dbx_path                  =   _3dbx_path,
+        )
+    else:
+        _set_skipped_mechanism_yield_to_one(waf_stack, "warpage")
+    warpage_yield_time = time.time() - start_time - waf_stack_init_time - overlay_yield_time - defect_yield_time - Cu_expansion_yield_time - esd_yield_time
+    print("Warpage yield calculation time: {:.2f} seconds.".format(warpage_yield_time))
+
+    chiplet_records = []
+    chiplet_start_time = time.time()
+    if "chiplet" in active_mechanisms:
+        design_root_dir = input_args.get("design_root_dir") or input_args.get("ds_dir", "")
+        chiplet_records = chiplet_yield_records(
+            cfg_dict,
+            design_root_dir,
+        )
+        waf_stack.set_chiplet_yield_records(chiplet_records)
+    chiplet_yield_time = time.time() - chiplet_start_time
+    print("Chiplet yield calculation time: {:.2f} seconds.".format(chiplet_yield_time))
+
+    die_stack_yield, die_stack_yield_list = waf_stack.get_die_stack_yield()
+    waf_stack.print_interface_yield_table()
+    if chiplet_records:
+        print_chiplet_yield_table(chiplet_records)
+    bonding_stack_yield_list = np.ones(waf_stack.num_dies_per_wafer, dtype=float)
+    for interface_yields in waf_stack.die_yield_list_per_interface_dict.values():
+        bonding_stack_yield_list *= interface_yields["overall"]
+    print(f"Calculated bonding stack yield: {np.mean(bonding_stack_yield_list):.6f}")
+    print(f"Calculated total stack yield: {die_stack_yield:.6f}")
+       
+
+    del waf_stack
+
+    return die_stack_yield, die_stack_yield_list

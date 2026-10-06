@@ -1,0 +1,9 @@
+{
+  "schema": "yap.native_resources.v1",
+  "resources": {
+    "compact_p2": "results/operators/p2_p24",
+    "geometry": "results/geometry",
+    "compact_p6": "results/operators/p6_p32",
+    "w2w_corrected": "results/w2w_reference"
+  }
+}
