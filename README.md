@@ -336,17 +336,6 @@ The compact central critical region is a layout surrogate, not exact real-bmap
 all-pad survival. Particle, chiplet, dishing, peeling and ESD parameters remain
 in the full config but are not scored in assembly-order mode.
 
-These are **unvalidated engineering studies**, not benchmark reproductions or
-qualified process recommendations. The natural-q6 initial-source approximation,
-free annealing, ideal flattening and per-material clocks remain model
-assumptions. The prepared-wafer 31-mm bow result and creep-clock interpretation
-are unresolved. D2W models a free die-site column, not a finite receiving wafer
-or carrier; its `square_affine` metric retains normal/shear coupling and
-twist but remains unvalidated. W2W uses the `disk` metric. New assembly
-paths retain `physical_readiness: false`, and missing data fail rather than
-producing a fabricated ranking. Implementation details and experiment evidence
-remain in [W2W/ASSEMBLY_ORDER.md](W2W/ASSEMBLY_ORDER.md).
-
 # File Formats
 
 **1. Bump Map (.bmap):**
