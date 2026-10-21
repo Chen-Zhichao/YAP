@@ -15,10 +15,15 @@ from W2W.assembly_design import load_design as load_w2w
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = [
-    ("D2W", "design_6_4hi_p2", .86, 2., 5000),
-    ("W2W", "design_6_4hi_p2", .99, 2., 5000),
-    ("W2W", "design_6_4hi_p6_reference", .89, 6., 1666),
+    ("D2W", "design_6_4hi_p2", .86, 2., 5000, 50.),
+    ("D2W", "design_6_4hi_p2_t30", .86, 2., 5000, 30.),
+    ("D2W", "design_6_4hi_p2_t80", .86, 2., 5000, 80.),
+    ("W2W", "design_6_4hi_p2", .99, 2., 5000, 775.),
+    ("W2W", "design_6_4hi_p6_reference", .89, 6., 1666, 775.),
 ]
+PLANNING_PROFILES = [(domain, name, initial_total)
+                     for domain, name, _, _, _, initial_total in PROFILES
+                     if initial_total in (30., 80.)]
 ACTIVE_FIELDS = (
     "ASSEMBLY_ORDER_ENABLED", "OUTPUT_DIR", "ANNEAL_MODE", "WAF_R_um", "dice_width",
     "PAD_ARRANGE_PATTERN", "CRITICAL_PAD_FRACTION", "POWER_GROUND_PAD_FRACTION",
@@ -36,8 +41,8 @@ def config_path(domain, name):
     return ROOT / domain / "configs" / name / f"{name}.yaml"
 
 
-@pytest.mark.parametrize("domain,name,gamma,pitch,rows", PROFILES)
-def test_full_profiles_keep_p6_sections_and_current_parameters(domain, name, gamma, pitch, rows):
+@pytest.mark.parametrize("domain,name,gamma,pitch,rows,initial_total", PROFILES)
+def test_full_profiles_keep_p6_sections_and_current_parameters(domain, name, gamma, pitch, rows, initial_total):
     document = OmegaConf.load(config_path(domain, name))
     reference = OmegaConf.load(ROOT / domain / "configs/design_6_4hi_p6/design_6_4hi_p6.yaml")
     assert set(document) == set(reference)
@@ -55,9 +60,9 @@ def test_full_profiles_keep_p6_sections_and_current_parameters(domain, name, gam
         assert cfg.PAD_ARR_ROW == cfg.PAD_ARR_COL == rows
         for field in ("ITF_TOP_THICK_um", "ITF_BOT_THICK_um"):
             if field in template:
-                assert cfg[field] == (50. if domain == "D2W" else 775.)
+                assert cfg[field] == initial_total
         if "DIE_THICHKNESS_um" in template:
-            assert cfg.DIE_THICHKNESS_um == 50.
+            assert cfg.DIE_THICHKNESS_um == initial_total
         assert cfg.INPUT_DIR == f"input/{name}/"
         assert cfg.INTERFACE is None
         for field in ("TOP_INI_BOW_MEAN_um", "TOP_INI_BOW_STD_um",
@@ -65,8 +70,67 @@ def test_full_profiles_keep_p6_sections_and_current_parameters(domain, name, gam
             assert cfg[field] is None
 
 
-@pytest.mark.parametrize("domain,name,gamma,pitch,rows", PROFILES)
-def test_retained_inactive_groups_do_not_change_plan_or_overlay(domain, name, gamma, pitch, rows):
+@pytest.mark.parametrize("domain,name,total", PLANNING_PROFILES)
+def test_plan_only_profiles_keep_coherent_geometry_and_calibration_inputs(domain, name, total):
+    base_name = name.rsplit("_t", 1)[0]
+    directory = ROOT / domain / "input" / name
+    baseline = ROOT / domain / "input" / base_name
+    stack_text = (directory / "stack.yaml").read_text(encoding="ascii")
+    design = OmegaConf.create(stack_text)
+    source = OmegaConf.load(baseline / "stack.yaml")
+    retained = total - 13.
+    geometry = design.stack.geometry
+    if domain == "D2W":
+        assert geometry.total_thickness_um == total
+        assert design.stack.allow_offline_substacks is True
+    else:
+        assert geometry.initial_total_thickness_um == geometry.target_total_thickness_um == total
+    assert geometry.front_bi_thickness_um == geometry.back_bi_thickness_um == 1.5
+    assert geometry.beol_thickness_um == 10.
+    assert [layer.thickness_um for layer in design.stack.fabrication_layers] == [1.5, 10., retained, 1.5]
+    for layer, original in zip(design.stack.fabrication_layers, source.stack.fabrication_layers):
+        for field in ("name", "e_mpa", "nu", "eigenstrain_per_amplitude"):
+            assert layer[field] == original[field]
+    assert design.stack.initial_bows_um == source.stack.initial_bows_um
+    assert design.stack.process == source.stack.process
+    assert design.stack.assembly_orders == "all"
+    assert design.mechanics.operator_package == f"resource:prepared_p2_native/packages/BI2_{int(total)}.json"
+    assert design.mechanics.get("frozen_preview", False) is False
+    assert design.mechanics.temporal_profile == "distilled26"
+    assert design.mechanics.metric == source.mechanics.metric
+    assert "audited p2/d1 engineering candidate" in stack_text
+    assert "thermal accuracy and assembly yields are not validated" in stack_text
+    assert "borrowed TOTAL50 calibration assumptions" in stack_text
+    assert "not verified material properties for this geometry" in stack_text
+    assert "Recompute calibration q6 from this ledger" in stack_text
+
+    body = "Die" if domain == "D2W" else "Wafer"
+    definitions = OmegaConf.load(directory / "generated_chiplet_definitions.3dbv")
+    topology = OmegaConf.load(directory / "generated_stack_config.3dbx")
+    assert topology.Design.name == name
+    assert (directory / "compact_layout.yaml").read_bytes() == (baseline / "compact_layout.yaml").read_bytes()
+    for index in range(1, 5):
+        key = f"{body}_{index}"
+        assert definitions.ChipletDef[key].thickness == total
+        assert topology.Stack[key].z == (index - 1) * total
+        assert (directory / f"{key}.3dbf").read_bytes() == (baseline / f"{key}.3dbf").read_bytes()
+
+    document = OmegaConf.load(config_path(domain, name))
+    original = OmegaConf.load(config_path(domain, base_name))
+    changed = {"INPUT_DIR", "DESIGN", "ITF_TOP_THICK_um", "ITF_BOT_THICK_um",
+               "DIE_THICHKNESS_um", "DIE_THICKNESS_um", "B_Chip_T", "T_Chip_T",
+               "B_Sub_T", "T_Sub_T"}
+    for mode, cfg in document.items():
+        for field, value in original[mode].items():
+            if field not in changed:
+                assert cfg[field] == value
+        for prefix in ("B", "T"):
+            assert cfg[f"{prefix}_Chip_T"] == pytest.approx(10.e-6)
+            assert cfg[f"{prefix}_Sub_T"] == pytest.approx(retained * 1.e-6)
+
+
+@pytest.mark.parametrize("domain,name,gamma,pitch,rows,initial_total", PROFILES)
+def test_retained_inactive_groups_do_not_change_plan_or_overlay(domain, name, gamma, pitch, rows, initial_total):
     full = OmegaConf.load(config_path(domain, name))[f"{domain.lower()}_modeling"]
     full.OVERLAY_SAMPLES = 8
     compact = OmegaConf.create({field: full[field] for field in ACTIVE_FIELDS if field in full})
@@ -80,9 +144,9 @@ def test_retained_inactive_groups_do_not_change_plan_or_overlay(domain, name, ga
     assert provenance["critical_pad_count"] == compact_provenance["critical_pad_count"]
 
 
-@pytest.mark.parametrize("domain,name,gamma,pitch,rows", PROFILES)
+@pytest.mark.parametrize("domain,name,gamma,pitch,rows,initial_total", PROFILES)
 @pytest.mark.parametrize("entrypoint", ["calculator_main.py", "simulator_main.py"])
-def test_reserved_simulation_profiles_rejected_before_dispatch(tmp_path, domain, name, gamma, pitch, rows, entrypoint):
+def test_reserved_simulation_profiles_rejected_before_dispatch(tmp_path, domain, name, gamma, pitch, rows, initial_total, entrypoint):
     design = tmp_path / "design"
     shutil.copytree(ROOT / domain / "input" / name, design)
     original_files = {path.name: path.read_bytes() for path in design.iterdir() if path.is_file()}

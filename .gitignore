@@ -22,6 +22,7 @@ dist/
 .snapshot/
 
 # Results at any depth, not just a root-level output directory.
+/user_runs/
 output/
 paper_results/
 temp/
@@ -77,17 +78,6 @@ W2W/input/design_6_4hi_p2/*
 W2W/configs/design_6_4hi_p2/*
 !W2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml
 
-!W2W/input/design_6_4hi_p2_no_thinning/
-W2W/input/design_6_4hi_p2_no_thinning/*
-!W2W/input/design_6_4hi_p2_no_thinning/stack.yaml
-!W2W/input/design_6_4hi_p2_no_thinning/compact_layout.yaml
-!W2W/input/design_6_4hi_p2_no_thinning/generated_chiplet_definitions.3dbv
-!W2W/input/design_6_4hi_p2_no_thinning/generated_stack_config.3dbx
-!W2W/input/design_6_4hi_p2_no_thinning/*.3dbf
-!W2W/configs/design_6_4hi_p2_no_thinning/
-W2W/configs/design_6_4hi_p2_no_thinning/*
-!W2W/configs/design_6_4hi_p2_no_thinning/design_6_4hi_p2_no_thinning.yaml
-
 !D2W/input/design_6_4hi_p2/
 D2W/input/design_6_4hi_p2/*
 !D2W/input/design_6_4hi_p2/stack.yaml
@@ -98,6 +88,28 @@ D2W/input/design_6_4hi_p2/*
 !D2W/configs/design_6_4hi_p2/
 D2W/configs/design_6_4hi_p2/*
 !D2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml
+
+!D2W/input/design_6_4hi_p2_t30/
+D2W/input/design_6_4hi_p2_t30/*
+!D2W/input/design_6_4hi_p2_t30/stack.yaml
+!D2W/input/design_6_4hi_p2_t30/compact_layout.yaml
+!D2W/input/design_6_4hi_p2_t30/generated_chiplet_definitions.3dbv
+!D2W/input/design_6_4hi_p2_t30/generated_stack_config.3dbx
+!D2W/input/design_6_4hi_p2_t30/*.3dbf
+!D2W/configs/design_6_4hi_p2_t30/
+D2W/configs/design_6_4hi_p2_t30/*
+!D2W/configs/design_6_4hi_p2_t30/design_6_4hi_p2_t30.yaml
+
+!D2W/input/design_6_4hi_p2_t80/
+D2W/input/design_6_4hi_p2_t80/*
+!D2W/input/design_6_4hi_p2_t80/stack.yaml
+!D2W/input/design_6_4hi_p2_t80/compact_layout.yaml
+!D2W/input/design_6_4hi_p2_t80/generated_chiplet_definitions.3dbv
+!D2W/input/design_6_4hi_p2_t80/generated_stack_config.3dbx
+!D2W/input/design_6_4hi_p2_t80/*.3dbf
+!D2W/configs/design_6_4hi_p2_t80/
+D2W/configs/design_6_4hi_p2_t80/*
+!D2W/configs/design_6_4hi_p2_t80/design_6_4hi_p2_t80.yaml
 
 !W2W/input/design_6_4hi_p6_reference/
 W2W/input/design_6_4hi_p6_reference/*

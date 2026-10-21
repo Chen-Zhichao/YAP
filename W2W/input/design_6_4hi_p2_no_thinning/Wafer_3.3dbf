@@ -1,6 +1,0 @@
-Bump_Types:
-  silicon_individual_bonding:
-    bump_size: 1.0
-    through_via_size: 1.0
-Chiplet_Grid:
-  pitch: 2.0

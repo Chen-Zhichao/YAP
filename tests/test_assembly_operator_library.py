@@ -1,6 +1,6 @@
 """Small native algebra fixtures, not physical validation of the new route."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 import hashlib
 import json
@@ -12,15 +12,13 @@ import pytest
 
 from W2W import assembly_operator_library as adapter
 
-if not (Path(__file__).resolve().parents[2] / "Ansys_Verify/12_stack_model_validation").is_dir():
-    pytest.skip("sibling native mechanics repository is not installed", allow_module_level=True)
-
-
 def geometry():
     return {**adapter._GEOMETRY_UM, "diameter_mm": 300.}
 
 
 def native(name):
+    if not (Path(__file__).resolve().parents[2] / "Ansys_Verify/12_stack_model_validation").is_dir():
+        pytest.skip("sibling native mechanics repository is not installed")
     return adapter._import_mechanics_module(name)
 
 
@@ -207,6 +205,19 @@ def test_library_rejects_wrong_thickness_and_coordinate_scales():
         adapter._check_library(replace(base, port_coordinate_scale=np.array([2.])))
 
 
+def test_prepared_aliases_preserve_checked_observed_thickness():
+    base, _ = library()
+    source = replace(base,
+        operators={adapter._SOURCE_KEYS[key]: value for key, value in base.operators.items()},
+        thickness_mm={adapter._SOURCE_KEYS[key]: value for key, value in base.thickness_mm.items()})
+    prepared = adapter._prepared_library(source)
+    assert prepared.thickness_mm == base.thickness_mm
+    assert prepared.operators == base.operators
+    bad = replace(source, thickness_mm={**source.thickness_mm, "tsv_si_h37": .067})
+    with pytest.raises(ValueError, match="native dataset thickness mismatch"):
+        adapter._prepared_library(bad)
+
+
 def test_pure_si_rejects_inelastic_segment():
     base, _ = library()
     op = base.operators["bi"]
@@ -336,3 +347,381 @@ def test_fine_cap_failure_reports_error_without_relaxing_gate(monkeypatch):
     monkeypatch.setattr(adapter, "_abd_audit", failed_audit)
     with pytest.raises(ValueError, match="defect=0.0159, limit=0.01"):
         adapter._build_cap(base, base.operators)
+
+
+@dataclass
+class PreparedFixtureCard:
+    value: float = 1.
+
+
+@dataclass
+class PreparedFixtureLibrary:
+    operators: dict
+    thickness_mm: dict
+    membrane_bending_coordinate_scale: np.ndarray
+    port_coordinate_scale: np.ndarray
+    cell_area_mm2: float = 36e-6
+    port_rank_per_face: int = 64
+    common_port_gauge_vectors: object = None
+
+
+def prepared_fixture_geometry(total, kind="die"):
+    layers = dict(front_bi_thickness_um=1.5, back_bi_thickness_um=1.5, beol_thickness_um=10.)
+    if kind == "die":
+        return dict(layers, total_thickness_um=total, width_mm=10., length_mm=10.)
+    return dict(layers, initial_total_thickness_um=total, target_total_thickness_um=total, diameter_mm=300.)
+
+
+@pytest.fixture
+def prepared_native64_fixture(tmp_path, monkeypatch):
+    # These deliberately non-scientific artifacts exercise only the admission contract.
+    for directory in ("packages", "audit", "shared", "datasets", "prepared", "build_receipts"):
+        (tmp_path / directory).mkdir()
+    def blob(relative, payload):
+        path = tmp_path / relative
+        path.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+    def dataset_blob(relative, key):
+        path = tmp_path / relative
+        content = hashlib.sha256(f"synthetic {key} content".encode()).hexdigest()
+        np.savez(path, content_sha256=np.array(content))
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    basis_hash = blob("shared/port_basis.npz", b"synthetic native64 basis")
+    monkeypatch.setattr(adapter, "_PREPARED_NATIVE64_BASIS_SHA256", basis_hash)
+    monkeypatch.setattr(adapter, "_input_path", lambda base, value: (Path(base) / value).resolve())
+    catalog_path = tmp_path / "catalog.json"
+    monkeypatch.setattr(adapter, "_PREPARED_OPERATOR_CATALOG", catalog_path)
+    shared = {}
+    for key in ("bi", "beol"):
+        shared[key] = (dataset_blob(f"shared/{key}.npz", key),
+                       blob(f"shared/{key}_prepared.npz", f"synthetic {key} geometry".encode()))
+    parent = dict(schema="exp12.ofat.geometry_package.v1", name="BI2_50", rank=64, ready=True,
+        state="READY_ENGINEERING_PREVIEW", port_basis="/old/unavailable/port_basis.npz",
+        port_basis_sha256=basis_hash, datasets={key: f"/old/unavailable/{key}.npz" for key in shared},
+        dataset_sha256={key: hashes[0] for key, hashes in shared.items()})
+    packages, receipts, source_datasets = {}, {}, {}
+    for total in (30., 80.):
+        retained = total - 13.
+        target = f"tsv_si_h{retained:g}"
+        hashes = dict(shared)
+        hashes[target] = (dataset_blob(f"datasets/{target}.npz", target),
+                          blob(f"prepared/{target}.npz", f"synthetic {target} geometry".encode()))
+        transfer_hash = blob(f"build_receipts/{target}_bubble.npz", f"synthetic {target} bubbles".encode())
+        raw_hash = blob(f"build_receipts/{target}_raw_bubble.npz", f"synthetic {target} raw bubbles".encode())
+        ds_paths = {key: f"../shared/{key}.npz" if key in shared else f"../datasets/{key}.npz" for key in hashes}
+        pg_paths = {key: f"../shared/{key}_prepared.npz" if key in shared else f"../prepared/{key}.npz" for key in hashes}
+        packages[total] = dict(schema="yap.prepared_p2_geometry_package.v1", name=f"BI2_{total:g}", rank=64,
+            ready=False, state="CANDIDATE_NOT_VALIDATED", datasets=ds_paths, prepared=pg_paths,
+            dataset_sha256={key: value[0] for key, value in hashes.items()},
+            prepared_sha256={key: value[1] for key, value in hashes.items()},
+            port_basis="../shared/port_basis.npz", port_basis_sha256=basis_hash,
+            parent_package="../shared/parent_BI2_50.json", audit_receipt=f"../audit/BI2_{total:g}.json")
+        bindings, geometry_bindings = {}, {}
+        for key, value in hashes.items():
+            thickness = dict(bi=.0015, beol=.010).get(key, retained / 1000.)
+            content = hashlib.sha256(f"synthetic {key} content".encode()).hexdigest()
+            bubble_size = 3 if key in shared else 167
+            bindings[key] = dict(sha256=value[0], dataset_content_sha256=content,
+                cu_point_count=2, thickness_mm=thickness, macro_size=134, bubble_size=bubble_size)
+            geometry_bindings[key] = dict(sha256=value[1], parent_dataset_content_sha256=content)
+            source_datasets[key] = SimpleNamespace(macro_size=134, bubble_size=bubble_size,
+                macro_coordinate_scale=np.ones(134), geometry_signature=dict(thickness_mm=thickness, cell_area_mm2=36e-6),
+                cu_card=PreparedFixtureCard(), reference_constant_materials={"si": PreparedFixtureCard()},
+                reference_temperature_c=25., linear_reference_mode="material_separable_bbar")
+        transfer = dict(source_thickness_um=38.5, target_thickness_um=retained, source_pitch_um=6.,
+            rank=167, observed_rank=167, source_rank=96, raw_transferred_rank=96, closure_added_rank=71,
+            singular_value_min=1., singular_value_max=1., gram_defect=1e-12,
+            face_trace=1e-12, relative_periodic_jump=1e-6,
+            source_bubble_sha256=hashlib.sha256(b"donor bubbles").hexdigest(),
+            source_dataset_sha256=hashlib.sha256(b"donor dataset").hexdigest(),
+            transferred_bubble_sha256=transfer_hash,
+            method="normalized_thickness_displacement_transfer_plus_inplane_swap_closure",
+            transferred_bubble=dict(path=f"../build_receipts/{target}_bubble.npz", sha256=transfer_hash),
+            raw_transferred_bubble_sha256=raw_hash,
+            raw_transferred_bubble=dict(path=f"../build_receipts/{target}_raw_bubble.npz", sha256=raw_hash),
+            raw_transfer_audit=dict(rank=96, observed_rank=96, singular_value_min=1., singular_value_max=1.,
+                gram_defect=1e-12, face_trace=1e-12, relative_periodic_jump=1e-6))
+        receipts[total] = dict(schema="yap.prepared_p2_operator_audit.v1", state="PASS_STRUCTURAL_ENGINEERING_CANDIDATE",
+            total_thickness_um=total, retained_si_thickness_um=retained, bonding_pitch_um=2.,
+            bonding_pad_diameter_um=1., rank=64, port_basis_sha256=basis_hash, stage_count=6,
+            all_cu_points_retained=True, thermal_geometry_validated=False, face_node_shape=[46, 46], cell_area_mm2=36e-6,
+            datasets=bindings, prepared=geometry_bindings, transfer_audit=transfer)
+    def write_json(path, value):
+        payload = json.dumps(value, sort_keys=True).encode()
+        path.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+    def seal():
+        parent_hash = write_json(tmp_path / "shared/parent_BI2_50.json", parent)
+        catalog = dict(schema="yap.prepared_p2_operator_catalog.v1", packages={})
+        for total in (30., 80.):
+            packages[total]["parent_package_sha256"] = parent_hash
+            receipts[total]["parent_package_sha256"] = parent_hash
+            audit_hash = write_json(tmp_path / f"audit/BI2_{total:g}.json", receipts[total])
+            packages[total]["audit_receipt_sha256"] = audit_hash
+            package_hash = write_json(tmp_path / f"packages/BI2_{total:g}.json", packages[total])
+            catalog["packages"][f"{total:g}"] = dict(package_sha256=package_hash, audit_sha256=audit_hash,
+                parent_package_sha256=parent_hash, port_basis_sha256=basis_hash)
+        write_json(catalog_path, catalog)
+        return catalog
+    def load_library(datasets, basis, **options):
+        operators, thicknesses = {}, {}
+        for key in datasets:
+            data = source_datasets[key]
+            operators[key] = SimpleNamespace(macro_size=134, bubble_size=data.bubble_size, macro_coordinate_scale=np.ones(134),
+                cu_point_count=2, weights_mm3=np.ones(2), cu_card=PreparedFixtureCard())
+            thicknesses[key] = data.geometry_signature["thickness_mm"]
+        return PreparedFixtureLibrary(operators, thicknesses, np.ones(6), np.ones(64))
+    runtime = SimpleNamespace(__file__=adapter.__file__, load_q6_sequential_library=Mock(side_effect=load_library))
+    data_module = SimpleNamespace(__file__=adapter.__file__, LayerROMDataset=SimpleNamespace(
+        load=Mock(side_effect=lambda path, **_: source_datasets[path.stem])))
+    imported = Mock(side_effect=lambda name: {"exp12_mindlin_sequential_runtime": runtime,
+                                             "exp12_layer_rom_dataset": data_module}[name])
+    monkeypatch.setattr(adapter, "_import_mechanics_module", imported)
+    monkeypatch.setattr(adapter, "_build_cap", Mock(side_effect=AssertionError("prepared bodies have no cap")))
+    seal()
+    return SimpleNamespace(root=tmp_path, packages=packages, receipts=receipts, parent=parent,
+        datasets=source_datasets, catalog_path=catalog_path, seal=seal, runtime=runtime,
+        data_module=data_module, imported=imported)
+
+
+@pytest.mark.parametrize("total", [30., 80.])
+def test_prepared_native64_loads_exact_layers_without_cap(prepared_native64_fixture, total):
+    fixture = prepared_native64_fixture
+    path = fixture.root / f"packages/BI2_{total:g}.json"
+    geometry = prepared_fixture_geometry(total)
+    library, provenance = adapter.load_prepared_die_library(path, geometry)
+    assert set(library.operators) == {"bi", "beol", "retained_si"}
+    assert library.thickness_mm == dict(bi=.0015, beol=.010, retained_si=(total - 13.) / 1000.)
+    assert provenance["port_rank_per_face"] == 64
+    assert provenance["operator_inputs_verified"] is True
+    assert provenance["physical_readiness"] is False
+    assert provenance["frozen_preview"] is False
+    assert provenance["removable_bulk_operator_built"] is False
+    assert provenance["all_cu_points_retained"] is True
+    assert library.operators["retained_si"].bubble_size == 167
+    assert "H38P5_TRANSFERRED_HOMOGENEOUS" in provenance["physics_qualification"]
+    args, kwargs = fixture.runtime.load_q6_sequential_library.call_args
+    assert set(args[0]) == {"bi", "beol", f"tsv_si_h{total - 13.:g}"}
+    assert kwargs["validate"] is kwargs["verify_content"] is kwargs["factorize_elements"] is True
+    assert kwargs["port_rank_per_face"] == 64
+    assert set(kwargs["prepared_geometry_paths"]) == set(args[0])
+    assert set(kwargs["frozen_expected_port_basis_sha256_by_dataset"].values()) == {adapter._PREPARED_NATIVE64_BASIS_SHA256}
+    assert len(provenance["input_sha256"]) == 13
+    assert fixture.data_module.LayerROMDataset.load.call_count == 3
+    assert all(call.kwargs == dict(validate=True, verify_content=True)
+               for call in fixture.data_module.LayerROMDataset.load.call_args_list)
+    assert all(not hasattr(data, "content_sha256") for data in fixture.datasets.values())
+    json.dumps(provenance)
+
+
+@pytest.mark.parametrize("relative", ["packages/BI2_30.json", "audit/BI2_30.json", "shared/parent_BI2_50.json",
+    "shared/bi.npz", "datasets/tsv_si_h17.npz", "prepared/tsv_si_h17.npz", "shared/port_basis.npz",
+    "build_receipts/tsv_si_h17_bubble.npz", "build_receipts/tsv_si_h17_raw_bubble.npz"])
+def test_prepared_native64_rejects_tampering_before_native_import(prepared_native64_fixture, relative):
+    fixture = prepared_native64_fixture
+    (fixture.root / relative).write_bytes(b"tampered")
+    with pytest.raises(ValueError, match="SHA256 mismatch"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+@pytest.mark.parametrize("total", [30., 80.])
+@pytest.mark.parametrize("field,value", [("source_thickness_um", 37.), ("target_thickness_um", 0.),
+    ("source_pitch_um", False), ("observed_rank", 2), ("rank", 3.), ("singular_value_min", 0.),
+    ("singular_value_max", 1e15), ("gram_defect", 1e-8), ("face_trace", 1e-8),
+    ("relative_periodic_jump", 1e-3), ("source_bubble_sha256", "bad"), ("method", ""),
+    ("face_trace", float("nan")), ("gram_defect", float("inf")), ("source_rank", 95),
+    ("raw_transferred_rank", 95), ("closure_added_rank", 70)])
+def test_prepared_native64_rejects_failed_transfer_audit(prepared_native64_fixture, total, field, value):
+    fixture = prepared_native64_fixture
+    fixture.receipts[total]["transfer_audit"][field] = value
+    fixture.seal()
+    with pytest.raises(ValueError):
+        adapter.load_prepared_die_library(fixture.root / f"packages/BI2_{total:g}.json", prepared_fixture_geometry(total))
+    fixture.imported.assert_not_called()
+
+
+@pytest.mark.parametrize("field,value", [("rank", True), ("stage_count", 5), ("bonding_pitch_um", 6.),
+    ("bonding_pad_diameter_um", 3.), ("face_node_shape", [36, 36]), ("all_cu_points_retained", False),
+    ("thermal_geometry_validated", True), ("state", "PHYSICALLY_VALIDATED"), ("cell_area_mm2", 0.)])
+def test_prepared_native64_rejects_inconsistent_receipt(prepared_native64_fixture, field, value):
+    fixture = prepared_native64_fixture
+    fixture.receipts[30.][field] = value
+    fixture.seal()
+    with pytest.raises(ValueError):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_requires_both_catalog_admissions(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    catalog = fixture.seal()
+    del catalog["packages"]["80"]
+    fixture.catalog_path.write_text(json.dumps(catalog))
+    with pytest.raises(ValueError, match="both TOTAL30/80"):
+        adapter.require_prepared_operator(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_empty_catalog_needs_no_runtime(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text('{"schema":"yap.prepared_p2_operator_catalog.v1","packages":{}}')
+    monkeypatch.setattr(adapter, "_PREPARED_OPERATOR_CATALOG", catalog)
+    forbidden = Mock(side_effect=AssertionError("unadmitted packages must not touch runtime inputs"))
+    monkeypatch.setattr(adapter, "_input_path", forbidden)
+    monkeypatch.setattr(adapter, "_import_mechanics_module", forbidden)
+    for total in (30., 80.):
+        geometry = prepared_fixture_geometry(total)
+        request = adapter.prepared_operator_request(f"BI2_{total:g}.json", geometry)
+        assert request["admission_status"] == "UNAVAILABLE_EXACT_P2_OPERATORS_NOT_ADMITTED"
+        with pytest.raises(RuntimeError, match="planning only"):
+            adapter.load_prepared_die_library(f"BI2_{total:g}.json", geometry)
+    forbidden.assert_not_called()
+
+
+def test_prepared_native64_parent_reuse_is_hash_based(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    fixture.parent["dataset_sha256"]["bi"] = "a" * 64
+    fixture.seal()
+    with pytest.raises(ValueError, match="byte-identical"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_geometry_content_binding_is_required(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    fixture.receipts[30.]["prepared"]["tsv_si_h17"]["parent_dataset_content_sha256"] = "b" * 64
+    fixture.seal()
+    with pytest.raises(ValueError, match="bind its dataset content"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+@pytest.mark.parametrize("fault", ["cu_card", "si_material", "thickness", "macro_size", "bubble_size"])
+def test_prepared_native64_checks_loaded_dataset_material_and_geometry(prepared_native64_fixture, fault):
+    fixture = prepared_native64_fixture
+    target = fixture.datasets["tsv_si_h17"]
+    if fault == "cu_card":
+        target.cu_card = PreparedFixtureCard(2.)
+    elif fault == "si_material":
+        target.reference_constant_materials["si"] = PreparedFixtureCard(2.)
+    elif fault == "thickness":
+        target.geometry_signature["thickness_mm"] = .037
+    else:
+        setattr(target, fault, 1)
+    with pytest.raises(ValueError):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+
+
+def test_prepared_native64_rejects_artifact_escape(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    fixture.packages[30.]["parent_package"] = "../../outside.json"
+    fixture.seal()
+    with pytest.raises(ValueError, match="escapes"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_rejects_artifact_symlinks(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    alias = fixture.root / "shared/alias_bi.npz"
+    alias.symlink_to(fixture.root / "shared/bi.npz")
+    fixture.packages[30.]["datasets"]["bi"] = "../shared/alias_bi.npz"
+    fixture.seal()
+    with pytest.raises(ValueError, match="symlink"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+@pytest.mark.parametrize("fault", ["rank", "gauge", "cu_count", "cell_area"])
+def test_prepared_native64_checks_returned_library(prepared_native64_fixture, fault):
+    fixture = prepared_native64_fixture
+    original = fixture.runtime.load_q6_sequential_library.side_effect
+    def broken(*args, **kwargs):
+        library = original(*args, **kwargs)
+        if fault == "rank":
+            library.port_rank_per_face = 24
+        elif fault == "gauge":
+            library.common_port_gauge_vectors = np.ones((64, 1))
+        elif fault == "cell_area":
+            library.cell_area_mm2 = 4e-6
+        else:
+            library.operators["tsv_si_h17"].cu_point_count = 1
+        return library
+    fixture.runtime.load_q6_sequential_library.side_effect = broken
+    with pytest.raises(ValueError):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+
+
+@pytest.mark.parametrize("field,value", [("schema", "exp12.ofat.geometry_package.v1"), ("name", "BI6_30"),
+    ("rank", 24), ("ready", True), ("state", "READY_ENGINEERING_PREVIEW")])
+def test_prepared_native64_rejects_other_package_contracts(prepared_native64_fixture, field, value):
+    fixture = prepared_native64_fixture
+    fixture.packages[30.][field] = value
+    fixture.seal()
+    with pytest.raises(ValueError, match="exact native64 engineering candidate"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_rejects_h37_substitution(prepared_native64_fixture):
+    fixture = prepared_native64_fixture
+    for field in ("datasets", "prepared", "dataset_sha256", "prepared_sha256"):
+        mapping = fixture.packages[30.][field]
+        mapping["tsv_si_h37"] = mapping.pop("tsv_si_h17")
+    fixture.seal()
+    with pytest.raises(ValueError, match="exactly the target p2 source keys"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()
+
+
+def test_prepared_native64_catalog_rejects_duplicate_keys(tmp_path, monkeypatch):
+    catalog = tmp_path / "catalog.json"
+    catalog.write_text('{"schema":"yap.prepared_p2_operator_catalog.v1","packages":{},"packages":{}}')
+    monkeypatch.setattr(adapter, "_PREPARED_OPERATOR_CATALOG", catalog)
+    with pytest.raises(ValueError, match="duplicate"):
+        adapter.prepared_operator_request("BI2_30.json", prepared_fixture_geometry(30.))
+
+
+@pytest.mark.parametrize("fault", ["missing", "mismatched", "invalid", "non_scalar", "object"])
+def test_prepared_native64_checks_stored_npz_content_digest(prepared_native64_fixture, fault):
+    fixture = prepared_native64_fixture
+    key = "tsv_si_h17"
+    digest = fixture.receipts[30.]["datasets"][key]["dataset_content_sha256"]
+    fields = {
+        "missing": {},
+        "mismatched": dict(content_sha256=np.array("a" * 64)),
+        "invalid": dict(content_sha256=np.array("invalid")),
+        "non_scalar": dict(content_sha256=np.array([digest])),
+        "object": dict(content_sha256=np.array(digest, dtype=object)),
+    }
+    path = fixture.root / f"datasets/{key}.npz"
+    np.savez(path, **fields[fault])
+    file_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    fixture.packages[30.]["dataset_sha256"][key] = file_digest
+    fixture.receipts[30.]["datasets"][key]["sha256"] = file_digest
+    fixture.seal()
+    with pytest.raises(ValueError, match="dataset content|Object arrays cannot be loaded"):
+        adapter.load_prepared_die_library(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+
+
+@pytest.mark.parametrize("total", [30., 80.])
+@pytest.mark.parametrize("field,value", [("observed_rank", 95), ("rank", 95), ("gram_defect", 1e-8),
+    ("face_trace", 1e-8), ("relative_periodic_jump", 1e-3), ("singular_value_min", 0.)])
+def test_prepared_native64_checks_raw_transfer_separately(prepared_native64_fixture, total, field, value):
+    fixture = prepared_native64_fixture
+    fixture.receipts[total]["transfer_audit"]["raw_transfer_audit"][field] = value
+    fixture.seal()
+    with pytest.raises(ValueError):
+        adapter.load_prepared_die_library(fixture.root / f"packages/BI2_{total:g}.json", prepared_fixture_geometry(total))
+    fixture.imported.assert_not_called()
+
+
+@pytest.mark.parametrize("relative", ["datasets/tsv_si_h17.npz", "prepared/tsv_si_h17.npz",
+    "shared/port_basis.npz", "build_receipts/tsv_si_h17_raw_bubble.npz"])
+def test_prepared_native64_missing_artifacts_fail_during_preflight(prepared_native64_fixture, relative):
+    fixture = prepared_native64_fixture
+    (fixture.root / relative).unlink()
+    with pytest.raises(FileNotFoundError):
+        adapter.require_prepared_operator(fixture.root / "packages/BI2_30.json", prepared_fixture_geometry(30.))
+    fixture.imported.assert_not_called()

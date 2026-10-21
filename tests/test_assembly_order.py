@@ -1,4 +1,4 @@
-"""Software-contract tests. Fabricated records below are not mechanical evidence."""
+"""Legacy archive contracts; fabricated records are not mechanical evidence."""
 
 from copy import deepcopy
 import json
@@ -9,9 +9,10 @@ from unittest.mock import patch
 
 import numpy as np
 from omegaconf import OmegaConf
+import pytest
 
 from W2W.assembly_order import (
-    all_orders, archive_template, build_plan, content_id, evaluate_archive,
+    all_orders, archive_template, _build_legacy_plan as build_plan, content_id, evaluate_archive,
     main, parse_order, tree_text, load_stack_input,
 )
 from history_bow_yield import PrebondBody, paired_magnification
@@ -23,6 +24,12 @@ def temporary_directory():
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "W2W/input/design_6_4hi_p2/stack.yaml"
+
+
+@pytest.fixture(autouse=True)
+def legacy_archive_cli(monkeypatch):
+    import W2W.assembly_order as module
+    monkeypatch.setattr(module, "build_plan", build_plan)
 
 
 def config():

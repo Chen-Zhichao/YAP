@@ -334,7 +334,6 @@ def test_plan_loading_keeps_resource_references_without_private_map(tmp_path, mo
     monkeypatch.setenv("YAP_RUNTIME_RESOURCES", str(tmp_path / "missing.json"))
     for domain, name in (("D2W", "design_6_4hi_p2"),
                          ("W2W", "design_6_4hi_p2"),
-                         ("W2W", "design_6_4hi_p2_no_thinning"),
                          ("W2W", "design_6_4hi_p6_reference")):
         if domain == "D2W":
             from D2W.assembly_order import build_plan as planner, STACK_SCHEMA, INPUT_SCHEMA
@@ -358,7 +357,7 @@ def test_delivery_verifier_rejects_external_overrides_before_reading_files(monke
 @pytest.mark.parametrize("metric", [{"model": "unsupported"}, {}, [], "", False])
 def test_unknown_or_malformed_archive_metrics_do_not_fall_back_to_scalar(metric):
     from test_assembly_order import config, overlay_input, synthetic_archive
-    from W2W.assembly_order import build_plan, evaluate_archive
+    from W2W.assembly_order import _build_legacy_plan as build_plan, evaluate_archive
     plan = build_plan(config())
     archive = synthetic_archive(plan)
     archive["native_configuration"] = {"metric": metric}

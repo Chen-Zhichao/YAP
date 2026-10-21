@@ -1,12 +1,23 @@
-# Independent P2 Assembly Runs
+# Independent Assembly Runs
 
-The exported folder contains `YAP/`, including native CPU mechanics, frozen
-BI2/P24 operators, parent geometry integrals, process cards, and complete D2W
-and W2W p2 input/config profiles. No original project mount or ANSYS solve is
-needed for these two profiles. This is an unvalidated engineering preview,
-not a reproduction of a population-yield benchmark.
+This page describes the legacy standalone delivery and exporter. The new
+13-entry component-v2 interface uses existing canonical operator and evidence
+paths on the shared server; it is not included by `--prepared-operators`.
+Follow [component runtime setup](README.md#component-runtime-and-catalog) for
+that interface. Copying its catalog or native source directory alone does not
+create an independent data bundle on another server.
 
-Use Linux with Python 3.11 or 3.12. From the exported `YAP` directory:
+Keep the exported `YAP/runtime/` directory with the code. Runtime bundles
+contain private operators and immutable provenance; they do not belong in the
+public Git repository. A Git checkout alone does not contain these data.
+Installing Python requirements or importing YAP as another project's dependency
+does not supply the operators and geometry datasets. On the same shared server,
+use the [missing mechanics data instructions](README.md#missing-mechanics-data)
+to bind the existing data package; no MAPDL rebuild is needed for its supported
+profiles. On another server, request the full standalone bundle, not only the
+source checkout or the example resource map.
+
+Use Linux and Python 3.11 or 3.12. From the exported `YAP` directory:
 
 ```bash
 export YAP_WORK_DIR=/path/to/approved/work-disk/yap-work
@@ -14,81 +25,97 @@ mkdir -p "$YAP_WORK_DIR/temp"
 export TMPDIR="$YAP_WORK_DIR/temp" TMP="$YAP_WORK_DIR/temp" TEMP="$YAP_WORK_DIR/temp"
 export NUMBA_CACHE_DIR="$YAP_WORK_DIR/numba" MPLCONFIGDIR="$YAP_WORK_DIR/matplotlib"
 export PIP_CACHE_DIR="$YAP_WORK_DIR/pip" PYTHONDONTWRITEBYTECODE=1
-unset PYTHONPYCACHEPREFIX
+unset PYTHONPYCACHEPREFIX YAP_NATIVE_RUNTIME_DIR YAP_RUNTIME_RESOURCES
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-unset YAP_NATIVE_RUNTIME_DIR YAP_RUNTIME_RESOURCES
-
-OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-python W2W/calculator_main.py \
-  --config W2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml \
-  --mode w2w_modeling --ds_name design_6_4hi_p2 \
-  --ds_dir W2W/input/design_6_4hi_p2 --mechanism-filter overlay
 ```
 
-Replace the work-disk placeholder before setup. No temporary files or caches
-may use `/tmp`; unsafe overrides and output paths are rejected. Small caches
-default to the Git-ignored `.cache/yap/` when no override is set. Large mechanics
-builds require explicit host-local scratch. Keep accepted results separately
-under your shared project and check the executing host's storage before a run.
+Replace the work-disk placeholder. No outputs, temporary files or caches may
+use `/tmp`. Keep large solver scratch on approved host-local storage and
+accepted results on your shared project storage.
 
-For D2W, replace every `W2W` with `D2W` and use `--mode d2w_modeling`.
-Both `stack.yaml` files select all five fixed-layer-order assembly trees.
-Their initial bows are illustrative `[10, -10, 20, -20] um`; replace these
-with the measured signed center-to-edge bows before a real study. D2W dies
-remain 50 um total throughout; W2W uses the configured F2B preparation events.
+## D2W
 
-The full YAML parameter groups are preserved. Assembly-order execution scores
-overlay yield only. Defaults write under `D2W/output/assembly_orders` or
-`W2W/output/assembly_orders` inside the exported YAP folder, independently of
-the shell working directory. Use `--output-dir /your/output/path` to override.
-Add `--plan-only` to check the input; this does not validate native operator
-loading. The current memory gate requires at least 40 GiB available RAM.
-
-Verify delivery hashes, both input profiles and native operator loading:
+The existing p2 TOTAL50 profile has prefabricated front and back BI layers;
+there is no thinning or deposition during D2W assembly:
 
 ```bash
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
-python verify_assembly_runtime.py --load-operators
+python D2W/calculator_main.py \
+  --config D2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml \
+  --mode d2w_modeling --ds_name design_6_4hi_p2 \
+  --ds_dir D2W/input/design_6_4hi_p2 --mechanism-filter overlay
 ```
 
-The verifier denies access to the historical project before importing native
-code. It checks deployment, not a complete five-order physics rerun.
+`stack.yaml` selects all five fixed-layer-order trees. Initial bows are
+illustrative `[10, -10, 20, -20] um`; replace them with the known signed
+center-minus-mid-edge bows. Operators are reusable when only these values
+change, but every selected tree's Cu and thermal history must be recomputed.
+This does not reconstruct a pre-existing Cu manufacturing history from bow.
 
-Keep `runtime/` with the code when moving the folder. Frozen manifests retain
-historical absolute paths as provenance; the loader rebases recognized paths
-into the local native runtime before reading. Missing local files, wrong
-hashes and conflicting native imports fail instead of using original storage.
-`runtime/BUNDLE.json` records delivered file hashes; it is a delivery inventory,
-not new physical validation. Do not rewrite frozen manifests or NPZ files.
-The private `runtime/RESOURCES.json` resolves logical operator references and
-is covered by the delivery inventory. The verifier rejects external runtime
-or resource-map overrides.
+The optional prepared-operator delivery also contains
+`design_6_4hi_p2_t30` and `design_6_4hi_p2_t80`. Both built operators passed
+the pinned structural catalog admission. These candidates use native64 ports rather than
+the existing TOTAL50 P24 preview. Their numerical checks do not establish
+independent physical validation. See the
+[prepared-operator instructions](README.md#prepared-total30-and-total80).
 
-Maintainers can export another copy without copying solver campaigns:
+Assembly-order mode scores overlay only. Add `--plan-only` to inspect input
+and process requests without native data; this does not verify operator loading.
+Full runs require at least 40 GiB available memory. Outputs default to
+`D2W/output/assembly_orders`; `--output-dir` selects another approved path.
+
+## W2W
+
+The no-thinning W2W branch is retired. The replacement begins with 775-um
+wafers, uses F2F pair bonding followed by free anneal/cool, then appropriate
+thinning, backside Cu/BI growth, and F2B or B2B joins. Final outside thinning
+does not add a backside BI. W4 carrier attachment is temporary and adds no
+permanent bonding interface.
+
+The new W2W request is plan-only: the two specified process ledgers are
+recorded symbolically; the other three trees need process definitions.
+Orientation and checked history transfers remain unresolved, so native
+execution and scoring are blocked. Historical W2W yields are not results
+for this new process. See [W2W process planning](W2W/ASSEMBLY_ORDER.md).
+
+## Delivery Checks
+
+For a prepared-operator delivery:
 
 ```bash
-python package_assembly_runtime.py --output-dir /your/shared/delivery/folder
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+python verify_assembly_runtime.py --prepared-operators
 ```
 
-This bundle is scoped to p2/TOTAL50 and the existing thermal recipe. Other
-geometries or the p6 reference profile require their own operator/data export.
+For a default delivery, use `--load-operators` instead. Verification checks
+inventory and supported native operator loading, not full assembly histories.
+It denies access to the original project and rejects external resource-map
+overrides. Frozen paths are rebased into the delivered runtime without
+rewriting manifests or NPZ files. `runtime/BUNDLE.json` inventories the files;
+`runtime/RESOURCES.json` binds logical resources to delivered directories.
+Missing files, conflicting imports and changed hashes fail closed.
 
-Runtime bundles and raw execution archives are private scientific dependencies,
-not public release artifacts. They retain immutable provenance and original
-file names. Publish only the reviewed source/configs and separately reviewed
-result summaries; do not publish raw manifests, source snapshots or archives.
+Maintainers export into a new directory, never overwrite an existing delivery.
+Copies are paced at 24 MiB/s; independent SHA256 readback is paced at 32 MiB/s:
 
-## Shared-Server Git Checkouts
+```bash
+python package_assembly_runtime.py \
+  --native-source /path/to/confined/runtime/native \
+  --resource-map /path/to/private/resources.json \
+  --output-dir /your/shared/new-delivery --prepared-operators
+```
 
-The primary assembly-order experiment guide is now the
-[Assembly-Order Experiments section of README.md](README.md#assembly-order-experiments).
-It includes shared runtime setup, operator-path configuration, all three p2
-run commands, order selection and model limitations. Keep this document for
-standalone export and delivery verification, not a second copy of that guide.
+Prepared export includes D2W TOTAL50/30/80 only. Default export keeps the
+historical two-profile inventory, with the current W2W profile usable only
+for process planning. Neither mode enables new W2W mechanics.
 
-`verify_assembly_runtime.py` verifies a self-contained exported delivery, not
-a Git checkout using an external shared runtime. The October 4 exporter still
-includes only the original D2W/W2W p2 profiles, not the newer W2W no-thinning
-profile. Use the current Git source and its README for that experiment.
+The prepared delivery published on October 6, 2026 at
+`distribution/yap_prepared_p2_20261006_v1/YAP` passed independent inventory and
+native-loading checks for all three D2W profiles. It contains 305 files and
+about 8.15 GiB of native data; full assembly histories were not rerun.
+
+For shared-server Git checkouts, use the
+[README assembly-order guide](README.md#assembly-order-experiments) to bind a
+shared runtime instead of duplicating the private data.

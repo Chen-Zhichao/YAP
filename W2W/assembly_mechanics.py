@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 import hashlib
 import importlib.util
+import sys
 from pathlib import Path
 from time import perf_counter
 
@@ -19,17 +20,67 @@ import numpy as np
 
 from .assembly_order import (
     FRAME, DIE_FRAME, CONVENTION, _check_plan, archive_template, content_id,
-    is_die_plan, is_prepared_plan, component_key, footprint_mm,
+    is_die_plan, is_f2b_plan, is_prepared_plan, component_key, footprint_mm,
+    _check_recipe_request,
 )
 
-try:
-    from YAP.history_mechanics_backend import (
-        _import_mechanics_module as native, _configure_mechanics_runtime_environment,
-    )
-except ModuleNotFoundError:
-    from history_mechanics_backend import (
-        _import_mechanics_module as native, _configure_mechanics_runtime_environment,
-    )
+def _backend():
+    try:
+        from YAP import history_mechanics_backend
+    except ModuleNotFoundError:
+        import history_mechanics_backend
+    return history_mechanics_backend
+
+
+def native(name):
+    return _backend()._import_mechanics_module(name)
+
+
+def _configure_mechanics_runtime_environment(**kwargs):
+    return _backend()._configure_mechanics_runtime_environment(**kwargs)
+
+
+def _material_runtime(binding=None):
+    if binding is not None:
+        module = sys.modules.get(type(binding).__module__)
+        if module is not None and Path(getattr(module, "__file__", "")) == Path(__file__).parents[1] / "mechanics_runtime.py":
+            return module
+    try:
+        from YAP import mechanics_runtime
+    except ModuleNotFoundError:
+        import mechanics_runtime
+    return mechanics_runtime
+
+
+@lru_cache(maxsize=1)
+def _corrected_native_modules():
+    return native("exp12_all_gauss_exact_acceleration"), native("exp12_all_gauss_reduced_fe2")
+
+
+def _require_unaccelerated_corrected_material():
+    exact, reduced = _corrected_native_modules()
+    names = ("evaluate", "evaluate_many", "tangent_action", "assembled_bubble_tangent",
+             "assembled_coordinate_tangent")
+    patched = any(getattr(reduced.AllGaussReducedFE2Layer, name, None) is not
+                  getattr(exact, "_ORIGINAL_" + name.upper()) for name in names)
+    if (exact._INSTALLED or exact.reduced is not reduced or patched
+            or reduced.trial_update_batch is not exact._ORIGINAL_TRIAL_UPDATE_BATCH):
+        raise RuntimeError("corrected material requires an unpatched native runtime; "
+                           "legacy global acceleration is unsupported and was not uninstalled")
+
+
+def require_corrected_material_runtime(library):
+    """Refuse lost bindings and installed legacy acceleration before execution."""
+    corrected = False
+    for operator in library.operators.values():
+        if (getattr(operator, "corrected_material_binding", None) is not None
+                or getattr(operator, "material_kernels", None) is not None):
+            binding = getattr(operator, "corrected_material_binding", None)
+            _material_runtime(binding).preserve_corrected_material_binding(operator, operator)
+            corrected = True
+    if corrected:
+        _require_unaccelerated_corrected_material()
+    return corrected
 
 
 class LayerClockOperator:
@@ -43,15 +94,26 @@ class LayerClockOperator:
     def __init__(self, base, age_offset_s=0.0):
         self.base = base
         self.age_offset_s = float(age_offset_s)
+        if (getattr(base, "corrected_material_binding", None) is not None
+                or getattr(base, "material_kernels", None) is not None):
+            runtime = _material_runtime(getattr(base, "corrected_material_binding", None))
+            runtime.preserve_corrected_material_binding(base, self)
 
     def __getattr__(self, name):
         value = getattr(self.base, name)
-        if name == "assembled_bubble_tangent":
+        if name == "assembled_bubble_tangent" or (
+                name == "trial" and getattr(self.base, "corrected_material_binding", None) is not None):
             return lambda *args, **kwargs: self._call(name, args, kwargs)
         return value
 
     def _call(self, method, args, kwargs):
+        binding = getattr(self, "corrected_material_binding", None)
+        if binding is not None:
+            _material_runtime(binding).preserve_corrected_material_binding(self.base, self)
+            _require_unaccelerated_corrected_material()
         elapsed = kwargs.get("elapsed_time_s")
+        if binding is not None and elapsed is None:
+            raise ValueError("corrected material requires an explicit physical endpoint clock")
         if elapsed is None:
             if self.age_offset_s != 0:
                 raise ValueError("an explicit endpoint time is required for an aged layer")
@@ -84,8 +146,18 @@ class AssemblyBody:
 
 
 def _recipe(plan, temporal_profile):
+    _check_plan(plan)
+    _check_recipe_request(plan, temporal_profile)
     module = native("exp12_v2_process_schedule")
-    schedule = module.schedule_from_v2_process_card(1, temporal_profile=temporal_profile)
+    if temporal_profile == "component_graded25":
+        exact = module.schedule_from_v2_process_card(1, temporal_profile="exact")
+        indices = (0, *range(20, 161, 20), 161, 162, 164, 168, 170, 180, 190, 200,
+                   *range(220, 361, 20))
+        if len(exact) != 361:
+            raise ValueError("component graded25 requires the original 361-state cycle")
+        schedule = tuple(exact[i] for i in indices)
+    else:
+        schedule = module.schedule_from_v2_process_card(1, temporal_profile=temporal_profile)
     card = module.load_v2_process_card()
     process = plan["context"]["process"]
     expected = dict(room_temperature_c=card["temperature"]["room_C"],
@@ -104,7 +176,7 @@ def _recipe(plan, temporal_profile):
     return schedule
 
 
-def _check_library(library, geometry, *, prepared_dies=False):
+def _check_library(library, geometry, *, prepared_dies=False, split_cap=False):
     if library.common_port_gauge_vectors is not None:
         raise ValueError("existing formation templates require a rigid-mode-gauged library")
     front = geometry["front_bi_thickness_um"]
@@ -112,32 +184,39 @@ def _check_library(library, geometry, *, prepared_dies=False):
     if front != back:
         raise ValueError("one BI operator currently requires equal front/back BI thickness")
     target = geometry["total_thickness_um"] if prepared_dies else geometry["target_total_thickness_um"]
-    prepared = prepared_dies or geometry["initial_total_thickness_um"] == target
+    prepared = prepared_dies
     retained = target - front - back - geometry["beol_thickness_um"]
     expected = dict(bi=front, beol=geometry["beol_thickness_um"], retained_si=retained)
     if not prepared:
         cap = geometry["initial_total_thickness_um"] - front - geometry["beol_thickness_um"] - retained
-        expected["bulk_si"] = cap
+        expected["bulk_si"] = cap - back if split_cap else cap
+        if split_cap:
+            expected["outer_si"] = back
     for key, thickness in expected.items():
         if key not in library.operators or not np.isclose(
                 library.thickness_mm[key] * 1000, thickness, rtol=0, atol=1e-9):
             raise ValueError(f"missing exact {key} operator for {thickness:g} um")
     if not prepared and len(library.operators["bulk_si"].weights_mm3):
         raise ValueError("the removable substrate must be pure Si, with no Cu integration points")
+    if split_cap and (len(library.operators["outer_si"].weights_mm3)
+                      or library.operators["outer_si"].plastic_active):
+        raise ValueError("the retained original outer slice must be pure linear Si, with no Cu")
 
 
 class AssemblyExecutor:
     """One independent route; neither mutable clocks nor histories cross routes."""
 
     def __init__(self, plan, library, *, temporal_profile="distilled26", solver_options=None):
+        require_corrected_material_runtime(library)
         _check_plan(plan)
         self.plan = plan
         self.geometry = plan["context"]["geometry"]
         self.prepared_dies = is_die_plan(plan)
         self.prepared_bodies = is_prepared_plan(plan)
+        self.split_cap = is_f2b_plan(plan)
         self.ids_key = component_key(plan)
         self.footprint = footprint_mm(plan)
-        _check_library(library, self.geometry, prepared_dies=self.prepared_dies)
+        _check_library(library, self.geometry, prepared_dies=self.prepared_dies, split_cap=self.split_cap)
         self.schedule = _recipe(plan, temporal_profile)
         self.profile = temporal_profile
         self.library = library
@@ -188,8 +267,9 @@ class AssemblyExecutor:
         return topology
 
     def leaf(self, wafer):
-        # Pre-place independent bodies at their eventual z datum. Only joined
-        # bodies must be contiguous; their removable caps are gone by then.
+        # Independent computational datums, not an initial global assembly:
+        # full-thickness bodies may overlap numerically but are never joined
+        # until their mating surfaces coincide. Aged children are not translated.
         target = self.geometry["total_thickness_um"] if self.prepared_dies else self.geometry["target_total_thickness_um"]
         initial = target if self.prepared_dies else self.geometry["initial_total_thickness_um"]
         bottom = (wafer - 1) * target / 1000
@@ -197,7 +277,8 @@ class AssemblyExecutor:
         cursor = bottom
         placements = []
         final_layer = ("back_bi", "bi") if self.prepared_bodies else ("removable_bulk_si", "bulk_si")
-        for role, key in (("front_bi", "bi"), ("beol", "beol"), ("retained_si", "retained_si"), final_layer):
+        cap_layers = (("outer_retained_si", "outer_si"), final_layer) if self.split_cap else (final_layer,)
+        for role, key in (("front_bi", "bi"), ("beol", "beol"), ("retained_si", "retained_si"), *cap_layers):
             p = self._placement(wafer, role, key, cursor, birth_reference)
             placements.append(p)
             cursor = p.z_top_mm
@@ -234,9 +315,14 @@ class AssemblyExecutor:
             return body, dict(policy="prefabricated_back_BI_no_thinning_or_deposition",
                               retained_material_ages_unchanged=True,
                               source_checkpoint_unchanged=True)
-        if body.placements[-1].role != "removable_bulk_si":
-            raise ValueError("back preparation requires an exposed removable Si cap")
-        retained = body.placements[:-1]
+        if self.split_cap and body.placements[-1].role == "outer_retained_si":
+            retained = body.placements[:-1]
+        else:
+            if body.placements[-1].role != "removable_bulk_si":
+                raise ValueError("back preparation requires an exposed removable Si cap")
+            if self.split_cap and body.placements[-2].role != "outer_retained_si":
+                raise ValueError("F2B preparation requires both original pure-Si cap slices")
+            retained = body.placements[:-2] if self.split_cap else body.placements[:-1]
         top = self._topology(retained, body.topology)
         removal = self.transactions.remove_top_all_gauss_biaxial_modules(body.topology, top, body.state)
         ages = {p.name: body.ages_s[p.name] for p in retained}
@@ -255,11 +341,48 @@ class AssemblyExecutor:
                       retained_material_ages_unchanged=True, source_checkpoint_unchanged=True)
         return AssemblyBody(active, new_top, state, ages), report
 
+    def finish_outer_back(self, body):
+        """Remove the top bulk cap, retaining the original 1.5-um Si state."""
+        if self.split_cap and body.placements[-1].role == "outer_retained_si":
+            return body, dict(policy="original_outer_Si_already_retained_no_further_removal",
+                original_outer_Si_retained=True, silicon_deposition=False, new_back_BI=False,
+                retained_material_ages_unchanged=True, source_checkpoint_unchanged=True,
+                carrier_end_state="removed")
+        if not self.split_cap or body.placements[-1].role != "removable_bulk_si" \
+                or body.placements[-2].role != "outer_retained_si":
+            raise ValueError("outer finishing requires the original split pure-Si cap")
+        before = self.checkpoint(body)
+        retained = body.placements[:-1]
+        top = self._topology(retained, body.topology)
+        removal = self.transactions.remove_top_all_gauss_biaxial_modules(body.topology, top, body.state)
+        ages = {p.name: body.ages_s[p.name] for p in retained}
+        state = self._release(top, removal.committed, ages)
+        if self.checkpoint(body) != before:
+            raise ValueError("outer finishing mutated its committed source body")
+        return AssemblyBody(retained, top, state, ages), dict(
+            removal=self.production._transfer_record("outer_back_thin", removal),
+            original_outer_Si_retained=True, silicon_deposition=False, new_back_BI=False,
+            retained_material_ages_unchanged=True, source_checkpoint_unchanged=True,
+            carrier_end_state="removed")
+
+    def _assert_geometry(self, body, expected):
+        placements = body.placements
+        if any(not np.isclose(a.z_top_mm, b.z_bottom_mm, rtol=0, atol=1e-12)
+               for a, b in zip(placements, placements[1:])):
+            raise ValueError("assembly body contains a gap or overlapping joined layers")
+        actual = [1000 * sum(p.z_top_mm - p.z_bottom_mm for p in placements if p.die_index == wafer - 1)
+                  for wafer in expected[self.ids_key]]
+        if not np.allclose(actual, expected["total_thicknesses_um"], rtol=0, atol=1e-9):
+            raise ValueError("actual assembly thicknesses disagree with the process ledger")
+
     def join(self, lower, upper, event):
         originals = (self.checkpoint(lower), self.checkpoint(upper))
         if not np.isclose(lower.placements[-1].z_top_mm, upper.placements[0].z_bottom_mm,
                           rtol=0, atol=1e-12):
             raise ValueError("F2B mating faces do not coincide")
+        if self.split_cap and (lower.placements[-1].role != "back_bi"
+                               or upper.placements[0].role != "front_bi"):
+            raise ValueError("F2B joining requires a prepared lower BACK and upper FRONT")
         placements = lower.placements + upper.placements
         joined = self._topology(placements)
         start = self.schedule[0].time_s
@@ -369,23 +492,49 @@ class AssemblyExecutor:
             if progress:
                 progress(f"{route['order']} {event['event']}: {event['interface_id']}")
             old = fetch(event["lower_before_preparation"])
-            upper = fetch(event["upper_free"])
+            upper_before = fetch(event.get("upper_before_preparation", event["upper_free"]))
+            upper = upper_before
+            upper_preparation = None
+            if "upper_before_preparation" in event:
+                upper, upper_preparation = self.finish_outer_back(upper_before)
+                self._assert_geometry(upper_before, event["upper_before_preparation"])
+                self.bodies[event["upper_free"]["state_id"]] = upper
             lower, preparation = self.prepare_back(old)
+            self._assert_geometry(old, event["lower_before_preparation"])
+            self._assert_geometry(lower, event["lower_free"])
+            self._assert_geometry(upper, event["upper_free"])
             self.bodies[event["lower_free"]["state_id"]] = lower
             lower_record, lower_raw = self.observation(lower, event["lower_free"], "lower", metric)
             upper_record, upper_raw = self.observation(upper, event["upper_free"], "upper", metric)
             joined, formation = self.join(lower, upper, event["event"])
             result, thermal = self.anneal(joined)
+            self._assert_geometry(result, event["result"])
             self.bodies[event["result"]["state_id"]] = result
             checkpoints = {event[key]["state_id"]: self.checkpoint(body) for key, body in (
                 ("lower_before_preparation", old), ("lower_free", lower),
                 ("upper_free", upper), ("result", result))}
             audit = dict(preparation=preparation, formation=formation, thermal=thermal)
+            if upper_preparation is not None:
+                checkpoints[event["upper_before_preparation"]["state_id"]] = self.checkpoint(upper_before)
+                audit["incoming_preparation"] = upper_preparation
             output.update(lower=lower_record, upper=upper_record, checkpoints=checkpoints,
                 transfer_audit="embedded:audit:" + content_id(audit), audit=audit,
                 raw_prebond=dict(lower=lower_raw, upper=upper_raw),
                 result=self.summary(result), wall_seconds=perf_counter() - started)
-        target["final"] = self.summary(fetch(route["final"]))
+        if self.split_cap:
+            assembled = fetch(route["assembled"])
+            final, audit = self.finish_outer_back(assembled)
+            self._assert_geometry(final, route["final"])
+            self.bodies[route["final"]["state_id"]] = final
+            target["finalization"] = dict(route["finalization"], audit=audit,
+                source_checkpoint_sha256=self.checkpoint(assembled),
+                result_checkpoint_sha256=self.checkpoint(final))
+            target["final"] = dict(self.summary(final),
+                wafer_ids=list(route["final"]["wafer_ids"]),
+                total_thicknesses_um=list(route["final"]["total_thicknesses_um"]),
+                layers=[asdict(p) for p in final.placements])
+        else:
+            target["final"] = self.summary(fetch(route["final"]))
 
 
 def _metric_coefficients(metric, state_id, abd):
@@ -429,7 +578,10 @@ def _implementation_hash(metric=None):
 
 
 @contextmanager
-def _reference_runtime(enabled):
+def _reference_runtime(enabled, *, library=None):
+    corrected = library is not None and require_corrected_material_runtime(library)
+    if corrected and enabled:
+        raise RuntimeError("legacy reference acceleration cannot run with corrected material bindings")
     if not enabled:
         yield None
         return
@@ -451,7 +603,8 @@ def _reference_runtime(enabled):
 
 
 def run_native(plan, library, operator_provenance, *, temporal_profile="distilled26",
-               metric=None, solver_options=None, progress=None, route_complete=None):
+               metric=None, solver_options=None, progress=None, route_complete=None,
+               route_indices=None):
     """Run complete physical histories; score only with declared metric inputs.
 
     Library objects are reused, but physical-layer proxies and committed
@@ -459,8 +612,17 @@ def run_native(plan, library, operator_provenance, *, temporal_profile="distille
     offsets, gauges and material ages; this function does not write restarts.
     """
     _check_plan(plan)
+    if route_indices is None:
+        indices = list(range(len(plan["routes"])))
+    else:
+        if (not isinstance(route_indices, (list, tuple)) or not route_indices
+                or any(type(i) is not int or not 0 <= i < len(plan["routes"]) for i in route_indices)
+                or len(set(route_indices)) != len(route_indices)):
+            raise ValueError("route_indices must contain distinct valid integer route indices")
+        indices = list(route_indices)
     _check_metric_policy(plan, metric)
     output = archive_template(plan)
+    output["routes"] = [output["routes"][i] for i in indices]
     output["provenance"] = dict(solver_id="existing_REFERENCE_all_Gauss_tree_adapter",
         implementation_sha256=_implementation_hash(metric), operator_set_sha256=content_id(operator_provenance),
         source_transfer_audit="embedded:legacy_natural_q6_and_native_transaction_audits",
@@ -471,15 +633,23 @@ def run_native(plan, library, operator_provenance, *, temporal_profile="distille
         birth_sign_conversion="manufacturing_bending_sign_negated_for_native_paper_bow",
         carrier="ideal_free_membrane_flattening_only_no_explicit_carrier",
         anneal="free", checkpoint_kind="in_memory_state_fingerprints_not_restart_files")
+    if is_f2b_plan(plan):
+        output["native_configuration"].update(
+            carrier=plan["context"]["carrier_policy"],
+            cap_material_assumption=plan["context"]["cap_material_assumption"],
+            outer_finishing=plan["context"]["outer_finishing"],
+            computational_datum=plan["context"]["computational_datum"],
+            assembly_accuracy_validated=False)
     if metric is not None and metric.get("model") in ("square_surrogate", "square_affine"):
         path = _metric_source_path(metric)
         output["native_configuration"]["metric_implementation_sha256"] = {
             str(path): hashlib.sha256(path.read_bytes()).hexdigest()}
     process_api = native("exp12_v2_process_schedule")
     output["native_configuration"]["process_card_sha256"] = process_api.sha256_file(process_api.DEFAULT_CARD)
-    with _reference_runtime(operator_provenance.get("frozen_preview") is True) as acceleration:
+    with _reference_runtime(operator_provenance.get("frozen_preview") is True, library=library) as acceleration:
         output["native_configuration"]["runtime_acceleration"] = acceleration
-        for route, target in zip(plan["routes"], output["routes"]):
+        for index, target in zip(indices, output["routes"]):
+            route = plan["routes"][index]
             executor = AssemblyExecutor(plan, library, temporal_profile=temporal_profile,
                                         solver_options=solver_options)
             output["native_configuration"]["rt_solver"] = {
@@ -493,23 +663,43 @@ def run_native(plan, library, operator_provenance, *, temporal_profile="distille
     return output
 
 
-def run_native_from_settings(plan, settings, *, progress=None):
-    from .assembly_operator_library import load_assembly_library
+def run_native_from_settings(plan, settings, *, progress=None, worker_directory=None):
+    _check_plan(plan)
+    from .assembly_operator_library import (
+        load_assembly_library, load_f2b_assembly_library, load_prepared_die_library, require_prepared_operator,
+    )
     required = {"operator_package", "temporal_profile"}
-    optional = {"metric", "layer_workers", "frozen_preview"}
+    optional = {"metric", "layer_workers", "order_workers", "frozen_preview"}
     if not isinstance(settings, dict) or required - settings.keys() or settings.keys() - required - optional:
-        raise ValueError("native settings require operator_package/temporal_profile; optional metric/layer_workers")
+        raise ValueError("native settings require operator_package/temporal_profile; optional metric/layer_workers/order_workers")
     workers = settings.get("layer_workers", 1)
     if type(workers) is not int or workers < 1:
         raise ValueError("layer_workers must be a positive integer")
-    _configure_mechanics_runtime_environment(layer_workers=workers)
-    _recipe(plan, settings["temporal_profile"])
-    _check_metric_policy(plan, settings.get("metric"))
+    order_workers = settings.get("order_workers", 1)
+    if type(order_workers) is not int or order_workers < 1:
+        raise ValueError("order_workers must be a positive integer")
+    if order_workers > 1 and workers != 1:
+        raise ValueError("parallel orders require layer_workers=1")
     preview = settings.get("frozen_preview", False)
     if type(preview) is not bool:
         raise ValueError("frozen_preview must be Boolean")
+    if is_prepared_plan(plan):
+        require_prepared_operator(settings["operator_package"], plan["context"]["geometry"],
+                                  frozen_preview=preview)
+    _configure_mechanics_runtime_environment(layer_workers=workers)
+    _recipe(plan, settings["temporal_profile"])
+    _check_metric_policy(plan, settings.get("metric"))
+    if order_workers > 1:
+        from .assembly_parallel import run_parallel
+        if worker_directory is None:
+            from mechanics_runtime import configure_runtime_storage
+            from uuid import uuid4
+            worker_directory = configure_runtime_storage()["work"] / "assembly_orders" / uuid4().hex
+        return run_parallel(plan, settings, work_dir=worker_directory, progress=progress)
     options = {"frozen_preview": True} if preview else {}
-    library, provenance = load_assembly_library(settings["operator_package"], plan["context"]["geometry"], **options)
+    loader = (load_prepared_die_library if is_die_plan(plan) else
+              load_f2b_assembly_library if is_f2b_plan(plan) else load_assembly_library)
+    library, provenance = loader(settings["operator_package"], plan["context"]["geometry"], **options)
     return run_native(plan, library, provenance, temporal_profile=settings["temporal_profile"],
                       metric=settings.get("metric"), progress=progress)
 

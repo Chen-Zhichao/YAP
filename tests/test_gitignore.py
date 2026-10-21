@@ -1,4 +1,4 @@
-"""Git delivery includes runnable examples without generated or private data."""
+"""Git delivery includes declared profiles without generated or private data."""
 
 from pathlib import Path
 import shutil
@@ -10,8 +10,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 PROFILES = (
     ("D2W", "design_6_4hi_p2"),
+    ("D2W", "design_6_4hi_p2_t30"),
+    ("D2W", "design_6_4hi_p2_t80"),
     ("W2W", "design_6_4hi_p2"),
-    ("W2W", "design_6_4hi_p2_no_thinning"),
     ("W2W", "design_6_4hi_p6_reference"),
 )
 
@@ -45,6 +46,17 @@ def test_complete_compact_profiles_are_publishable(policy_repo, domain, name):
     paths.append(f"{domain}/configs/{name}/{name}.yaml")
     assert all((ROOT / path).is_file() for path in paths)
     assert not ignored_paths(policy_repo, paths)
+
+
+@pytest.mark.parametrize("domain,name", PROFILES)
+def test_profile_allowlists_exclude_generated_extras(policy_repo, domain, name):
+    paths = [
+        f"{domain}/input/{name}/{filename}"
+        for filename in ("TRACE.json", "large.bmap", "generated.npy", "operator.npz")
+    ]
+    paths.extend(f"{domain}/configs/{name}/{filename}"
+                 for filename in ("resolved.yaml", "generated_interface.yaml"))
+    assert ignored_paths(policy_repo, paths) == set(paths)
 
 
 def test_source_test_references_and_repository_metadata_are_publishable(policy_repo):

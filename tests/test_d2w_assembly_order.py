@@ -3,6 +3,7 @@
 from copy import deepcopy
 import csv
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -69,6 +70,118 @@ def test_five_trees_immutable_50um_no_thinning_and_explicit_ids():
             assert event["lower_free"] == event["lower_before_preparation"]
             assert "thinning" not in event
             assert not any("thinning" in op for op in event["operations"])
+
+
+@pytest.mark.parametrize("total", [30., 50., 80.])
+def test_prepared_thickness_profiles_recompute_births_and_keep_overlay(total):
+    from manufacturing_bow import strain_gradient_to_signed_edge_bow_um
+    name = "design_6_4hi_p2" + (f"_t{total:g}" if total != 50. else "")
+    cfg = OmegaConf.load(ROOT / "D2W/configs" / name / f"{name}.yaml").d2w_modeling
+    cfg.OVERLAY_SAMPLES = 16
+    _, request, overlay, resolved, provenance = load_design(cfg, ROOT / "D2W/input" / name, name)
+    _, baseline, baseline_overlay, _, _ = load_design(settings(), DESIGN, "design_6_4hi_p2")
+    assert overlay == baseline_overlay
+    assert request["status"] == "PLANNED_MECHANICS_REQUIRED"
+    assert request["physical_readiness"] is False
+    assert len(request["routes"]) == 5
+    assert [v["thickness_um"] for v in request["context"]["fabrication_layers"]] == [1.5, 10., total - 13., 1.5]
+    for route in request["routes"]:
+        assert route["final"]["total_thicknesses_um"] == [total] * 4
+        for event in route["events"]:
+            assert event["preparation"] == "prefabricated_back_BI_no_thinning_or_deposition"
+            assert "thinning" not in event
+    for birth in request["initialization"]["dies"]:
+        bow = strain_gradient_to_signed_edge_bow_um(np.mean(birth["initial_q6"][3:5]), 10.)
+        assert bow == pytest.approx(birth["initial_bow_um"])
+    if total != 50.:
+        assert request["initialization"]["dies"][0]["source_amplitude"] != baseline["initialization"]["dies"][0]["source_amplitude"]
+        assert provenance["operator_request"]["admission_status"] in {
+            "UNAVAILABLE_EXACT_P2_OPERATORS_NOT_ADMITTED",
+            "IDENTIFIED_NATIVE64_CANDIDATE_INPUTS_NOT_VERIFIED"}
+    assert provenance["operator_request"]["operator_inputs_verified"] is False
+    for record in resolved.values():
+        assert record["ITF_TOP_THICK_um"] == record["ITF_BOT_THICK_um"] == total
+
+
+@pytest.mark.parametrize("domain,total", [("D2W", t) for t in (30., 80.)])
+def test_new_thickness_plan_cli_needs_no_native_runtime_or_resource_map(tmp_path, domain, total):
+    base = "design_6_4hi_p2"
+    name = f"{base}_t{total:g}"
+    env = dict(os.environ, YAP_NATIVE_RUNTIME_DIR=str(tmp_path / "not_installed"),
+               YAP_RUNTIME_RESOURCES=str(tmp_path / "missing_resources.json"))
+    proc = subprocess.run([sys.executable, str(ROOT / domain / "calculator_main.py"),
+        "--config", str(ROOT / domain / "configs" / name / f"{name}.yaml"),
+        "--mode", f"{domain.lower()}_modeling", "--ds_name", name,
+        "--ds_dir", str(ROOT / domain / "input" / name), "--plan-only", "--output-dir", str(tmp_path)],
+        cwd=ROOT, env=env, capture_output=True, text=True, timeout=90)
+    assert proc.returncode == 0, proc.stderr
+    assert "no mechanics or yield evaluated" in proc.stdout
+    files = list(tmp_path.glob(f"{name}/*/PLAN.json"))
+    assert len(files) == 1
+    result = json.loads(files[0].read_text())
+    assert len(result["routes"]) == 5 and result["physical_readiness"] is False
+    provenance = json.loads(files[0].with_name("INPUTS.json").read_text())
+    assert provenance["operator_request"]["retained_si_thickness_um"] == total - 13.
+    for filename in ("MECHANICS.json", "RESULT.json", "SUMMARY.csv", "FAILED.json"):
+        assert not files[0].with_name(filename).exists()
+
+
+@pytest.mark.parametrize("domain,total", [("D2W", t) for t in (30., 80.)])
+def test_unavailable_thickness_execution_fails_before_memory_or_native_imports(tmp_path, monkeypatch, domain, total):
+    from W2W import assembly_design, assembly_operator_library
+    base = "design_6_4hi_p2"
+    name = f"{base}_t{total:g}"
+    cfg = OmegaConf.load(ROOT / domain / "configs" / name / f"{name}.yaml")[f"{domain.lower()}_modeling"]
+    cfg.OVERLAY_SAMPLES = 2
+    def forbidden(*_, **__):
+        raise AssertionError("unavailable operators must fail before memory/native access")
+    monkeypatch.setattr(assembly_design, "_memory_gate", forbidden)
+    monkeypatch.setattr(assembly_operator_library, "_prepared_catalog", lambda: ({"packages": {}}, {}))
+    monkeypatch.setattr(assembly_operator_library, "_import_mechanics_module", forbidden)
+    monkeypatch.setattr(assembly_operator_library, "_input_path", forbidden)
+    runner = run_design if domain == "D2W" else assembly_design.run_design
+    with pytest.raises(RuntimeError, match=f"TOTAL{total:g}.*retained Si {total - 13.:g} um.*planning only"):
+        runner(cfg, ROOT / domain / "input" / name, name, output_dir=tmp_path)
+    failed = list(tmp_path.glob(f"{name}/*/FAILED.json"))
+    assert len(failed) == 1
+    assert json.loads(failed[0].read_text())["status"] == "FAILED_NO_COMPLETE_RANKING"
+    for filename in ("MECHANICS.json", "RESULT.json", "SUMMARY.csv"):
+        assert not failed[0].with_name(filename).exists()
+
+
+@pytest.mark.parametrize("total", [30., 80.])
+@pytest.mark.parametrize("kind", ["die"])
+def test_operator_loaders_reject_even_present_but_unadmitted_packages(tmp_path, monkeypatch, total, kind):
+    from W2W import assembly_operator_library as operators
+    name = f"BI2_{total:g}.json"
+    path = tmp_path / name
+    path.write_text('{"ready": true}')
+    def forbidden(*_, **__):
+        raise AssertionError("new package must not be read or loaded")
+    monkeypatch.setattr(operators, "_input_path", forbidden)
+    monkeypatch.setattr(operators, "_import_mechanics_module", forbidden)
+    monkeypatch.setattr(operators, "_prepared_catalog", lambda: ({"packages": {}}, {}))
+    if kind == "die":
+        geometry = dict(width_mm=10., length_mm=10., total_thickness_um=total,
+                        front_bi_thickness_um=1.5, back_bi_thickness_um=1.5, beol_thickness_um=10.)
+        loader = operators.load_prepared_die_library
+    else:
+        geometry = dict(diameter_mm=300., initial_total_thickness_um=total, target_total_thickness_um=total,
+                        front_bi_thickness_um=1.5, back_bi_thickness_um=1.5, beol_thickness_um=10.)
+        loader = operators.load_assembly_library
+    with pytest.raises(RuntimeError, match=f"TOTAL{total:g}.*planning only"):
+        loader(path, geometry)
+    with pytest.raises(ValueError, match="no geometry substitution"):
+        loader("BI6_30.json", geometry)
+    with pytest.raises(ValueError, match="only the existing TOTAL50"):
+        loader(path, geometry, frozen_preview=True)
+
+
+@pytest.mark.parametrize("profile", ["unknown", None, True])
+def test_plan_only_rejects_unsupported_temporal_profile_without_runtime(tmp_path, profile):
+    from W2W.assembly_order import _check_recipe_request
+    with pytest.raises(ValueError, match="unsupported temporal_profile"):
+        _check_recipe_request(plan(), profile)
 
 
 @pytest.mark.parametrize("order", ["(1,2)", "((1,3),(2,4))", "((1,2),(3,3))", ["(((1,2),3),4)"] * 2])

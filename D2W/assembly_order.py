@@ -146,7 +146,7 @@ def build_plan(config):
 def load_design(cfg, design_dir, design_name):
     from .compact_layout import compact_regular_geometry
     from .overlay_yield_calculator import max_allowed_misalignment_calculator
-    from W2W.assembly_operator_library import check_prepared_die_geometry
+    from W2W.assembly_operator_library import check_prepared_die_geometry, prepared_operator_request
 
     directory = Path(design_dir).resolve()
     paths = [directory / name for name in ("stack.yaml", "generated_chiplet_definitions.3dbv",
@@ -158,7 +158,9 @@ def load_design(cfg, design_dir, design_name):
     if cfg.get("ANNEAL_MODE") != "sequential":
         raise ValueError("D2W assembly trees require explicit ANNEAL_MODE: sequential, not legacy batch anneal")
     geometry = plan["context"]["geometry"]
-    check_prepared_die_geometry(geometry)
+    mechanics = design.get("mechanics", {})
+    if not str(mechanics.get("operator_package", "")).startswith("component:"):
+        check_prepared_die_geometry(geometry)
     count = len(plan["context"]["initial_bows_um"])
     names = [f"Die_{i}" for i in range(1, count + 1)]
     definition_file = OmegaConf.load(paths[1])
@@ -199,10 +201,10 @@ def load_design(cfg, design_dir, design_name):
             connection = topology.Connection[f"Conn{i}"]
             if connection.top != f"{name}.regions.From_Die_{i}" or connection.bot != f"Die_{i}.regions.To_{name}":
                 raise ValueError("connections must join adjacent lower BACK to upper FRONT")
-    if design.get("mechanics", {}).get("frozen_preview") is not True or Path(
-            design["mechanics"]["operator_package"]).name != "BI2_50.json" or (
-            layout.pitch_r_um, layout.pitch_c_um, layout.pad_diameter_um) != (2., 2., 1.):
-        raise ValueError("this prepared-die example requires matching reference BI2/P24 p2/d1 mechanics and layout")
+    mechanics = design.get("mechanics", {})
+    operator_request = prepared_operator_request(mechanics.get("operator_package", ""), geometry,
+        frozen_preview=mechanics.get("frozen_preview", False),
+        layout=(layout.pitch_r_um, layout.pitch_c_um, layout.pad_diameter_um))
     cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
     cfg.DIE_W_um, cfg.DIE_L_um = dimensions
     cfg.PITCH_r_um, cfg.PITCH_c_um = float(layout.pitch_r_um), float(layout.pitch_c_um)
@@ -253,6 +255,7 @@ def load_design(cfg, design_dir, design_name):
         site_count=1, critical_pad_count=compact["num_critical_pads"], critical_geometry="compact_central_rectangle_boundary_surrogate",
         coordinate_frame="die_centered_no_wafer_site_offset", placement_seed=seed,
         placement_seed_rule="SeedSequence([seed, physical_interface])", overlay_input_sha256=content_id(overlay),
+        operator_request=operator_request,
         experiment="new_fixed_bow_prepared_die_column_not_REFERENCE_population_reproduction",
         receiving_wafer_model="not_explicitly_solved", probability_model="REFERENCE_signed_scalar_worst_critical_pad_not_joint_all_pad")
     return design, plan, overlay, resolved, provenance

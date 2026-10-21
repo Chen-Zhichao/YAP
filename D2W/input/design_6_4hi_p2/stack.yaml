@@ -29,6 +29,7 @@ mechanics:
   operator_package: resource:compact_p2/packages/BI2_50.json
   temporal_profile: distilled26
   layer_workers: 1
+  order_workers: 1  # Set >1 for concurrent assembly-order processes.
   # Full square retains the actual P24 normal/shear coupling; no scalar fallback.
   metric: {model: square_affine}
   frozen_preview: true

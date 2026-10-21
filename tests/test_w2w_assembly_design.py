@@ -13,7 +13,7 @@ import pytest
 from scipy.linalg import cho_factor, cho_solve
 
 from W2W.assembly_design import load_design
-from W2W.assembly_order import build_plan, evaluate_archive
+from W2W.assembly_order import _build_legacy_plan as build_plan, evaluate_archive
 from W2W.wafer_membrane import disk_membrane_metric, solve_disk_membrane
 from test_assembly_order import config, overlay_input, synthetic_archive
 
@@ -26,6 +26,22 @@ def settings():
     cfg = OmegaConf.load(CONFIG).w2w_modeling
     cfg.OVERLAY_SAMPLES = 8
     return cfg
+
+
+def test_current_p2_full_config_matches_f2b_preview_profile_and_overlay():
+    from W2W.assembly_order import F2B_PLAN_SCHEMA
+
+    preview_dir = ROOT / "W2W/input/f2b_4hi50_p24_preview"
+    preview_cfg = OmegaConf.load(preview_dir / "calculator.yaml").w2w_modeling
+    preview_cfg.OVERLAY_SAMPLES = 8
+    current, plan, overlay, _, _ = load_design(settings(), DESIGN, "design_6_4hi_p2")
+    preview, preview_plan, preview_overlay, _, _ = load_design(
+        preview_cfg, preview_dir, "f2b_4hi50_p24_preview")
+    assert current["mechanics"]["temporal_profile"] == preview["mechanics"]["temporal_profile"] == "component_graded25"
+    assert plan["schema"] == preview_plan["schema"] == F2B_PLAN_SCHEMA
+    assert plan["context_id"] == preview_plan["context_id"]
+    assert [route["request_id"] for route in plan["routes"]] == [route["request_id"] for route in preview_plan["routes"]]
+    assert overlay == preview_overlay
 
 
 def test_normal_design_geometry_and_repeatable_physical_draws(tmp_path):
@@ -47,43 +63,13 @@ def test_normal_design_geometry_and_repeatable_physical_draws(tmp_path):
     assert other == o
 
 
-def test_prepared_wafer_design_has_five_fixed_thickness_routes_and_common_overlay():
-    name = "design_6_4hi_p2_no_thinning"
-    cfg = OmegaConf.load(ROOT / "W2W/configs" / name / f"{name}.yaml").w2w_modeling
-    cfg.OVERLAY_SAMPLES = 8
-    _, request, overlay, resolved, provenance = load_design(cfg, ROOT / "W2W/input" / name, name)
-    _, _, baseline_overlay, _, _ = load_design(settings(), DESIGN, "design_6_4hi_p2")
-    assert overlay == baseline_overlay
-    assert request["context"]["body_kind"] == "prepared_wafer"
-    assert len(request["routes"]) == 5
-    assert provenance["site_count"] == 624
-    assert "no thinning" in provenance["config_thickness_scope"]
-    for record in resolved.values():
-        assert record["ITF_TOP_THICK_um"] == record["ITF_BOT_THICK_um"] == 50.
-    for route in request["routes"]:
-        assert route["final"]["total_thicknesses_um"] == [50.] * 4
-        assert len(route["events"]) == 3
-        assert {event["interface_id"] for event in route["events"]} == {
-            "1.BACK--2.FRONT", "2.BACK--3.FRONT", "3.BACK--4.FRONT"}
-        for event in route["events"]:
-            assert "thinning" not in event
-            assert event["lower_before_preparation"] == event["lower_free"]
-            assert event["preparation"] == "prefabricated_back_BI_no_thinning_or_deposition"
-            assert not any("thinning" in operation for operation in event["operations"])
-            assert all(thickness == 50. for thickness in event["result"]["total_thicknesses_um"])
-
-
-@pytest.mark.parametrize("change", [
-    lambda c: c["fabrication_layers"].pop(),
-    lambda c: c["fabrication_layers"][2].__setitem__("thickness_um", 38.5),
-    lambda c: c["fabrication_layers"][3].__setitem__("eigenstrain_per_amplitude", 1.),
-    lambda c: c["geometry"].__setitem__("target_total_thickness_um", 51.),
-])
-def test_prepared_wafer_rejects_inconsistent_geometry_or_source(change):
+@pytest.mark.parametrize("total", [30., 50., 80.])
+def test_w2w_no_thinning_is_rejected_before_native_access(total):
     from W2W.assembly_order import load_stack_input
-    stack = load_stack_input(ROOT / "W2W/input/design_6_4hi_p2_no_thinning/stack.yaml")["stack"]
-    change(stack)
-    with pytest.raises(ValueError):
+    stack = load_stack_input(DESIGN / "stack.yaml")["stack"]
+    stack["geometry"]["initial_total_thickness_um"] = total
+    stack["geometry"]["target_total_thickness_um"] = total
+    with pytest.raises(ValueError, match="W2W requires thinning"):
         build_plan(stack)
 
 
@@ -235,6 +221,8 @@ def test_normal_runner_complete_disk_path(tmp_path, monkeypatch):
     import W2W.assembly_operator_library as loaders
     from test_assembly_mechanics import tiny_library
     import json
+    import W2W.assembly_design as bridge
+    monkeypatch.setattr(bridge, "build_plan", build_plan)
     monkeypatch.setattr(loaders, "load_assembly_library",
                         lambda *_, **__: (tiny_library(), {"fixture": "nonphysical_unit_test"}))
     run = run_design(settings(), DESIGN, "design_6_4hi_p2", output_dir=tmp_path,
@@ -250,6 +238,26 @@ def test_normal_runner_complete_disk_path(tmp_path, monkeypatch):
     assert "m_xy_ppm" in rows[0] and "max_residual_bow_overlay_nm" in rows[0]
     for physical in ("1.BACK--2.FRONT", "2.BACK--3.FRONT", "3.BACK--4.FRONT"):
         assert len({row["non_bow_overlay_sha256"] for row in rows if row["interface"] == physical}) == 1
+
+
+def test_public_mixed_face_runner_rejects_before_any_native_access(tmp_path, monkeypatch):
+    from W2W import assembly_design as bridge, assembly_mechanics as mechanics
+    from W2W import assembly_operator_library as loaders
+    from W2W.assembly_order import _build_mixed_plan
+    monkeypatch.setattr(bridge, "build_plan", _build_mixed_plan)
+    import json
+    def forbidden(*_, **__):
+        pytest.fail("public mixed-face plans must be rejected before native access")
+    monkeypatch.setattr(bridge, "_memory_gate", forbidden)
+    monkeypatch.setattr(mechanics, "native", forbidden)
+    monkeypatch.setattr(loaders, "load_assembly_library", forbidden)
+    with pytest.raises(ValueError, match="mixed-face W2W v2 is plan-only"):
+        bridge.run_design(settings(), DESIGN, "design_6_4hi_p2", output_dir=tmp_path)
+    run = next(tmp_path.glob("design_6_4hi_p2/*"))
+    assert json.loads((run / "PLAN.json").read_text())["schema"].endswith(".v2")
+    assert json.loads((run / "FAILED.json").read_text())["status"] == "FAILED_NO_COMPLETE_RANKING"
+    for name in ("MECHANICS.json", "RESULT.json", "SUMMARY.csv"):
+        assert not (run / name).exists()
 
 
 def test_magnification_maximum_uses_only_selected_sites_and_critical_pads():

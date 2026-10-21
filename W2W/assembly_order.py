@@ -1,8 +1,8 @@
-"""Fixed-order F2B planning, native Cu histories and overlay scoring.
+"""F2B-only W2W planning and explicitly historical archive utilities.
 
-Native execution reuses the reduced kernels through assembly_mechanics.
-A plan alone is not a prediction. Neither imported records nor new native
-assembly paths confer independent physics qualification.
+Historical mixed-face v2 ledgers remain plan-only and are never executed.
+The private v1 planner remains unchanged for archive fixtures.
+A plan alone is not a mechanics or yield prediction.
 Run from the YAP root with ``python -m W2W.assembly_order --help``.
 """
 
@@ -43,11 +43,16 @@ except ModuleNotFoundError:
 INPUT_SCHEMA = "yap.w2w_assembly_order_input.v1"
 STACK_SCHEMA = "yap.w2w_stack_input.v1"
 PLAN_SCHEMA = "yap.w2w_assembly_order_plan.v1"
+F2B_PLAN_SCHEMA = "yap.w2w_f2b_assembly_order_plan.v3"
+MIXED_PLAN_SCHEMA = "yap.w2w_assembly_order_plan.v2"
+MIXED_ROUTE_SCHEMA = "yap.w2w_symbolic_process_ledger.v2"
+PROCESS_PLACEHOLDER_SCHEMA = "yap.w2w_process_definition_request.v2"
 ARCHIVE_SCHEMA = "yap.w2w_assembly_order_mechanics.v1"
 DIE_PLAN_SCHEMA = "yap.d2w_assembly_order_plan.v1"
 DIE_ARCHIVE_SCHEMA = "yap.d2w_assembly_order_mechanics.v1"
 DIE_FRAME = "fixed_bottom_to_top_die_centered_front_below_back"
 FRAME = "fixed_bottom_to_top_z_front_below_back"
+MIXED_FRAME = "pending_route_derived_mixed_face_global_frame"
 CONVENTION = "center_minus_mid_edge"
 MAX_WAFERS = 32
 _PROCESS_DEFAULTS = {
@@ -61,6 +66,22 @@ _PROCESS_DEFAULTS = {
     "bonding_support": "ideal_flattening_free_membrane",
     "material_clock_policy": "retain_each_material_history_no_reset",
 }
+_TEMPORAL_PROFILES = frozenset({"exact", "distilled14", "distilled26", "distilled51",
+                               "distilled61", "distilled76", "distilled101", "component_graded25"})
+
+
+def _check_recipe_request(plan, temporal_profile):
+    """Check the supported request without reading native schedule/card data."""
+    if not isinstance(temporal_profile, str) or temporal_profile not in _TEMPORAL_PROFILES:
+        raise ValueError(f"unsupported temporal_profile: {temporal_profile!r}")
+    process = plan["context"]["process"]
+    expected = dict(room_temperature_c=25., anneal_temperature_c=350.,
+                    ramp_up_s=650., dwell_s=3600., cool_down_s=650.)
+    if any(not np.isclose(process[key], value, rtol=0., atol=1e-12)
+           for key, value in expected.items()):
+        raise ValueError("assembly execution requires the existing 25C/350C V2 thermal recipe")
+    if process["prebond_policy"] != _PROCESS_DEFAULTS["prebond_policy"]:
+        raise ValueError("assembly execution requires the declared legacy frozen-history prebond policy")
 
 
 def _json(value):
@@ -75,8 +96,12 @@ def is_die_plan(plan):
     return plan.get("schema") == DIE_PLAN_SCHEMA
 
 
+def is_f2b_plan(plan):
+    return plan.get("schema") == F2B_PLAN_SCHEMA
+
+
 def is_prepared_plan(plan):
-    return is_die_plan(plan) or plan["context"].get("body_kind") == "prepared_wafer"
+    return is_die_plan(plan)
 
 
 def component_key(plan):
@@ -189,15 +214,13 @@ def _context(config):
     initial = geometry["initial_total_thickness_um"]
     target = geometry["target_total_thickness_um"]
     front = geometry["front_bi_thickness_um"] + geometry["beol_thickness_um"]
-    if not front + geometry["back_bi_thickness_um"] < target <= initial:
-        raise ValueError("target total must include front BI, BEOL, positive Si, and back BI, and not exceed initial")
-    prepared = target == initial
+    if not front + geometry["back_bi_thickness_um"] < target < initial:
+        raise ValueError("W2W requires thinning: target total must include front BI, BEOL, positive Si, and back BI, and be below initial")
 
     raw_layers = config["fabrication_layers"]
-    layer_count = 4 if prepared else 3
+    layer_count = 3
     if not isinstance(raw_layers, list) or len(raw_layers) != layer_count:
-        suffix = ", back BI" if prepared else ""
-        raise ValueError(f"fabrication_layers must be [front BI, BEOL, Si{suffix}], in bottom-to-top order")
+        raise ValueError("fabrication_layers must be [front BI, BEOL, Si], in bottom-to-top order")
     layers = []
     for index, raw in enumerate(raw_layers):
         _keys(raw, {"name", "thickness_um", "e_mpa", "nu", "eigenstrain_per_amplitude"},
@@ -205,16 +228,13 @@ def _context(config):
         _label(raw["name"], "layer name")
         numbers = {key: _number(value, key) for key, value in raw.items() if key != "name"}
         layers.append(ManufacturingLayer(name=raw["name"], **numbers,
-                                        is_bulk_silicon=index == 2 and not prepared))
+                                        is_bulk_silicon=index == 2))
     if len({layer.name for layer in layers}) != layer_count:
         raise ValueError("fabrication layer names must be distinct")
-    source_free = (0, 2, 3) if prepared else (0,)
+    source_free = (0,)
     if any(layers[index].eigenstrain_per_amplitude != 0 for index in source_free):
         raise ValueError("the existing fabrication model confines its source to BEOL, not BI")
     expected = [geometry["front_bi_thickness_um"], geometry["beol_thickness_um"], initial - front]
-    if prepared:
-        expected[2] -= geometry["back_bi_thickness_um"]
-        expected.append(geometry["back_bi_thickness_um"])
     if not np.allclose([layer.thickness_um for layer in layers], expected, rtol=0, atol=1e-9):
         raise ValueError("fabrication layer thicknesses do not match the total-thickness ledger")
 
@@ -242,9 +262,6 @@ def _context(config):
                 fabrication_layers=[asdict(layer) for layer in layers],
                 frame_id=FRAME, bow_convention=CONVENTION,
                 orientation="lower_BACK_to_upper_FRONT", thickness_scope="total_including_BEOL_and_BI")
-    if prepared:
-        context.update(body_kind="prepared_wafer",
-                       thickness_scope="total_including_BEOL_and_both_prefabricated_BIs")
     return context
 
 
@@ -267,8 +284,8 @@ def _births(context):
                 status="CALIBRATION_ONLY_NOT_RESIDUAL_STRESS_HISTORY_INITIALIZATION")
 
 
-def build_plan(config):
-    """Build provenance-bound offline requests. No mechanics, yield, or ranking."""
+def _build_legacy_plan(config):
+    """Private v1 request builder for legacy archive fixtures, not public W2W."""
     context = _context(config)
     count = len(context["initial_bows_um"])
     selection = config["assembly_orders"]
@@ -286,7 +303,6 @@ def build_plan(config):
     context_id = content_id(dict(context=context, initialization=births))
     geometry = context["geometry"]
     initial, target = (geometry[key] for key in ("initial_total_thickness_um", "target_total_thickness_um"))
-    fixed_thickness = context.get("body_kind") == "prepared_wafer"
 
     def state_id(tree, phase):
         return content_id(dict(context_id=context_id, tree=tree_text(tree), phase=phase))
@@ -304,7 +320,7 @@ def build_plan(config):
             k = lower["wafer_ids"][-1]
             if lower["total_thicknesses_um"][-1] != initial:
                 raise ValueError("lower child's exposed top wafer was unexpectedly thinned already")
-            prepared = lower if fixed_thickness else dict(
+            prepared = dict(
                 lower, total_thicknesses_um=lower["total_thicknesses_um"][:-1] + [target],
                 state_id=state_id(node[0], "back_prepared_free"))
             result = dict(wafer_ids=lower["wafer_ids"] + upper["wafer_ids"],
@@ -320,14 +336,11 @@ def build_plan(config):
                                      "bond_lower_BACK_to_upper_FRONT", "release_flattening_constraints",
                                      "free_anneal", "free_cooldown"],
                          result=result)
-            if fixed_thickness:
-                event["preparation"] = "prefabricated_back_BI_no_thinning_or_deposition"
-            else:
-                event["thinning"] = dict(wafer=k, from_total_um=initial, to_total_um=target,
-                    retained_si_um=target - geometry["front_bi_thickness_um"]
-                    - geometry["beol_thickness_um"] - geometry["back_bi_thickness_um"],
-                    new_back_bi_um=geometry["back_bi_thickness_um"], source_amplitude_unchanged=True)
-                event["operations"].insert(0, "carrier_assisted_back_thinning_and_BI_preparation")
+            event["thinning"] = dict(wafer=k, from_total_um=initial, to_total_um=target,
+                retained_si_um=target - geometry["front_bi_thickness_um"]
+                - geometry["beol_thickness_um"] - geometry["back_bi_thickness_um"],
+                new_back_bi_um=geometry["back_bi_thickness_um"], source_amplitude_unchanged=True)
+            event["operations"].insert(0, "carrier_assisted_back_thinning_and_BI_preparation")
             events.append(event)
             return result
 
@@ -347,13 +360,286 @@ def build_plan(config):
                 live_mechanics_backend="W2W.assembly_mechanics (opt-in)")
 
 
+_MIXED_BLOCKERS = (
+    "FINAL_ORIENTATION_UNCONFIRMED",
+    "INNER_AND_OUTER_OPERATOR_ADMISSION_PENDING",
+    "COMPATIBLE_INITIAL_775_SI_CAP_ADMISSION_PENDING",
+    "PREFIX_AND_SUFFIX_HISTORY_TRANSFER_AUDITS_PENDING",
+    "NATIVE_ROUTE_FRAME_AND_INITIAL_DATUM_GENERATION_PENDING",
+    "TEMPORARY_CARRIER_LIFECYCLE_UNSPECIFIED",
+)
+_CONFIRMED_ORDERS = {
+    "(((1,2),3),4)": ("sequential", [-1, 1, 1, 1]),
+    "((1,2),(3,4))": ("balanced", [-1, 1, -1, 1]),
+}
+
+
+def _mixed_orders(config, count):
+    selection = config["assembly_orders"]
+    if selection == "all":
+        orders = all_orders(count)
+    elif isinstance(selection, str):
+        orders = (parse_order(selection, count),)
+    elif isinstance(selection, list) and selection:
+        orders = tuple(parse_order(value, count) for value in selection)
+    else:
+        raise ValueError("assembly_orders must be 'all', one expression, or a nonempty list of trees")
+    if len(set(orders)) != len(orders):
+        raise ValueError("duplicate assembly orders")
+    return orders
+
+
+def _mixed_route(tree, context, context_id):
+    order = tree_text(tree)
+    if order not in _CONFIRMED_ORDERS:
+        route = dict(schema=PROCESS_PLACEHOLDER_SCHEMA, order=order, context_id=context_id,
+                     status="NEEDS_PROCESS_DEFINITION", events=[],
+                     blockers=["PROCESS_DEFINITION_NOT_CONFIRMED"])
+        route["request_id"] = content_id(route)
+        return route
+
+    process_name, orientation = _CONFIRMED_ORDERS[order]
+    geometry = context["geometry"]
+    initial = geometry["initial_total_thickness_um"]
+    target = geometry["target_total_thickness_um"]
+    back_bi = geometry["back_bi_thickness_um"]
+    outer_si = target - geometry["front_bi_thickness_um"] - geometry["beol_thickness_um"]
+    inner_si = outer_si - back_bi
+    events = []
+
+    def visit(node):
+        if type(node) is int:
+            return dict(wafer_ids=[node], thermal_cycles=[0], back_bi_cycles={}, after_event=None)
+        lower, upper = visit(node[0]), visit(node[1])
+        lower_leaf, upper_leaf = type(node[0]) is int, type(node[1]) is int
+        if lower_leaf and upper_leaf:
+            faces, bond_mode = ("FRONT", "FRONT"), "F2F"
+        elif not lower_leaf and upper_leaf:
+            faces, bond_mode = ("BACK", "FRONT"), "F2B"
+        elif not lower_leaf and not upper_leaf:
+            faces, bond_mode = ("BACK", "BACK"), "B2B"
+        else:
+            raise ValueError("unconfirmed leaf-stack mixed-face process")
+        k = lower["wafer_ids"][-1]
+        preparations = {"lower": [], "upper": []}
+        back_bi_cycles = {**lower["back_bi_cycles"], **upper["back_bi_cycles"]}
+        for role, child, face, wafer in (
+                ("lower", lower, faces[0], k), ("upper", upper, faces[1], k + 1)):
+            if face != "BACK":
+                continue
+            if child["after_event"] is None or wafer in back_bi_cycles:
+                raise ValueError("mating-back preparation requires one prior free anneal/cool")
+            preparations[role].append(dict(
+                wafer=wafer, face="BACK", after_free_anneal_cool_event=child["after_event"],
+                operations=["thin_mating_back", "grow_stressfree_back_BI"],
+                from_total_um=initial, to_total_um=target, retained_si_um=inner_si,
+                new_back_bi_um=back_bi, source_amplitude_unchanged=True))
+            back_bi_cycles[wafer] = 0
+        event_id = f"A{len(events) + 1}"
+        events.append(dict(
+            event=event_id, subtree=tree_text(node), interface_id=f"{k}--{k + 1}",
+            physical_interface_index=k - 1, bond_mode=bond_mode,
+            lower_child=dict(wafer_ids=lower["wafer_ids"], after_event=lower["after_event"]),
+            upper_child=dict(wafer_ids=upper["wafer_ids"], after_event=upper["after_event"]),
+            mating_faces=dict(lower=faces[0], upper=faces[1]), preparations=preparations,
+            operations=[f"prepare_{role}_mating_back" for role in ("lower", "upper")
+                        if preparations[role]] + ["bond", "free_anneal", "free_cooldown"],
+            anneal_support="free", cooldown_support="free"))
+        return dict(wafer_ids=lower["wafer_ids"] + upper["wafer_ids"],
+                    thermal_cycles=[value + 1 for value in lower["thermal_cycles"] + upper["thermal_cycles"]],
+                    back_bi_cycles={wafer: value + 1 for wafer, value in back_bi_cycles.items()},
+                    after_event=event_id)
+
+    ledger = visit(tree)
+
+    def outer_thin(wafer):
+        return dict(operation="thin_outer_back_without_new_BI", wafer=wafer,
+                    after_free_anneal_cool_event=ledger["after_event"],
+                    from_total_um=initial, to_total_um=target, retained_si_um=outer_si,
+                    new_back_bi_um=0., source_amplitude_unchanged=True)
+
+    if process_name == "sequential":
+        finalization = dict(ordering_status="CONFIRMED", operations=[
+            outer_thin(4), dict(operation="attach_temporary_carrier", wafer=4, face="BACK"),
+            outer_thin(1)], carrier_end_state="UNSPECIFIED")
+    else:
+        finalization = dict(ordering_status="UNSPECIFIED", operations=[],
+                            required_operations=[outer_thin(1), outer_thin(4)],
+                            temporary_carrier_ordering="UNSPECIFIED", carrier_end_state="UNSPECIFIED")
+    route = dict(
+        schema=MIXED_ROUTE_SCHEMA, order=order, context_id=context_id, status="PLAN_ONLY",
+        process_definition=process_name,
+        orientation_proposal=dict(status="UNCONFIRMED", thickness_orientation=list(orientation),
+                                  coordinate_transform_applied=False),
+        events=events, finalization=finalization,
+        final_ledger=dict(status="SYMBOLIC_TARGET_NOT_SOLVED", wafer_ids=ledger["wafer_ids"],
+                          total_thicknesses_um=[target] * 4,
+                          retained_si_thicknesses_um=[outer_si, inner_si, inner_si, outer_si],
+                          new_back_bi_thicknesses_um=[0., back_bi, back_bi, 0.],
+                          thermal_cycle_counts=ledger["thermal_cycles"],
+                          added_back_bi_thermal_cycle_counts={str(wafer): count
+                              for wafer, count in sorted(ledger["back_bi_cycles"].items())}),
+        blockers=list(_MIXED_BLOCKERS) + (
+            ["BALANCED_OUTER_THINNING_CARRIER_ORDERING_UNSPECIFIED"] if process_name == "balanced" else []))
+    route["request_id"] = content_id(route)
+    return route
+
+
+def _build_mixed_plan(config):
+    """Build only the two confirmed symbolic processes; expose other trees as requests."""
+    context = _context(config)
+    count = len(context["initial_bows_um"])
+    if count != 4:
+        raise ValueError("mixed-face W2W planning currently requires exactly four wafers")
+    orders = _mixed_orders(config, count)
+    births = _births(context)
+    context.pop("orientation")
+    context.update(frame_id=MIXED_FRAME, orientation_status="UNCONFIRMED",
+                   source_frame="intrinsic_wafer_local_front_below_back",
+                   process_kind="mixed_face_free_anneal_cool_before_back_preparation",
+                   initial_body_separation="FULL_INITIAL_THICKNESS_GLOBAL_DATUM_NOT_GENERATED")
+    context_id = content_id(dict(context=context, initialization=births))
+    routes = [_mixed_route(tree, context, context_id) for tree in orders]
+    defined = sum(route["schema"] == MIXED_ROUTE_SCHEMA for route in routes)
+    missing = len(routes) - defined
+    source_input = json.loads(_json(config))
+    plan = dict(
+        schema=MIXED_PLAN_SCHEMA,
+        status="PLAN_ONLY_PARTIAL_PROCESS_DEFINITIONS" if missing else "PLAN_ONLY",
+        physical_readiness=False, native_execution_available=False,
+        source_input=source_input, source_input_sha256=content_id(source_input),
+        context_id=context_id, context=context, initialization=births, routes=routes,
+        summary=dict(requested_routes=len(routes), defined_routes=defined,
+                     missing_process_definitions=missing),
+        blockers=list(_MIXED_BLOCKERS) + (["PROCESS_DEFINITIONS_MISSING"] if missing else []))
+    plan["plan_id"] = content_id(plan)
+    return plan
+
+
+def build_plan(config):
+    """Plan every selected ordered tree using only lower-BACK/upper-FRONT bonds."""
+    source = json.loads(_json(config))
+    source.setdefault("geometry", {}).setdefault("target_total_thickness_um", 50.)
+    prethin = source.setdefault("prethin_incoming", False)
+    if type(prethin) is not bool:
+        raise ValueError("prethin_incoming must be Boolean")
+    context = _context({key: value for key, value in source.items() if key != "prethin_incoming"})
+    geometry = context["geometry"]
+    initial = geometry["initial_total_thickness_um"]
+    target = geometry["target_total_thickness_um"]
+    if initial != 775.:
+        raise ValueError("F2B wafers must be born at 775 um total thickness")
+    context.update(
+        process_kind="F2B_only_lower_exposed_back_preparation",
+        computational_datum="independent_body_bottom_(wafer_id-1)*target_total; not_initial_global_assembly",
+        carrier_policy="ideal_thinning_support_removed_before_free_observation_no_carrier_thermal_cycle",
+        outer_finishing="global_top_back_thin_without_new_BI_retain_original_pure_Si_slice",
+        prethin_incoming=prethin,
+        cap_material_assumption="legacy_pure_Si_not_new_TSV_Si_accuracy_admission")
+    births = _births(context)
+    context_id = content_id(dict(context=context, initialization=births))
+    count = len(context["initial_bows_um"])
+    routes = []
+
+    def state_id(node, phase):
+        return content_id(dict(context_id=context_id, tree=tree_text(node), phase=phase))
+
+    for tree in _mixed_orders(source, count):
+        events = []
+
+        def visit(node):
+            if type(node) is int:
+                return dict(wafer_ids=[node], total_thicknesses_um=[initial],
+                            thermal_cycle_counts=[0], state_id=state_id(node, "initial_free"))
+            lower, upper = visit(node[0]), visit(node[1])
+            wafer = lower["wafer_ids"][-1]
+            lower_total = lower["total_thicknesses_um"][-1]
+            if lower_total != initial and not (prethin and lower_total == target):
+                raise ValueError("lower exposed top wafer must retain its original backside cap")
+            upper_before = upper
+            if prethin and upper["total_thicknesses_um"][-1] == initial:
+                upper = dict(upper, total_thicknesses_um=upper["total_thicknesses_um"][:-1] + [target],
+                             state_id=state_id(node[1], "incoming_outer_thinned_free"))
+            prepared = dict(lower, total_thicknesses_um=lower["total_thicknesses_um"][:-1] + [target],
+                            state_id=state_id(node[0], "back_prepared_free"))
+            result = dict(wafer_ids=lower["wafer_ids"] + upper["wafer_ids"],
+                total_thicknesses_um=prepared["total_thicknesses_um"] + upper["total_thicknesses_um"],
+                thermal_cycle_counts=[v + 1 for v in lower["thermal_cycle_counts"] + upper["thermal_cycle_counts"]],
+                state_id=state_id(node, "post_anneal_cooldown_free"))
+            events.append(dict(event=f"A{len(events) + 1}", subtree=tree_text(node),
+                interface_id=f"{wafer}.BACK--{wafer + 1}.FRONT", physical_interface_index=wafer - 1,
+                bond_mode="F2B", mating_faces=dict(lower="BACK", upper="FRONT"),
+                lower_before_preparation=lower, lower_free=prepared, upper_free=upper,
+                thinning=dict(wafer=wafer, from_total_um=lower_total, to_total_um=target,
+                    retained_si_um=target - geometry["front_bi_thickness_um"]
+                        - geometry["beol_thickness_um"] - geometry["back_bi_thickness_um"],
+                    removed_original_pure_si_um=lower_total - target + geometry["back_bi_thickness_um"],
+                    new_back_bi_um=geometry["back_bi_thickness_um"], source_amplitude_unchanged=True),
+                operations=["carrier_assisted_back_thinning_and_BI_preparation",
+                    "observe_both_released_prebond_states", "independent_ideal_flattening",
+                    "capture_both_child_references_and_Cu_histories", "bond_lower_BACK_to_upper_FRONT",
+                    "release_flattening_constraints", "free_anneal", "free_cooldown"], result=result))
+            if upper != upper_before:
+                events[-1]["upper_before_preparation"] = upper_before
+                events[-1]["operations"].insert(1, "prethin_incoming_back_without_new_BI")
+            return result
+
+        assembled = visit(tree)
+        final = dict(assembled, total_thicknesses_um=[target] * count,
+                     state_id=state_id(tree, "outer_back_finished_free"))
+        route = dict(order=tree_text(tree), context_id=context_id, events=events,
+            assembled=assembled, final=final, finalization=dict(
+                operation="thin_global_top_back_without_new_BI", wafer=count,
+                source_state_id=assembled["state_id"], result_state_id=final["state_id"],
+                from_total_um=assembled["total_thicknesses_um"][-1], to_total_um=target,
+                removed_pure_si_um=assembled["total_thicknesses_um"][-1] - target,
+                retained_original_pure_si_um=geometry["back_bi_thickness_um"],
+                retained_state_unchanged=True, new_back_bi_um=0., carrier_end_state="removed"))
+        route["request_id"] = content_id(route)
+        routes.append(route)
+    plan = dict(schema=F2B_PLAN_SCHEMA, status="PLANNED_MECHANICS_REQUIRED", physical_readiness=False,
+        native_execution_available=True, context_id=context_id, context=context, initialization=births,
+        source_input=source, routes=routes,
+        physics_qualification="EXPERIMENTAL_F2B_LEGACY_PURE_SI_CAP_ASSEMBLY_ACCURACY_PENDING")
+    plan["plan_id"] = content_id(plan)
+    return plan
+
+
+def validate_mixed_plan(plan):
+    """Validate the entire symbolic contract, not just caller-recomputed hashes."""
+    if not isinstance(plan, dict) or plan.get("schema") != MIXED_PLAN_SCHEMA:
+        raise ValueError("expected a public mixed-face W2W v2 plan; legacy archives are not process ledgers")
+    source_input = plan.get("source_input")
+    if not isinstance(source_input, dict):
+        raise ValueError("mixed-face W2W plan requires its source input")
+    expected = _build_mixed_plan(source_input)
+    if _json(plan) != _json(expected):
+        raise ValueError("invalid or modified mixed-face W2W process ledger")
+
+
+def require_executable_plan(plan):
+    """Reject public mixed-face requests before importing or loading any native backend."""
+    if isinstance(plan, dict) and plan.get("schema") == MIXED_PLAN_SCHEMA:
+        validate_mixed_plan(plan)
+        raise ValueError(
+            "mixed-face W2W v2 is plan-only: pending process qualification, final orientation, "
+            "inner/outer operators, initial Si cap, bottom/suffix history transfer and carrier lifecycle; "
+            "native execution, archive scoring, ranking and subset execution are unavailable")
+    _check_plan(plan)
+
+
 def _digest(value, name):
     if not isinstance(value, str) or len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
         raise ValueError(f"{name} must be a lowercase SHA-256 digest")
 
 
 def _check_plan(plan):
-    if plan.get("schema") not in (PLAN_SCHEMA, DIE_PLAN_SCHEMA) or content_id(dict(
+    if plan.get("schema") == MIXED_PLAN_SCHEMA:
+        require_executable_plan(plan)
+    if is_f2b_plan(plan):
+        if not isinstance(plan.get("source_input"), dict) or _json(plan) != _json(build_plan(plan["source_input"])):
+            raise ValueError("invalid or modified F2B process ledger")
+    if plan.get("schema") not in (PLAN_SCHEMA, F2B_PLAN_SCHEMA, DIE_PLAN_SCHEMA) or content_id(dict(
             context=plan.get("context"), initialization=plan.get("initialization"))) != plan.get("context_id"):
         raise ValueError("invalid or modified plan context")
     if is_die_plan(plan) and (plan["context"].get("body_kind") != "prepared_die_column"
@@ -424,6 +710,8 @@ def _check_record(record, expected):
     checkpoints = record.get("checkpoints")
     required = {expected[key]["state_id"] for key in
                 ("lower_before_preparation", "lower_free", "upper_free", "result")}
+    if "upper_before_preparation" in expected:
+        required.add(expected["upper_before_preparation"]["state_id"])
     if not isinstance(checkpoints, dict) or set(checkpoints) != required:
         raise ValueError("missing pre-thinning, prebond, or post-cycle checkpoint references")
     for digest in checkpoints.values():
@@ -524,6 +812,19 @@ def evaluate_archive(plan, archive, overlay):
         if supplied_route.get("order") != route["order"] or not isinstance(supplied_route.get("events"), list) \
                 or len(supplied_route["events"]) != count - 1:
             raise ValueError("mechanics route order or event count mismatch")
+        if is_f2b_plan(plan):
+            finishing = supplied_route.get("finalization", {})
+            final = supplied_route.get("final", {})
+            if any(finishing.get(key) != value for key, value in route["finalization"].items()) \
+                    or any(final.get(key) != route["final"][key]
+                           for key in ("wafer_ids", "total_thicknesses_um")):
+                raise ValueError("F2B archive requires the requested final outer-back finishing")
+            for key in ("source_checkpoint_sha256", "result_checkpoint_sha256"):
+                _digest(finishing.get(key), "outer-finishing checkpoint")
+            source_checkpoint = supplied_route["events"][-1].get("checkpoints", {}).get(route["assembled"]["state_id"])
+            if finishing["result_checkpoint_sha256"] != final.get("checkpoint_sha256") \
+                    or finishing["source_checkpoint_sha256"] != source_checkpoint:
+                raise ValueError("F2B finishing checkpoints do not match the assembled and final states")
         magnifications, physical_indices = [], []
         for record, expected in zip(supplied_route["events"], route["events"]):
             if not isinstance(record, dict):
@@ -548,7 +849,7 @@ def evaluate_archive(plan, archive, overlay):
                     raise ValueError("shared free state has inconsistent observations across routes")
                 state_observations[key] = normalized
                 # An untouched incoming leaf must reconstruct its fixed initial bow.
-                if len(body[ids_key]) == 1 and role == "upper":
+                if len(body[ids_key]) == 1 and role == "upper" and "upper_before_preparation" not in expected:
                     initial_bow = plan["context"]["initial_bows_um"][body[ids_key][0] - 1]
                     if not np.allclose(body["bow_um"], initial_bow, atol=1e-8, rtol=1e-8):
                         raise ValueError("incoming leaf bow differs from its fixed fabrication initialization")
@@ -678,7 +979,7 @@ def load_stack_input(path, *, stack_schema=STACK_SCHEMA, input_schema=INPUT_SCHE
     # Resolve only runtime asset paths; the stack payload used for IDs is unchanged.
     if "mechanics" in value:
         settings = value["mechanics"]
-        _keys(settings, {"operator_package", "temporal_profile"}, "mechanics", {"metric", "layer_workers", "frozen_preview"})
+        _keys(settings, {"operator_package", "temporal_profile"}, "mechanics", {"metric", "layer_workers", "order_workers", "frozen_preview"})
         if type(settings.get("frozen_preview", False)) is not bool:
             raise ValueError("mechanics.frozen_preview must be Boolean")
         package = _label(settings["operator_package"], "mechanics.operator_package")
@@ -686,10 +987,18 @@ def load_stack_input(path, *, stack_schema=STACK_SCHEMA, input_schema=INPUT_SCHE
         workers = settings.get("layer_workers", 1)
         if type(workers) is not int or workers < 1:
             raise ValueError("mechanics.layer_workers must be a positive integer")
+        order_workers = settings.get("order_workers", 1)
+        if type(order_workers) is not int or order_workers < 1:
+            raise ValueError("mechanics.order_workers must be a positive integer")
+        if order_workers > 1 and workers != 1:
+            raise ValueError("parallel orders require mechanics.layer_workers=1")
         if settings.get("metric") is not None and not isinstance(settings["metric"], dict):
             raise ValueError("mechanics.metric must be a mapping")
         if package.startswith("resource:"):
             validate_resource_reference(package)
+        elif package.startswith("component:"):
+            if not package.removeprefix("component:").strip():
+                raise ValueError("mechanics.operator_package requires a component identifier")
         else:
             settings["operator_package"] = str((Path(path).resolve().parent / package).resolve())
     if "overlay" in value and not isinstance(value["overlay"], dict):
@@ -712,7 +1021,7 @@ def main(argv=None):
     mode.add_argument("--plan-only", action="store_true", help="Emit requests; do not predict mechanics or yield")
     mode.add_argument("--mechanics-archive", help="Complete offline mechanics archive matching this request")
     mode.add_argument("--native-mechanics", nargs="?", const=True, metavar="LEGACY_JSON",
-                      help="Execute inline YAML mechanics; legacy JSON configs require a settings path")
+                      help="Execute F2B histories with explicitly supported operators; historical mixed-face plans remain blocked")
     parser.add_argument("--overlay-input", help="Legacy JSON only: explicit reference overlay settings")
     parser.add_argument("--archive-template", help="Write an unfilled mechanics template in plan-only mode")
     parser.add_argument("--mechanics-output", help="Also save native mechanics when scoring in the same run")
@@ -734,6 +1043,11 @@ def main(argv=None):
             if args.native_mechanics is True:
                 raise ValueError("legacy JSON requires --native-mechanics SETTINGS_JSON; use stack.yaml for inline settings")
             config = _load(args.config)
+            settings, overlay = None, None
+        plan = build_plan(config)
+        if not args.plan_only:
+            require_executable_plan(plan)
+        if not is_yaml:
             settings = _load(args.native_mechanics) if native_requested else None
             overlay = _load(args.overlay_input) if args.overlay_input else None
         if args.plan_only and args.overlay_input:
@@ -747,7 +1061,6 @@ def main(argv=None):
         paths = [validate_write_path(p) for p in (args.output, args.archive_template, args.mechanics_output) if p]
         if len(set(paths)) != len(paths) or any(p.exists() for p in paths):
             raise ValueError("all output paths must be new and distinct")
-        plan = build_plan(config)
         if overlay is not None:
             _overlay_settings(overlay, len(plan["context"]["initial_bows_um"]),
                               500 * plan["context"]["geometry"]["diameter_mm"])
@@ -777,7 +1090,13 @@ def main(argv=None):
         parser.exit(2, f"assembly-order: {exc}\n")
     print(f"{output['status']}: {len(output['routes'])} assembly orders -> {args.output}")
     if args.plan_only:
-        print("No yield predicted. Use --native-mechanics to execute the requested Cu histories.")
+        if output["schema"] == MIXED_PLAN_SCHEMA:
+            summary = output["summary"]
+            print(f"{summary['defined_routes']} defined process ledgers; "
+                  f"{summary['missing_process_definitions']} missing process definitions.")
+            print("Orientation and native qualification pending. No mechanics, yield or ranking predicted.")
+        else:
+            print("No mechanics or yield predicted.")
     elif "best_supplied_orders" in output:
         print("Best within supplied mechanics: " + ", ".join(output["best_supplied_orders"]))
         print("Physics qualification: UNKNOWN; history integrity is not independent physics validation.")

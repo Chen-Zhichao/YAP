@@ -1,3 +1,6 @@
+# Mixed-face v2 is symbolic only: two defined trees, three missing process definitions.
+# Route orientations and native operator/history-transfer qualification remain pending.
+# Existing reference geometry and descriptive metadata below are preserved unchanged.
 stack:
   initial_bows_um:
   - 10.0
@@ -29,6 +32,7 @@ stack:
     nu: 0.2917809724509618
     eigenstrain_per_amplitude: 0.0
   process:
+    # Bond, free anneal/cool, then prepare any backs required for the next join.
     room_temperature_c: 25.0
     anneal_temperature_c: 350.0
     ramp_up_s: 650.0
@@ -37,6 +41,7 @@ stack:
   description: New fixed-bow tree capability experiment using reference p6/P32; pre-merge
     lower-wafer thinning, not original sequential reference process.
 mechanics:
+  # Legacy reference operators do not admit the new mixed-face native process.
   operator_package: resource:compact_p6/packages/BI6_50.json
   temporal_profile: distilled101
   layer_workers: 1

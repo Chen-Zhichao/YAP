@@ -1,4 +1,6 @@
-# Four-wafer F2B assembly study. Replace the illustrative bows with known values.
+# Current public planner: all five F2B-only orders, using the legacy P24 preview.
+# Historical mixed-face v2 ledgers remain separate and non-executable.
+# Experimental only, not native64 or assembly-accuracy admission; bows are illustrative.
 stack:
   # Fixed signed center-minus-mid-edge bows, ordered bottom to top. Not re-sampled.
   initial_bows_um: [10.0, -10.0, 20.0, -20.0]
@@ -30,7 +32,7 @@ stack:
       nu: 0.2917809724509618
       eigenstrain_per_amplitude: 0.0
   process:
-    # Native execution currently supports only this existing reference thermal recipe.
+    # Prepare the lower exposed backside before each F2B bond; freely anneal/cool afterward.
     room_temperature_c: 25.0
     anneal_temperature_c: 350.0
     ramp_up_s: 650.0
@@ -39,10 +41,12 @@ stack:
 
 mechanics:
   # Relative to this YAML, not the shell working directory. Operator data stays external.
-  # Existing BI2/P24 preview: 2-um pitch and prepared TOTAL50, retaining 37-um Si/TSV.
+  # Legacy BI2/P24 split pure-Si cap, not an admitted native64 W2W library.
+  # Final top wafer retains its original pure-Si 1.5-um slice with no new backside BI.
   operator_package: resource:compact_p2/packages/BI2_50.json
-  temporal_profile: distilled26
+  temporal_profile: component_graded25
   layer_workers: 1
+  order_workers: 1  # Set >1 for concurrent assembly-order processes.
   metric: {model: disk}
   frozen_preview: true
 

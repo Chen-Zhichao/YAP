@@ -8,7 +8,7 @@ from omegaconf import OmegaConf
 import numpy as np
 import pytest
 
-from W2W.assembly_order import build_plan, archive_template, evaluate_archive, main, load_stack_input
+from W2W.assembly_order import _build_legacy_plan as build_plan, archive_template, evaluate_archive, main, load_stack_input
 from W2W.assembly_mechanics import AssemblyExecutor, native, run_native, _check_metric_policy
 
 if not (Path(__file__).resolve().parents[2] / "Ansys_Verify/12_stack_model_validation").is_dir():
@@ -16,6 +16,12 @@ if not (Path(__file__).resolve().parents[2] / "Ansys_Verify/12_stack_model_valid
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "W2W/input/design_6_4hi_p2/stack.yaml"
+
+
+@pytest.fixture(autouse=True)
+def legacy_kernel_cli(monkeypatch):
+    import W2W.assembly_order as module
+    monkeypatch.setattr(module, "build_plan", build_plan)
 
 
 def plan(orders="all", bows=(10., -10., 20., -20.)):
@@ -88,53 +94,6 @@ def test_prepare_is_cap_removal_not_state_reinitialization():
             for field in ("plastic_strain", "creep_strain", "equivalent_plastic_strain", "equivalent_creep_strain"):
                 np.testing.assert_array_equal(getattr(layer.cu_state, field), getattr(body.state.layers[name].cu_state, field))
             np.testing.assert_array_equal(layer.birth_macro_coordinates, body.state.layers[name].birth_macro_coordinates)
-
-
-def prepared_wafer_plan(order="all"):
-    source = EXAMPLE.parent.parent / "design_6_4hi_p2_no_thinning/stack.yaml"
-    config = load_stack_input(source)["stack"]
-    config["assembly_orders"] = order
-    return build_plan(config)
-
-
-def test_prepared_wafer_birth_and_preparation_keep_state_and_ages():
-    run = executor(prepared_wafer_plan(), with_cu=True)
-    for wafer, expected in enumerate((10., -10., 20., -20.), 1):
-        body = run.leaf(wafer)
-        assert [p.role for p in body.placements] == ["front_bi", "beol", "retained_si", "back_bi"]
-        assert body.placements[-1].z_top_mm - body.placements[0].z_bottom_mm == pytest.approx(.05)
-        assert all(p.birth_reference_z_mm == pytest.approx((wafer - 1) * .05 + .025)
-                   for p in body.placements)
-        np.testing.assert_allclose(body.state.generalized_coordinates[3:5] * 300**2 * 1000 / 8, expected)
-        for name, layer in body.state.layers.items():
-            layer.cu_state.equivalent_plastic_strain[:] = .002
-            body.ages_s[name] = 5200.
-        before = run.checkpoint(body)
-        prepared, audit = run.prepare_back(body)
-        assert prepared is body
-        assert run.checkpoint(prepared) == before
-        assert "removal" not in audit and "deposition" not in audit
-        assert set(prepared.ages_s.values()) == {5200.}
-
-
-@pytest.mark.parametrize("order", ["(((1,2),3),4)", "((1,(2,3)),4)", "((1,2),(3,4))",
-                                   "(1,((2,3),4))", "(1,(2,(3,4)))"])
-def test_five_native_prepared_wafer_routes_keep_all_layers_and_material_ages(order):
-    request = prepared_wafer_plan(order)
-    run = executor(request)
-    target = archive_template(request)["routes"][0]
-    run.run_route(request["routes"][0], target)
-    final = run.bodies[request["routes"][0]["final"]["state_id"]]
-    assert len(final.placements) == 16
-    for wafer, cycles in enumerate(request["routes"][0]["final"]["thermal_cycle_counts"], 1):
-        own = [p for p in final.placements if p.die_index == wafer - 1]
-        assert (own[-1].z_top_mm - own[0].z_bottom_mm) * 1000 == pytest.approx(50.)
-        for placement in own:
-            assert final.ages_s[placement.name] == 300. + cycles * 4900.
-    for output in target["events"]:
-        assert output["audit"]["preparation"]["policy"] == "prefabricated_back_BI_no_thinning_or_deposition"
-        assert output["lower"]["frame_id"] == output["upper"]["frame_id"] == request["context"]["frame_id"]
-        assert "wafer_ids" in output["lower"] and "die_ids" not in output["lower"]
 
 
 @pytest.mark.parametrize("order", ["(((1,2),3),4)", "((1,(2,3)),4)", "((1,2),(3,4))",

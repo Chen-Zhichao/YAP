@@ -13,7 +13,7 @@ import numpy as np
 from omegaconf import OmegaConf
 
 from .assembly_order import (
-    _number, _write_new, build_plan, content_id, evaluate_archive, load_stack_input,
+    _number, _write_new, _check_recipe_request, build_plan, content_id, evaluate_archive, load_stack_input,
 )
 
 
@@ -34,6 +34,12 @@ def load_design(cfg, design_dir, design_name):
     definitions = OmegaConf.load(paths[1]).ChipletDef
     topology = OmegaConf.load(paths[2])
     layout = OmegaConf.load(paths[3])
+    operator_request = None
+    if str(design.get("mechanics", {}).get("operator_package", "")).startswith("component:"):
+        from component_operators import w2w_operator_request
+        operator_request = w2w_operator_request(design["mechanics"]["operator_package"],
+            plan["context"]["geometry"], frozen_preview=design["mechanics"].get("frozen_preview", False),
+            layout=(layout.pitch_r_um, layout.pitch_c_um, layout.pad_diameter_um))
     if design.get("mechanics", {}).get("frozen_preview", False):
         name = Path(design["mechanics"]["operator_package"]).name
         expected = {"BI2_50.json": (2., 1.), "BI6_50.json": (6., 3.)}.get(name)
@@ -60,7 +66,7 @@ def load_design(cfg, design_dir, design_name):
         if list(definition.design_area) != area or definition.thickness != initial:
             raise ValueError("all initial wafer definitions must match stack.yaml and share die-site dimensions")
         if topology.ChipletInst[name].reference != name or node.get("orient", "R0") != "R0" or list(node.loc) != [0., 0.]:
-            raise ValueError("only aligned, fixed-orientation F2B wafer instances are supported")
+            raise ValueError("only aligned, fixed-orientation wafer instances are supported")
         if node.z != i * initial:
             raise ValueError("3Dblox z coordinates must describe the initial total-thickness ledger")
         dbf = directory / f"{name}.3dbf"
@@ -74,10 +80,10 @@ def load_design(cfg, design_dir, design_name):
             connection = topology.Connection[f"Conn{i}"]
             if connection.top != f"{name}.regions.From_Wafer_{i}" \
                     or connection.bot != f"Wafer_{i}.regions.To_{name}":
-                raise ValueError("connections must join adjacent lower BACK to upper FRONT")
+                raise ValueError("connections must describe adjacent physical wafer interfaces")
             if definition.regions[f"From_Wafer_{i}"].side != "front" \
                     or definitions[f"Wafer_{i}"].regions[f"To_{name}"].side != "back":
-                raise ValueError("mating regions must be F2B")
+                raise ValueError("input region declarations must match the existing logical pad-map registration")
     cfg = OmegaConf.create(OmegaConf.to_container(cfg, resolve=True))
     cfg.DIE_W_um, cfg.DIE_L_um = dimensions
     cfg.PITCH_r_um, cfg.PITCH_c_um = float(layout.pitch_r_um), float(layout.pitch_c_um)
@@ -137,15 +143,15 @@ def load_design(cfg, design_dir, design_name):
     provenance = dict(design=design_name, input_sha256={
         str(path): hashlib.sha256(path.read_bytes()).hexdigest() for path in paths},
         effective_config=OmegaConf.to_container(cfg, resolve=True),
-        physical_interfaces=[f"{i}.BACK--{i+1}.FRONT" for i in range(1, n)],
+        physical_interfaces=[f"{i}--{i+1}" for i in range(1, n)],
+        physical_face_selection="assembly process ledger; 3Dblox regions register logical pad layout only",
         site_count=len(sites), critical_pad_count=geometry["num_critical_pads"],
         critical_geometry="production_compact_central_rectangle_convex_boundary",
         placement_seed=seed, placement_seed_rule="SeedSequence([seed, physical_interface])",
         experiment="new_fixed_bow_W2W_assembly_orders_not_REFERENCE_population_reproduction",
-        overlay_input_sha256=content_id(overlay), config_thickness_scope=(
-            "fixed TOTAL50; both BIs prefabricated; no thinning or deposition"
-            if plan["context"].get("body_kind") == "prepared_wafer"
-            else "initial; event ledger controls thinning"))
+        overlay_input_sha256=content_id(overlay), config_thickness_scope="initial; event ledger controls thinning")
+    if operator_request is not None:
+        provenance["operator_request"] = operator_request
     return design, plan, overlay, resolved, provenance
 
 
@@ -187,24 +193,27 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
 
     configure_runtime_storage()
     from threadpoolctl import threadpool_limits
-    from .assembly_mechanics import run_native, _recipe, _check_metric_policy
-    from .assembly_operator_library import load_assembly_library
 
     design, plan, overlay, resolved, provenance = (design_loader or load_design)(cfg, design_dir, design_name)
-    from .assembly_order import is_die_plan
+    from .assembly_order import is_die_plan, is_f2b_plan
     metric_model = "square_affine" if is_die_plan(plan) else "disk"
     settings = design.get("mechanics")
     if not settings or settings.get("metric") != {"model": metric_model}:
         raise ValueError(f"normal assembly-order mode requires mechanics.metric: {{model: {metric_model}}}")
     if settings.get("layer_workers", 1) != 1:
         raise ValueError("this design runner currently requires one layer worker")
-    _recipe(plan, settings["temporal_profile"])
-    _check_metric_policy(plan, settings["metric"])
+    order_workers = settings.get("order_workers", 1)
+    if type(order_workers) is not int or order_workers < 1:
+        raise ValueError("mechanics.order_workers must be a positive integer")
+    _check_recipe_request(plan, settings["temporal_profile"])
     root = Path(output_dir or cfg.OUTPUT_DIR)
     if output_dir is None and not root.is_absolute():
         domain = "D2W" if is_die_plan(plan) else "W2W"
         root = Path(__file__).resolve().parents[1] / domain / root
     root = validate_write_path(root)
+    if str(settings.get("operator_package", "")).startswith("component:"):
+        from component_operators import canonical_write_path
+        root = canonical_write_path(root)
     run = validate_write_path(root / design_name / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]))
     run.mkdir(parents=True, exist_ok=False)
     print(f"Assembly-order run: {run}", flush=True)
@@ -239,9 +248,36 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
         OmegaConf.save(OmegaConf.create(record), run / f"{name}.yaml")
     if plan_only:
         print(f"Planned {len(plan['routes'])} orders; no mechanics or yield evaluated.")
+        print(f"Order concurrency: requested {order_workers}, effective {min(order_workers, len(plan['routes']))}.")
+        if "summary" in plan:
+            summary = plan["summary"]
+            print(f"{summary['defined_routes']} defined process ledgers; "
+                  f"{summary['missing_process_definitions']} missing process definitions.")
+            print("New mixed-face W2W: orientation and native qualification pending; execution blocked.")
+        elif is_f2b_plan(plan):
+            print("F2B only; 775-um birth, lower-back preparation before every bond, final outer-back thinning.")
+            print("Component execution checks pure-Si caps; the explicit P24 preview remains available. Assembly accuracy is pending.")
+        request = provenance.get("operator_request", {})
+        if request.get("admission_status") == "UNAVAILABLE_EXACT_P2_OPERATORS_NOT_ADMITTED":
+            print("Execution unavailable: exact p2 operators for this thickness have not been built and admitted.")
         return run
     started = perf_counter()
     try:
+        from .assembly_order import _check_plan
+        _check_plan(plan)
+        if "operator_request" in provenance:
+            if is_f2b_plan(plan) and str(settings["operator_package"]).startswith("component:"):
+                from component_operators import w2w_operator_request
+                w2w_operator_request(settings["operator_package"], plan["context"]["geometry"],
+                                     frozen_preview=settings.get("frozen_preview", False))
+            else:
+                from .assembly_operator_library import require_prepared_operator
+                require_prepared_operator(settings["operator_package"], plan["context"]["geometry"],
+                                          frozen_preview=settings.get("frozen_preview", False))
+        from .assembly_mechanics import run_native, _recipe, _check_metric_policy
+        from .assembly_operator_library import load_assembly_library, load_f2b_assembly_library
+        _recipe(plan, settings["temporal_profile"])
+        _check_metric_policy(plan, settings["metric"])
         minimum = cfg.get("MIN_AVAILABLE_MEMORY_GIB", 40.)
         _memory_gate(minimum)
         def progress(message):
@@ -255,13 +291,19 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
             _write_new(run / f"route_{number}_mechanics.json", partial)
             progress(f"Completed order {number}/{len(plan['routes'])}: {route['order']}")
         with threadpool_limits(limits=1):
-            progress("Loading the selected checked layer operators once.")
-            options = {"frozen_preview": True} if settings.get("frozen_preview", False) else {}
-            loader = operator_loader or load_assembly_library
-            library, operators = loader(settings["operator_package"], plan["context"]["geometry"], **options)
-            progress("Layer operators loaded; executing complete Cu histories.")
-            archive = run_native(plan, library, operators, temporal_profile=settings["temporal_profile"],
-                metric=settings["metric"], progress=progress, route_complete=completed)
+            if order_workers > 1:
+                from .assembly_parallel import run_parallel
+                progress(f"Executing orders with up to {order_workers} isolated worker processes.")
+                archive = run_parallel(plan, settings, work_dir=run / "order_workers",
+                    minimum_memory_gib=minimum, progress=progress, route_complete=completed)
+            else:
+                progress("Loading the selected checked layer operators once.")
+                options = {"frozen_preview": True} if settings.get("frozen_preview", False) else {}
+                loader = operator_loader or (load_f2b_assembly_library if is_f2b_plan(plan) else load_assembly_library)
+                library, operators = loader(settings["operator_package"], plan["context"]["geometry"], **options)
+                progress("Layer operators loaded; executing complete Cu histories.")
+                archive = run_native(plan, library, operators, temporal_profile=settings["temporal_profile"],
+                    metric=settings["metric"], progress=progress, route_complete=completed)
         # Native modules and the dynamically loaded metric may arrive after the
         # input snapshot. Preserve their exact sources without rewriting receipts.
         late_sources = set()
@@ -277,6 +319,14 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
                 if path.suffix == ".py" and (path.is_relative_to(project) or path.is_relative_to(native_root)):
                     late_sources.add(path)
         late_sources.update(Path(p) for p in archive.get("native_configuration", {}).get("metric_implementation_sha256", {}))
+        worker_sources = archive.get("native_configuration", {}).get("worker_runtime_sources", {})
+        for filename, expected in worker_sources.items():
+            path = Path(filename).resolve()
+            if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
+                raise ValueError(f"worker source changed during assembly execution: {path}")
+            if not (path.is_relative_to(project) or path.is_relative_to(native_root)):
+                raise ValueError(f"worker source is outside the project/native runtime: {path}")
+            late_sources.add(path)
         runtime_hashes = {}
         for path in sorted(late_sources):
             relative = path.relative_to(project) if path.is_relative_to(project) else Path("YAP/runtime/native") / path.relative_to(native_root)

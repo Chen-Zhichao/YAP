@@ -3,6 +3,7 @@
   "resources": {
     "compact_p2": "results/operators/p2_p24",
     "geometry": "results/geometry",
+    "prepared_p2_native": "results/operators/prepared_p2_native",
     "compact_p6": "results/operators/p6_p32",
     "w2w_corrected": "results/w2w_reference"
   }
