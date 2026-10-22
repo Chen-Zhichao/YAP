@@ -13,13 +13,16 @@ import sys
 import time
 
 sys.dont_write_bytecode = True
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from mechanics_runtime import configure_runtime_storage, mechanics_work_directory, validate_write_path
 
 configure_runtime_storage()
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 ANSYS_VALIDATION = ROOT.parent / "Ansys_Verify" / "12_stack_model_validation"
 CORRECTED_TIER_CONTRACT = "same_orientation_tsv_beol_frontbi_upper_backbi_20260914_v1"
 

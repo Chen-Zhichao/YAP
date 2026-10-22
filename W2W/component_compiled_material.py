@@ -20,7 +20,7 @@ except ImportError:
     import mechanics_runtime as runtime
 
 
-SOURCE_ROOT = runtime.COMPONENT_PROJECT_ROOT / "operator_repair_20261015/source"
+SOURCE_ROOT = runtime.COMPONENT_PROJECT_ROOT / "distribution/operators/artifacts/operator_repair_20261015/source"
 SOURCE_PINS = MappingProxyType({
     "exp12_cu_material_point.py": "35e7016dab8b1fb2cb0a928e7642665d3fc4f00b4f255eb797fb6d6e44b56722",
     "exp12_all_gauss_exact_acceleration.py": "483c9d948931d48beb73561842cb8fe780db285d3b61f158e580229fbdcd465f",

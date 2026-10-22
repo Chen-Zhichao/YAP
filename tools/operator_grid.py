@@ -25,7 +25,10 @@ import threading
 import time
 import zipfile
 
-import build_prepared_operators as builder
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as builder
 
 
 PITCHES = tuple(range(2, 11))
@@ -247,7 +250,7 @@ def checked_baseline(root):
     files = inventory.get("files_sha256", {})
     if not isinstance(files, dict) or len(files) > 512:
         raise ValueError("invalid baseline inventory")
-    from package_assembly_runtime import confined_source
+    from tools.package_assembly_runtime import confined_source
     for filename, expected in files.items():
         path = confined_source(root, root.parent / filename)
         if builder.digest(regular(path)) != expected:
@@ -298,7 +301,8 @@ def check_material_contract(dataset, expected):
 
 
 def source_closure(api, cases):
-    sources = {Path(__file__), Path(builder.__file__), Path(api.__file__)}
+    sources = {Path(__file__), Path(builder.__file__), Path(api.__file__),
+               Path(__file__).with_name("__init__.py")}
     supervisor = Path(__file__).parent / "operator_thermal_validation.py"
     if supervisor.is_file():
         sources.add(supervisor)
@@ -1318,7 +1322,7 @@ def worker(args):
                      started_epoch=time.time(), completed=[], requested_coverage=81,
                      native_execution_expanded=False)
         builder.write_json(work / "STATUS.json", state)
-        from operator_thermal_validation import ProcessInventory, publish_worker_scope
+        from tools.operator_thermal_validation import ProcessInventory, publish_worker_scope
         publish_worker_scope(ProcessInventory())
         archive_identity = None
         try:
@@ -1330,7 +1334,7 @@ def worker(args):
             case_deadline = 0.
             active_adoption = None
             if group_binding is not None:
-                from operator_thermal_validation import run_child
+                from tools.operator_thermal_validation import run_child
                 def supervised_stage(command, log, name, *, environment=None):
                     print(f"START {name}: {log}", flush=True)
                     run_child(command, log, case_deadline, environment=environment, group_binding=group_binding)
@@ -1491,7 +1495,7 @@ def launch(args, *, preparation_deadline=None, prepared=None):
         return child
     except BaseException:
         if child is not None:
-            from operator_thermal_validation import cleanup_spawned
+            from tools.operator_thermal_validation import cleanup_spawned
             cleanup_spawned(child, observed)
         raise
 
@@ -1699,7 +1703,8 @@ def training_closure(source):
     common = regular(source.parent / "common/ansys_utils.py")
     if builder.digest(common) != COMMON_HELPER_SHA:
         raise ValueError("unreviewed solver cleanup helper")
-    seeds = [Path(__file__), Path(builder.__file__), Path(__file__).parent / "operator_thermal_validation.py",
+    seeds = [Path(__file__), Path(builder.__file__), Path(__file__).with_name("__init__.py"),
+             Path(__file__).parent / "operator_thermal_validation.py",
              common, source / TRAINING_NATIVE, source / TRAINING_OUTPUTS,
              source / TRAINING_EXTRACTOR, source / "exp12_250c_branch.py"]
     if (common.parent / "__init__.py").is_file():
@@ -1716,7 +1721,8 @@ def training_closure(source):
             elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
                 modules.add(node.module)
         for module in modules:
-            roots = [Path(__file__).parent, source, source.parent / "09_effective_material_die_validation",
+            roots = [Path(__file__).resolve().parents[1], Path(__file__).parent,
+                     source, source.parent / "09_effective_material_die_validation",
                      source.parent / "11_symmetric_mesh_beol_rve_verify"]
             if module.startswith("common."):
                 roots = [source.parent]
@@ -1724,6 +1730,8 @@ def training_closure(source):
                                         if (root / (module.replace(".", "/") + ".py")).is_file()))
             if len(matches) > 1:
                 raise ValueError(f"ambiguous training dependency: {module}")
+            if module.startswith("tools.") and not matches:
+                raise ValueError(f"missing offline tool dependency: {module}")
             if matches and matches[0] not in files:
                 files.add(matches[0])
                 pending.append(matches[0])
@@ -3468,7 +3476,7 @@ def training_recover_native(args):
 def training_recover_worker(args):
     plan, work = checked_recovery(args)
     environment = builder.configure(work)
-    from operator_thermal_validation import run_child, ProcessInventory, publish_worker_scope
+    from tools.operator_thermal_validation import run_child, ProcessInventory, publish_worker_scope
     with worker_solver_lock(work):
         state = dict(state="RECOVERY_COPYING_AND_EXTRACTION", worker_pid=os.getpid(),
                      thermal_geometry_validated=False, runtime_admitted=False)
@@ -3625,7 +3633,7 @@ def training_native(args):
 def training_worker(args):
     plan, work = checked_training(args)
     environment = builder.configure(work)
-    from operator_thermal_validation import run_child, ProcessInventory, publish_worker_scope
+    from tools.operator_thermal_validation import run_child, ProcessInventory, publish_worker_scope
     with worker_solver_lock(work):
         state = dict(state="PREFLIGHT", worker_pid=os.getpid(), thermal_geometry_validated=False, runtime_admitted=False)
         builder.write_json(work / "STATUS.json", state, immutable=True)
@@ -3721,7 +3729,7 @@ def spawn_training_worker(work, plan_sha, pins_sha, environment, *, action="trai
         print(json.dumps(receipt, indent=2), flush=True)
     except BaseException:
         if child is not None:
-            from operator_thermal_validation import cleanup_spawned
+            from tools.operator_thermal_validation import cleanup_spawned
             cleanup_spawned(child, observed)
         raise
 

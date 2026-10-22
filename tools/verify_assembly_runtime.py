@@ -8,9 +8,12 @@ from pathlib import Path
 import sys
 
 sys.dont_write_bytecode = True
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from mechanics_runtime import configure_runtime_storage
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def isolate_original_storage():
@@ -37,7 +40,7 @@ def isolate_original_storage():
 
 def check_prepared_library(library, inputs, total):
     import numpy as np
-    from package_assembly_runtime import PREPARED_BASIS_SHA256, digest
+    from tools.package_assembly_runtime import PREPARED_BASIS_SHA256, digest
     from W2W.assembly_operator_library import _prepared_json
 
     if library.port_rank_per_face != 64 or inputs.get("port_rank_per_face") != 64:
@@ -78,7 +81,7 @@ def verify(*, load_operators=False, prepared_operators=False):
         raise ValueError("delivery verification requires only the inventoried runtime resource map")
     isolate_original_storage()
     from omegaconf import OmegaConf
-    from package_assembly_runtime import (
+    from tools.package_assembly_runtime import (
         PREPARED_PROFILES, confined_source, delivery_profiles, digest, prepared_data_files,
     )
     from mechanics_runtime import NATIVE_ROOT, PORTABLE_RUNTIME

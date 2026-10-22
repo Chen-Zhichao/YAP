@@ -1,6 +1,7 @@
 """Relocation preserves frozen bytes and never falls back to original storage."""
 
 import json
+import hashlib
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +13,119 @@ import pytest
 
 import mechanics_runtime as runtime
 from W2W.assembly_operator_library import _bound_reference_factory
-from package_assembly_runtime import replace_yaml_scalar
+from tools.package_assembly_runtime import replace_yaml_scalar
+
+
+def _artifact_manifest(tmp_path, monkeypatch, files, *, raw=None):
+    manifest = tmp_path / "distribution/operators/artifacts/LOCATIONS.json"
+    manifest.parent.mkdir(parents=True)
+    payload = raw if raw is not None else json.dumps(
+        dict(schema="yap.operator_artifact_locations.v1", files=files)).encode()
+    manifest.write_bytes(payload)
+    manifest.chmod(0o444)
+    monkeypatch.setattr(runtime, "COMPONENT_PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(runtime, "ARTIFACT_LOCATIONS_SHA256", hashlib.sha256(payload).hexdigest())
+    return manifest
+
+
+def test_artifact_relocation_is_exact_and_preserves_unknown_paths(tmp_path, monkeypatch):
+    relative = Path("operator_repair_20261015/source/material.py")
+    _artifact_manifest(tmp_path, monkeypatch, [str(relative)])
+    original = tmp_path / relative
+    current = tmp_path / "distribution/operators/artifacts" / relative
+    assert runtime.shared_distribution_path(original) == current
+    assert runtime.shared_distribution_path(original.parent) == current.parent
+    assert runtime.shared_distribution_path(current) == current
+    unrelated = original.with_name("another.py")
+    assert runtime.shared_distribution_path(unrelated) == unrelated
+    from tools.publish_component_operators import binding, same_binding
+    left, right = dict(path=str(original), sha256="a" * 64), dict(path=str(current), sha256="a" * 64)
+    same_binding(left, right)
+    assert binding(left) == right
+    assert left["path"] == str(original)
+
+
+@pytest.mark.parametrize("files", [[], [""], ["operator_repair_20261015/source/a.py"] * 2,
+    ["operator_repair_20261015/.snapshot/a.json"], ["operator_repair_20261015/archives/a.json"],
+    ["operator_repair_20261015/../a.json"], ["other/source/a.py"]])
+def test_artifact_relocation_rejects_invalid_manifest(tmp_path, monkeypatch, files):
+    _artifact_manifest(tmp_path, monkeypatch, files)
+    with pytest.raises(ValueError):
+        runtime.shared_distribution_path(tmp_path / "operator_repair_20261015/source/a.py")
+
+
+def test_artifact_relocation_refuses_hash_mismatch(tmp_path, monkeypatch):
+    _artifact_manifest(tmp_path, monkeypatch, ["operator_repair_20261015/source/a.py"])
+    monkeypatch.setattr(runtime, "ARTIFACT_LOCATIONS_SHA256", "f" * 64)
+    with pytest.raises(ValueError, match="SHA256"):
+        runtime.shared_distribution_path(tmp_path / "operator_repair_20261015/source/a.py")
+
+
+def test_artifact_relocation_refuses_symlink_manifest(tmp_path, monkeypatch):
+    manifest = _artifact_manifest(tmp_path, monkeypatch, ["operator_repair_20261015/source/a.py"])
+    target = manifest.with_name("original.json")
+    manifest.rename(target)
+    manifest.symlink_to(target)
+    with pytest.raises(OSError):
+        runtime.shared_distribution_path(tmp_path / "operator_repair_20261015/source/a.py")
+
+
+def test_artifact_metadata_reads_relocated_bytes_without_rewriting_evidence(tmp_path, monkeypatch):
+    relative = Path("operator_repair_20261015/progress/REPORT.json")
+    _artifact_manifest(tmp_path, monkeypatch, [str(relative)])
+    original = tmp_path / relative
+    current = tmp_path / "distribution/operators/artifacts" / relative
+    current.parent.mkdir(parents=True)
+    document = {"readset": {str(original): "original-binding"}}
+    raw = json.dumps(document).encode()
+    current.write_bytes(raw)
+    from tools.publish_component_operators import MetadataReader
+    reader = MetadataReader(tmp_path)
+    loaded, observed = reader.read(dict(path=str(original), sha256=hashlib.sha256(raw).hexdigest()))
+    assert loaded == document
+    assert observed["path"] == str(current)
+    assert not original.exists()
+    reader.verify_unchanged()
+    with pytest.raises(ValueError, match="variant differs"):
+        reader.read(dict(path=str(original), sha256="0" * 64))
+
+
+@pytest.mark.parametrize("previous,current", runtime.DISTRIBUTION_RELOCATIONS.items())
+def test_distribution_alias_is_component_exact_and_idempotent(previous, current):
+    root = runtime.COMPONENT_PROJECT_ROOT / "distribution"
+    old = root / previous / "runtime/RESOURCES.json"
+    expected = root / "operators" / current / "runtime/RESOURCES.json"
+    assert runtime.shared_distribution_path(old) == expected
+    assert runtime.shared_distribution_path(expected) == expected
+    unrelated = root / (previous + "_other") / "runtime/RESOURCES.json"
+    assert runtime.shared_distribution_path(unrelated) == unrelated
+
+
+@pytest.mark.parametrize("part", ["..", "#snapshot", ".snapshot"])
+def test_distribution_alias_rejects_traversal_and_snapshots(part):
+    root = runtime.COMPONENT_PROJECT_ROOT / "distribution"
+    with pytest.raises(ValueError):
+        runtime.shared_distribution_path(root / "yap_component_operators_20261021_v1" / part / "data")
+
+
+def test_distribution_aliases_resolve_resource_and_native_selectors(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime, "COMPONENT_PROJECT_ROOT", tmp_path)
+    package = tmp_path / "distribution/operators/components/runtime"
+    native = package / "native"
+    (native / "geometry").mkdir(parents=True)
+    (native / "exp12_layer_rom_dataset.py").write_text("# fixture\n")
+    mapping = {"schema": "yap.native_resources.v1", "resources": {"geometry": "geometry"}}
+    (package / "RESOURCES.json").write_text(json.dumps(mapping))
+    previous = tmp_path / "distribution/yap_component_operators_20261021_v1/runtime"
+    monkeypatch.setenv("YAP_NATIVE_RUNTIME_DIR", str(previous / "native"))
+    monkeypatch.setenv("YAP_RUNTIME_RESOURCES", str(previous / "RESOURCES.json"))
+    assert runtime.select_native_root() == (native, True)
+    assert runtime.resource_map_path(previous / "native") == package / "RESOURCES.json"
+    assert runtime.load_resource_map(previous / "RESOURCES.json") == mapping
+    assert runtime.resolve_resource("resource:geometry/data.json", native_root=previous / "native") == (
+        native / "geometry/data.json")
+    assert runtime.resolve_native_input(previous / "native", previous / "native/geometry/data.json",
+        native_root=previous / "native", portable=True) == native / "geometry/data.json"
 
 
 @pytest.fixture
@@ -136,7 +249,7 @@ def test_cli_rejects_tmp_before_third_party_imports(tmp_path, entry):
     result = subprocess.run([sys.executable, "-B", str(runtime.ROOT / entry), "--help"],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode != 0
-    assert "/tmp storage is not allowed" in result.stderr
+    assert "TMPDIR must use /app storage, not /tmp, home or /data" in result.stderr
     assert "matplotlib" not in result.stderr
 
 
@@ -348,7 +461,7 @@ def test_plan_loading_keeps_resource_references_without_private_map(tmp_path, mo
 
 @pytest.mark.parametrize("name", ["YAP_NATIVE_RUNTIME_DIR", "YAP_RUNTIME_RESOURCES"])
 def test_delivery_verifier_rejects_external_overrides_before_reading_files(monkeypatch, name):
-    from verify_assembly_runtime import verify
+    from tools.verify_assembly_runtime import verify
     monkeypatch.setenv(name, "/unavailable")
     with pytest.raises(ValueError, match="overrides"):
         verify()
@@ -367,7 +480,7 @@ def test_unknown_or_malformed_archive_metrics_do_not_fall_back_to_scalar(metric)
 
 @pytest.mark.parametrize("through_symlink", [False, True])
 def test_miniature_private_export_inventories_relocatable_resource_map(tmp_path, monkeypatch, through_symlink):
-    import package_assembly_runtime as package
+    import tools.package_assembly_runtime as package
     root, mapping = resource_fixture(tmp_path)
     operator = root / "results/compact/packages/BI2_50.json"
     operator.parent.mkdir(parents=True)
@@ -426,7 +539,7 @@ def test_resource_map_rejects_nonregular_files_and_symlinked_parents(tmp_path):
 
 def test_exporter_help_does_not_select_environment_native_root():
     environment = dict(os.environ, YAP_NATIVE_RUNTIME_DIR="/unavailable/native/runtime")
-    result = subprocess.run([sys.executable, str(runtime.ROOT / "package_assembly_runtime.py"), "--help"],
+    result = subprocess.run([sys.executable, str(runtime.ROOT / "tools/package_assembly_runtime.py"), "--help"],
         capture_output=True, text=True, env=environment, timeout=20)
     assert result.returncode == 0, result.stderr
     assert "--resource-map" in result.stdout

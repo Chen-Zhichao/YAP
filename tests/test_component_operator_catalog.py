@@ -35,7 +35,8 @@ def component_arrays():
 def corrected_material(monkeypatch, component_arrays):
     import importlib.util
     from types import SimpleNamespace
-    source = runtime.ROOT.parent / 'operator_repair_20261015/source/exp12_cu_material_point.py'
+    source = runtime.shared_distribution_path(
+        runtime.ROOT.parent / 'operator_repair_20261015/source/exp12_cu_material_point.py')
     if not source.is_file():
         pytest.skip('optional corrected research material is not installed')
     spec = importlib.util.spec_from_file_location('_component_bridge_test_corrected_cu',source)
@@ -132,9 +133,10 @@ def sha(payload):
 
 
 @pytest.fixture
-def catalog(monkeypatch):
-    # Always keep generated test inputs in the canonical project, never /tmp.
-    with tempfile.TemporaryDirectory(prefix=".component_catalog_test_", dir=runtime.ROOT) as directory:
+def catalog(monkeypatch, tmp_path):
+    # Keep generated fixtures under the caller's private /app --basetemp.
+    assert tmp_path.is_relative_to("/app")
+    with tempfile.TemporaryDirectory(prefix=".component_catalog_test_", dir=tmp_path) as directory:
         root = Path(directory)
         monkeypatch.setattr(runtime, "COMPONENT_PROJECT_ROOT", root)
         monkeypatch.delenv("YAP_COMPONENT_OPERATOR_CATALOG", raising=False)

@@ -17,9 +17,12 @@ import subprocess
 import sys
 import time
 
-import build_prepared_operators as storage
-import operator_grid as grid
-import operator_thermal_validation as thermal
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as storage
+import tools.operator_grid as grid
+import tools.operator_thermal_validation as thermal
 
 
 def frozen_equilibrium(stiffness, thermal_load, eigenstrain_force, macro):
@@ -41,7 +44,7 @@ def deny_native(*args, **kwargs):
 
 
 def run(args):
-    from operator_accuracy_review import completed_cases, read, validate_screen
+    from tools.operator_accuracy_review import completed_cases, read, validate_screen
     work = storage.local_scratch(args.work)
     if work.exists():
         raise FileExistsError("fresh diagnostic work required")
@@ -187,7 +190,7 @@ def run(args):
     si_matrix = nodal.reshape(-1, 27).T @ fields.reshape(-1, op.coordinate_size)
     full_audit = None
     if args.full_nodal:
-        from operator_frozen_residual import FrozenResidualAudit
+        from tools.operator_frozen_residual import FrozenResidualAudit
         full_audit = FrozenResidualAudit(work, plan["source"], ids, xyz, fields, materials, ds, op,
             (case / "preflight" / "M3_tsv_si_INTERFACE_REPLAY_exact.dat").read_text())
     del fields, nodal, lifts, bubbles, probe_fields

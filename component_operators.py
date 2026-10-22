@@ -21,9 +21,9 @@ import mechanics_runtime as runtime
 
 
 PROJECT = runtime.COMPONENT_PROJECT_ROOT
-DELIVERY = PROJECT / "distribution/yap_component_operators_20261021_v1"
+DELIVERY = PROJECT / "distribution/operators/components"
 DEFAULT_CATALOG = DELIVERY / "CATALOG.json"
-DEFAULT_THICKNESS_FAMILY = PROJECT / "distribution/yap_thickness_family_20261021_v2"
+DEFAULT_THICKNESS_FAMILY = PROJECT / "distribution/operators/thickness_family"
 CU_MATERIAL_CARD_SHA256 = "b3a876bcd8847e5ee2366580155b66ef5a3c01a7971a3b44b152b47eb46db8aa"
 ARRAY_LIMIT = 6 * 1024**3
 READ_LIMIT = 24 * 1024**3
@@ -51,7 +51,9 @@ def _binding(value, base):
 
 
 def _same(left, right):
-    return all(left.get(key) == right.get(key) for key in ("path", "sha256"))
+    return (left.get("path") is not None and right.get("path") is not None
+            and left.get("sha256") == right.get("sha256")
+            and runtime.shared_distribution_path(left["path"]) == runtime.shared_distribution_path(right["path"]))
 
 
 def _document(binding):
@@ -78,7 +80,7 @@ def _projected_work(component):
 
 def _verify_validation(entry, reader):
     """Use the publisher's exact assessment/candidate/artifact evidence chain."""
-    from publish_component_operators import _assessment, _components
+    from tools.publish_component_operators import _assessment, _components
 
     geometry, validation = entry["geometry"], entry["validation"]
     pitch, si = geometry["bi_pitch_um"], geometry["si_tsv_thickness_um"]
@@ -99,7 +101,8 @@ def _verify_validation(entry, reader):
     _require(_same(construction, entry["construction"]) and _same(reference, entry["reference"]),
              "validated history used a different operator or reference")
     for role in ROLES:
-        _require(components[role] == {key: entry["components"][role][key]
+        expected = _binding(entry["components"][role], DEFAULT_CATALOG.parent)
+        _require(components[role] == {key: expected[key]
                                      for key in ("path", "sha256", "bytes", "micro_rank")},
                  "validated history used a different component operand")
 
@@ -113,7 +116,7 @@ def load_catalog(catalog_path=None):
              and catalog["schema"] == "yap.component_operator_catalog.v2"
              and isinstance(catalog["entries"], list) and 1 <= len(catalog["entries"]) <= 128,
              "invalid shared component v2 catalog")
-    from publish_component_operators import MetadataReader
+    from tools.publish_component_operators import MetadataReader
     evidence_reader = MetadataReader(PROJECT)
     entries, identifiers = [], set()
     required = {"id", "geometry", "components", "construction", "reference", "validation", "capabilities"}
@@ -267,8 +270,11 @@ def configure_component_runtime():
     selected_native = runtime._component_path(os.environ.get(
         "YAP_NATIVE_RUNTIME_DIR", str(DELIVERY / "runtime/native")))
     _check_loaded_native_root(selected_native)
-    os.environ.setdefault("YAP_NATIVE_RUNTIME_DIR", str(selected_native))
-    os.environ.setdefault("YAP_RUNTIME_RESOURCES", str(DELIVERY / "runtime/RESOURCES.json"))
+    os.environ["YAP_NATIVE_RUNTIME_DIR"] = str(selected_native)
+    os.environ["YAP_RUNTIME_RESOURCES"] = str(runtime.shared_distribution_path(
+        os.environ.get("YAP_RUNTIME_RESOURCES", DELIVERY / "runtime/RESOURCES.json")))
+    os.environ["YAP_W2W_SI_CAP_LIBRARY_DIR"] = str(runtime._component_path(
+        os.environ.get("YAP_W2W_SI_CAP_LIBRARY_DIR", PROJECT / "distribution/operators/silicon_caps")))
 
 
 def _check_loaded_native_root(selected, *, modules=None):

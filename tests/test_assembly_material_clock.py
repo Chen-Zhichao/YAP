@@ -225,7 +225,8 @@ def test_discarded_trial_and_cutback_endpoints_keep_offset_fixed(material, entry
 
 @pytest.fixture
 def corrected_material(monkeypatch, material):
-    source = runtime.ROOT.parent / "operator_repair_20261015/source/exp12_cu_material_point.py"
+    source = runtime.shared_distribution_path(
+        runtime.ROOT.parent / "operator_repair_20261015/source/exp12_cu_material_point.py")
     spec = importlib.util.spec_from_file_location("_assembly_clock_corrected_cu", source)
     module = importlib.util.module_from_spec(spec)
     monkeypatch.setitem(sys.modules, spec.name, module)

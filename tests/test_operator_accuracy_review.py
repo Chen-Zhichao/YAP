@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-import operator_accuracy_review as review
-from operator_snapshot_diagnostic import deny_native, frozen_equilibrium
+import tools.operator_accuracy_review as review
+from tools.operator_snapshot_diagnostic import deny_native, frozen_equilibrium
 
 
 def fixture_result(passed=True):
@@ -136,7 +136,7 @@ def test_scientific_epoch_ignores_only_scheduler_location():
 def test_full_nodal_old_span_has_no_missing_direction():
     from scipy.sparse import csc_matrix
     from scipy.sparse.linalg import splu
-    from operator_frozen_residual import complement
+    from tools.operator_frozen_residual import complement
     k = csc_matrix(np.diag([2., 3., 4.]))
     z = np.eye(3)[:, :1]
     missing, report = complement(k, splu(k), z, np.array([1., 0., 0.]))
@@ -147,7 +147,7 @@ def test_full_nodal_old_span_has_no_missing_direction():
 def test_full_nodal_known_complement_energy():
     from scipy.sparse import csc_matrix
     from scipy.sparse.linalg import splu
-    from operator_frozen_residual import complement
+    from tools.operator_frozen_residual import complement
     k = csc_matrix(np.diag([2., 3., 4.]))
     z = np.eye(3)[:, :1]
     missing, report = complement(k, splu(k), z, np.array([1., 3., 0.]))
@@ -159,7 +159,7 @@ def test_full_nodal_known_complement_energy():
 
 def test_both_faces_remove_columns_not_just_rows():
     from scipy.sparse import eye
-    from operator_frozen_residual import both_fixed_faces
+    from tools.operator_frozen_residual import both_fixed_faces
     xyz = np.array([[0., 0., 0.], [0., .5, 0.], [0., 1., 0.]])
     p, counts = both_fixed_faces(eye(9, format="csr"), xyz)
     assert p.shape == (9, 3)
@@ -169,7 +169,7 @@ def test_both_faces_remove_columns_not_just_rows():
 
 def test_full_nodal_constraint_map_checks_actual_ce_and_fixed_nodes():
     from scipy.sparse import csr_matrix
-    from operator_frozen_residual import constraint_map_audit
+    from tools.operator_frozen_residual import constraint_map_audit
     p = csr_matrix(np.array([[1.], [0.], [0.], [1.], [0.], [0.]]))
     ids = np.array([1, 2])
     deck = "\n".join(f"CE,{i},0,1,UX,1,2,UX,-1" for i in range(1, 5251)) + "\n/SOLU"

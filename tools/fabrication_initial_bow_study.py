@@ -7,6 +7,9 @@ from pathlib import Path
 import sys
 
 sys.dont_write_bytecode = True
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 try:
     from YAP.mechanics_runtime import configure_runtime_storage, validate_write_path
 except ModuleNotFoundError:

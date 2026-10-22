@@ -16,7 +16,7 @@ from test_component_operators import entry as exact_entry, geometry, gp_arrays
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FAMILY = ROOT.parent / "distribution/yap_thickness_family_20261021_v2"
+FAMILY = ROOT.parent / "distribution/operators/thickness_family"
 HISTORY_FIELDS = {"plastic_strain", "creep_strain", "equivalent_plastic_strain",
                   "equivalent_creep_strain", "cu_state"}
 

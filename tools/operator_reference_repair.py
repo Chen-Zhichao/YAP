@@ -9,8 +9,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
-import build_prepared_operators as storage
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as storage
 
 
 FORCES = ("Nx", "Ny", "Nxy", "Mx", "My", "Mxy")
@@ -26,7 +30,7 @@ def read_record(path):
 
 def score_response(prediction, reference, times, rows):
     import numpy as np
-    import operator_thermal_validation as thermal
+    import tools.operator_thermal_validation as thermal
 
     prediction, reference = np.asarray(prediction), np.asarray(reference)
     times = np.asarray(times)
@@ -86,8 +90,8 @@ def run(args):
         raise FileExistsError('fresh reference-repair result directory required')
     storage.configure(work)
     import numpy as np
-    import operator_thermal_validation as thermal
-    import operator_work_reference as reference_api
+    import tools.operator_thermal_validation as thermal
+    import tools.operator_work_reference as reference_api
 
     review = read_record(args.review)
     case = storage.safe_path(review['case'])

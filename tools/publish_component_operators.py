@@ -16,11 +16,16 @@ import re
 import stat
 import sys
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from mechanics_runtime import shared_distribution_path
+
 
 ROOT = Path('/app/nanocad/projects/personal/zchen/YAP_STACK')
 PROGRESS_RELATIVE = ('operator_repair_20261015/progress/deployment_20261019_v1/'
                      'PROGRESS_ACCELERATION_20261021_v2.json')
-CATALOG_RELATIVE = 'distribution/yap_component_operators_20261021_v1/CATALOG.json'
+CATALOG_RELATIVE = 'distribution/operators/components/CATALOG.json'
 SCHEMA = 'yap.component_operator_catalog.v2'
 JSON_LIMIT = 1024**2
 READ_LIMIT = 64 * JSON_LIMIT
@@ -40,7 +45,7 @@ def binding(value):
     require(isinstance(value, dict) and isinstance(value.get('path'), str)
             and re.fullmatch(r'[0-9a-f]{64}', str(value.get('sha256'))),
             'exact path/SHA256 binding required')
-    return {key: value[key] for key in ('path', 'sha256')}
+    return dict(path=str(shared_distribution_path(value['path'])), sha256=value['sha256'])
 
 
 def same_binding(left, right):
@@ -75,7 +80,9 @@ class MetadataReader:
                 and not {'#snapshot', '.snapshot', 'mapdl_run_roots', 'mapdl_archives'}.intersection(path.parts)
                 and not any(p.startswith(('.migration_hold_', 'storage_migration')) for p in path.parts),
                 'literal canonical non-snapshot evidence path required')
-        return path
+        relocated = shared_distribution_path(path)
+        require(relocated.is_relative_to(self.root), 'relocated evidence escapes reader root')
+        return relocated
 
     def _open(self, path):
         directory = os.open('/', os.O_RDONLY | os.O_DIRECTORY)

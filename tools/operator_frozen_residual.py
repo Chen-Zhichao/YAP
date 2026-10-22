@@ -7,7 +7,7 @@ import csv
 from pathlib import Path
 from types import SimpleNamespace
 
-import build_prepared_operators as storage
+import tools.build_prepared_operators as storage
 
 HELPER_SHA = "b71b24e9eea8a4564fb14a0a052085deb0ec7fd82f33765cc654a76cb15ae626"
 SAMPLE_SETS = (201, 361)

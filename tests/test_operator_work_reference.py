@@ -8,8 +8,8 @@ import os
 import numpy as np
 import pytest
 
-from operator_work_reference import Q6, extract_work_reference
-import operator_work_reference as work_reference
+from tools.operator_work_reference import Q6, extract_work_reference
+import tools.operator_work_reference as work_reference
 
 
 PILOT_HEADER = ("result_set", "time_s", "rf_p_ex", "rf_p_kx", "rf_p_ez",

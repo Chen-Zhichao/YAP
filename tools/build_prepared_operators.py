@@ -21,6 +21,9 @@ import subprocess
 import sys
 import time
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 
 STAGES = ("tangent", "q6", "extract_tangent", "extract_q6", "static_lifts", "q6_operator")
 TOTALS = {30: 17., 80: 67.}
@@ -544,7 +547,7 @@ def publish(args):
 
 
 def checked_inventory(root, path):
-    from package_assembly_runtime import confined_source
+    from tools.package_assembly_runtime import confined_source
     path = confined_source(root, path)
     if not path.is_file() or not 1 <= path.stat().st_size <= 1024**2:
         raise ValueError("inventory must be a bounded regular file")
@@ -597,13 +600,15 @@ def stage_resources(args, baseline, old, old_sha, new, new_sha):
 
 
 def application_files(root):
-    from package_assembly_runtime import confined_source, delivery_profiles
+    from tools.package_assembly_runtime import confined_source, delivery_profiles
     root = Path(root).expanduser().absolute()
     if any(parent.is_symlink() for parent in (root, *root.parents)):
         raise ValueError("application source must not use symlinks")
     selected = []
-    for relative in (".", "D2W", "W2W", "D2W/utils", "W2W/utils"):
+    for relative in (".", "D2W", "W2W", "D2W/utils", "W2W/utils", "tools"):
         directory = confined_source(root, root / relative)
+        if relative == "tools" and not directory.is_dir():
+            continue
         files = list(directory.glob("*.py"))
         if len(files) > 128:
             raise ValueError("unexpected application-directory size")
@@ -631,7 +636,7 @@ def application_files(root):
 
 def stage_preflight(args):
     """No writes before local-storage, source-confinement and inventory checks."""
-    from package_assembly_runtime import confined_source
+    from tools.package_assembly_runtime import confined_source
     work = safe_path(args.work)
     if not work.is_relative_to(OWNED_WORK_ROOT):
         raise ValueError("staging requires owned local scratch")
@@ -743,9 +748,18 @@ def stage_delivery(args):
                           stage_inventory_sha256=digest(destination / "STAGE.json"))), flush=True)
 
 
+def staged_exporter(root, files):
+    """Select one receipt-bound executable without rewriting legacy stages."""
+    candidates = ("source/package_assembly_runtime.py", "source/tools/package_assembly_runtime.py")
+    selected = [name for name in candidates if name in files]
+    if len(selected) != 1:
+        raise ValueError("staging receipt requires exactly one exporter executable")
+    return Path(root) / selected[0]
+
+
 def export_staged(args):
     """Authenticate frozen executable inputs before importing the staged application."""
-    from package_assembly_runtime import confined_source
+    from tools.package_assembly_runtime import confined_source
     work = safe_path(args.work)
     if not work.is_relative_to(OWNED_WORK_ROOT):
         raise ValueError("export requires owned local scratch")
@@ -759,9 +773,7 @@ def export_staged(args):
             or not isinstance(document.get("files_sha256"), dict)
             or not 1 <= len(document["files_sha256"]) <= 512):
         raise ValueError("wrong frozen application staging receipt")
-    executable = root / "source/package_assembly_runtime.py"
-    if "source/package_assembly_runtime.py" not in document["files_sha256"]:
-        raise ValueError("staging receipt omits the exporter executable")
+    executable = staged_exporter(root, document["files_sha256"])
     for relative, expected in document["files_sha256"].items():
         path = confined_source(root, root / relative)
         if relative.startswith("source/") or path.suffix == ".py" or relative == "runtime/RESOURCES.json":
@@ -779,7 +791,7 @@ def export_staged(args):
     resource_check(work)
     command = [sys.executable, "-I", "-B", "-c",
                "import runpy,sys; sys.path.insert(0,sys.argv[1]); sys.argv=sys.argv[2:]; runpy.run_path(sys.argv[0],run_name='__main__')",
-               str(executable.parent), str(executable), "--native-source", str(root / "runtime/native"),
+               str(root / "source"), str(executable), "--native-source", str(root / "runtime/native"),
                "--resource-map", str(root / "runtime/RESOURCES.json"), "--output-dir", str(destination),
                "--prepared-operators", "--stage-inventory", str(receipt), "--stage-inventory-sha256", sha]
     write_json(work / "EXPORT_LAUNCH_V5.json", dict(wrapper_sha256=digest(__file__),

@@ -7,7 +7,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import time
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from omegaconf import OmegaConf
 
@@ -17,7 +21,7 @@ from mechanics_runtime import (
 )
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 COMPACT = "resource:compact_p2/packages/BI2_50.json"
 PARENT = "resource:geometry/packages/BI2_50.json"
 BASE_PROFILES = ("D2W/design_6_4hi_p2", "W2W/design_6_4hi_p2")
@@ -362,6 +366,9 @@ def export(destination, native_root, *, source_root=ROOT, map_path=None, prepare
     application = []
     directories = (source_root, source_root / "D2W", source_root / "W2W",
                    source_root / "D2W/utils", source_root / "W2W/utils")
+    tools = confined_source(source_root, source_root / "tools")
+    if tools.is_dir():
+        directories += (tools,)
     for directory in directories:
         directory = confined_source(source_root, directory)
         paths = sorted(directory.glob("*.py"))

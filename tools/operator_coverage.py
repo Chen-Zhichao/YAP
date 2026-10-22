@@ -14,13 +14,19 @@ import os
 from pathlib import Path
 import shlex
 import stat
+import sys
 import time
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from mechanics_runtime import shared_distribution_path
 
 
 ROOT = Path('/app/nanocad/projects/personal/zchen/YAP_STACK')
 PROGRESS = Path('operator_repair_20261015/progress')
 DEVELOPMENT = Path('operator_repair_20261015/development/trial_forcing_closure_v1/continuous_cu_screen_v1')
-DELIVERY = Path('distribution/yap_prepared_p2_20261006_v1/YAP/runtime')
+DELIVERY = Path('distribution/operators/legacy/prepared/YAP/runtime')
 NATIVE = Path('Ansys_Verify/12_stack_model_validation')
 SEED_DECKS = Path('operator_repair_20261015/global_warpage_20261017_v4/native')
 OLD_NATIVE = tuple(Path(p) / 'Ansys_Verify/12_stack_model_validation' for p in (
@@ -69,8 +75,10 @@ class Inventory:
 
     def check(self, path):
         path = literal_path(path)
-        if not any(path.is_relative_to(root) for root in self.roots):
+        if not any(path.is_relative_to(root) or path.is_relative_to(shared_distribution_path(root))
+                   for root in self.roots):
             raise ValueError('path outside literal inventory roots: ' + str(path))
+        path = shared_distribution_path(path)
         if time.monotonic() >= self.deadline:
             raise TimeoutError('inventory wall budget exceeded')
         if str(path) not in self.files and len(self.files) >= self.max_files:
@@ -264,7 +272,7 @@ def expansion_plan(inv, root, packages):
     source = root / DEVELOPMENT
     files = [source / name for name in ('native_monolithic_reference.py', 'native_periodic_geometry.py',
              'native_monolithic_assembly.py', 'causal_sparse_geometry.py', 'build_shared_component_catalog.py')]
-    files += [root / NATIVE / 'prepare_exp12_layer_geometry.py', root / 'YAP/operator_grid.py']
+    files += [root / NATIVE / 'prepare_exp12_layer_geometry.py', root / 'YAP/tools/operator_grid.py']
     sources = {str(p): hashlib.sha256(inv.read(p)).hexdigest() for p in files}
     seed_decks = [inv.metadata(root / SEED_DECKS / case / 'prepared_v3/macro_history_stack_rve_plan.dat')
                   for case in ('h48p5', 'h87')]
@@ -347,7 +355,7 @@ def collect(root):
     counts = {key: sum(row[key] for row in rows) for key in (
         'package_exists', 'payload_exists', 'structural_candidate', 'validated_global_bow', 'D2W_assembly', 'W2W_assembly')}
     return dict(schema='yap.operator_coverage.bounded.v1', root=str(root),
-                evidence=inv.files[str(formal_path)], grid_rows=rows, grid_combinations=len(rows),
+                evidence=inv.files[str(shared_distribution_path(formal_path))], grid_rows=rows, grid_combinations=len(rows),
                 grid_counts=counts, packages=packages, repaired_single_BI=repaired,
                 backend_registries=registries, expansion_plan=plan,
                 inventory=list(inv.files.values()), bytes_read=inv.bytes_read,

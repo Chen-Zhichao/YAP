@@ -7,6 +7,7 @@ import re
 import stat
 import sys
 import tempfile
+from functools import lru_cache
 from dataclasses import asdict, dataclass, field, is_dataclass
 
 
@@ -123,6 +124,8 @@ def configure_runtime_storage():
     directories['HOME'] = validate_user_write_path(work/'home', label='runtime HOME')
     if "PYTHONPYCACHEPREFIX" in os.environ:
         validate_user_write_path(os.environ["PYTHONPYCACHEPREFIX"], label="PYTHONPYCACHEPREFIX")
+    published_caps = _component_path(os.environ.get("YAP_W2W_SI_CAP_LIBRARY_DIR",
+        COMPONENT_PROJECT_ROOT / "distribution/operators/silicon_caps"))
     # Validate every override before any mkdir; never probe tempfile's fallback paths.
     os.umask(0o077)
     run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -134,6 +137,7 @@ def configure_runtime_storage():
             raise PermissionError(f"working directory is not writable: {directory}")
     os.environ.update({key: str(directory) for key, directory in directories.items()})
     os.environ['YAP_WORK_DIR'] = str(work)
+    os.environ["YAP_W2W_SI_CAP_LIBRARY_DIR"] = str(published_caps)
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.dont_write_bytecode = True
     tempfile.tempdir = str(directories["TMPDIR"])
@@ -164,7 +168,7 @@ def select_native_root(root=ROOT):
         candidate, portable = Path(root).parent / "Ansys_Verify/12_stack_model_validation", False
     if {"#snapshot", ".snapshot"}.intersection(candidate.parts):
         raise ValueError("snapshot paths are not allowed")
-    candidate = candidate.resolve()
+    candidate = shared_distribution_path(candidate).resolve()
     if {"#snapshot", ".snapshot"}.intersection(candidate.parts):
         raise ValueError("snapshot paths are not allowed")
     if portable and override is None and not candidate.is_relative_to(Path(root).resolve()):
@@ -212,12 +216,12 @@ def resource_map_path(native_root=None):
     override = os.environ.get("YAP_RUNTIME_RESOURCES")
     local = ROOT / ".runtime_resources.json"
     root = _runtime_value("NATIVE_ROOT") if native_root is None else Path(native_root)
-    return Path(override) if override is not None else (
-        local if local.exists() else root.parent / "RESOURCES.json")
+    return shared_distribution_path(Path(override) if override is not None else (
+        local if local.exists() else root.parent / "RESOURCES.json"))
 
 
 def load_resource_map(path):
-    path = Path(path)
+    path = shared_distribution_path(path)
     if {"#snapshot", ".snapshot"}.intersection(path.parts + path.resolve().parts):
         raise ValueError("snapshot paths are not allowed")
     if any(parent.is_symlink() for parent in (path, *path.parents)):
@@ -257,6 +261,7 @@ def load_resource_map(path):
 
 def resource_directory(name, *, native_root=None, map_path=None):
     root = _runtime_value("NATIVE_ROOT") if native_root is None else Path(native_root)
+    root = shared_distribution_path(root)
     if {"#snapshot", ".snapshot"}.intersection(root.parts + root.resolve().parts):
         raise ValueError("snapshot paths are not allowed")
     root = root.resolve()
@@ -289,7 +294,7 @@ def resolve_resource(value, *, native_root=None, map_path=None):
 
 
 def resolve_native_input(base, value, *, native_root=None, portable=None):
-    root = _runtime_value("NATIVE_ROOT") if native_root is None else Path(native_root).resolve()
+    root = shared_distribution_path(_runtime_value("NATIVE_ROOT") if native_root is None else native_root).resolve()
     confined = _runtime_value("PORTABLE_RUNTIME") if portable is None else portable
     if str(value).startswith("resource:"):
         return resolve_resource(str(value), native_root=root)
@@ -297,12 +302,13 @@ def resolve_native_input(base, value, *, native_root=None, portable=None):
     if {"#snapshot", ".snapshot"}.intersection(path.parts):
         raise ValueError("snapshot paths are not allowed")
     if path.is_absolute():
+        path = shared_distribution_path(path)
         for old_root in HISTORICAL_NATIVE_ROOTS:
             if path.is_relative_to(old_root):
                 path = root / path.relative_to(old_root)
                 break
     else:
-        path = Path(base) / path
+        path = shared_distribution_path(base) / path
     path = path.resolve()
     if {"#snapshot", ".snapshot"}.intersection(path.parts):
         raise ValueError("snapshot paths are not allowed")
@@ -323,7 +329,15 @@ def relocate_geometry_paths(value, base):
 
 # Component admission is separate from all legacy package and resource registries.
 COMPONENT_PROJECT_ROOT = Path("/app/nanocad/projects/personal/zchen/YAP_STACK")
-COMPONENT_CATALOG_RELATIVE = "distribution/yap_component_operators_20261019_v1/CATALOG.json"
+COMPONENT_CATALOG_RELATIVE = "distribution/operators/legacy/component_catalog/CATALOG.json"
+DISTRIBUTION_RELOCATIONS = {
+    "yap_component_operators_20261021_v1": "components",
+    "yap_thickness_family_20261021_v2": "thickness_family",
+    "yap_w2w_si_caps_20261021_v1": "silicon_caps",
+    "yap_prepared_p2_20261006_v1": "legacy/prepared",
+    "yap_component_operators_20261019_v1": "legacy/component_catalog",
+}
+ARTIFACT_LOCATIONS_SHA256 = "d01d5b558c74d88939ea03f8307d10f1fb70c53fa9a5f25f8ee6c0a60cbeb958"
 COMPONENT_VALIDATION_SCOPE = "VALIDATED_GLOBAL_BOW_ORIGINAL1081"
 COMPONENT_FORMAL_ACCEPTANCE_SHA256 = "3581258499ad4f035c899ca9eb338b5317f3664087210dfe2a12e6b80db21cbc"
 COMPONENT_RECIPE_SHA256 = {
@@ -340,6 +354,75 @@ _COMPONENT_GEOMETRY_FIELDS = frozenset((
 ))
 
 
+@lru_cache(maxsize=4)
+def _artifact_locations(project):
+    path = project / "distribution/operators/artifacts/LOCATIONS.json"
+    directory = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        descriptor = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
+    finally:
+        os.close(directory)
+    import hashlib
+    with os.fdopen(descriptor, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        identity = _component_identity(stream)
+        if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= 128 * 1024 or before.st_mode & 0o222:
+            raise ValueError("bounded read-only artifact locations required")
+        raw = stream.read(128 * 1024 + 1)
+        if identity != _component_identity(stream) or hashlib.sha256(raw).hexdigest() != ARTIFACT_LOCATIONS_SHA256:
+            raise ValueError("artifact locations changed or SHA256 mismatch")
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate artifact locations key")
+            result[key] = value
+        return result
+    document = json.loads(raw, object_pairs_hook=unique)
+    if (set(document) != {"schema", "files"} or document["schema"] != "yap.operator_artifact_locations.v1"
+            or not isinstance(document["files"], list) or not 1 <= len(document["files"]) <= 256):
+        raise ValueError("invalid artifact locations schema")
+    files = set()
+    for value in document["files"]:
+        if not isinstance(value, str):
+            raise ValueError("literal artifact location required")
+        relative = Path(value)
+        if (relative.is_absolute() or not relative.parts or relative.parts[0] != "operator_repair_20261015"
+                or relative.suffix not in (".json", ".npz", ".py") or str(relative) != value
+                or len(relative.parts) > 40 or any(part in {"..", "#snapshot", ".snapshot", "Ansys_Verify",
+                    "mapdl_run_roots", "mapdl_archives", "archives", "source_snapshot"}
+                    or part.startswith((".migration_hold_", "storage_migration")) for part in relative.parts)
+                or relative in files):
+            raise ValueError("unsafe or duplicate artifact location")
+        files.add(relative)
+    # Exact directory aliases support receipt comparisons, never prefix routing.
+    locations = set(files)
+    for relative in files:
+        locations.update(parent for parent in relative.parents if parent != Path("."))
+    return frozenset(locations)
+
+
+def shared_distribution_path(value):
+    """Resolve only known retired package names; never rewrite frozen JSON."""
+    path = Path(value)
+    if {"..", "#snapshot", ".snapshot"}.intersection(path.parts):
+        raise ValueError("shared distribution path must not enter snapshots or traverse parents")
+    distribution = COMPONENT_PROJECT_ROOT / "distribution"
+    for old_name, new_name in DISTRIBUTION_RELOCATIONS.items():
+        previous = distribution / old_name
+        if path.is_relative_to(previous):
+            return distribution / "operators" / new_name / path.relative_to(previous)
+    if path.is_relative_to(COMPONENT_PROJECT_ROOT / "operator_repair_20261015"):
+        relative = path.relative_to(COMPONENT_PROJECT_ROOT)
+        if relative in _artifact_locations(COMPONENT_PROJECT_ROOT):
+            return distribution / "operators/artifacts" / relative
+    return path
+
+
 def _component_path(value, base=None):
     if not isinstance(value, (str, Path)) or not str(value) or len(str(value)) > 4096:
         raise ValueError("component path must be a bounded nonempty path")
@@ -350,6 +433,7 @@ def _component_path(value, base=None):
         if base is None:
             raise ValueError("component catalog path must be absolute")
         path = base / path
+    path = shared_distribution_path(path)
     if not path.is_relative_to(COMPONENT_PROJECT_ROOT) or path == COMPONENT_PROJECT_ROOT:
         raise ValueError("component paths must remain in the canonical project")
     if any(part in ("#snapshot", ".snapshot", "Ansys_Verify", "mapdl_run_roots", "mapdl_archives")

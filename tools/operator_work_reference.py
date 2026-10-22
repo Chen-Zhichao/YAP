@@ -1,4 +1,4 @@
-"""Stream native reactions into the original lift's work-conjugate response.
+"""Offline extraction of native reactions into work-conjugate responses.
 
 For public ROM q6=(eps_x, eps_y, gamma_xy, kappa_x, kappa_y, kappa_xy),
 native physical coordinates are (ex, ez, gamma_xz, kx, kz, kappaxz).

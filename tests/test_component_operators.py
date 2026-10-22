@@ -127,12 +127,12 @@ def test_component_schedule_keeps_original_physical_clock(monkeypatch):
 def actual_entries():
     if not components.DEFAULT_CATALOG.is_file():
         pytest.skip("published component catalog is not installed")
-    from publish_component_operators import MetadataReader
+    from tools.publish_component_operators import MetadataReader
     return MetadataReader().read(components.DEFAULT_CATALOG)[0]["entries"]
 
 
 def test_all_actual_assessments_bind_exact_candidate_and_geometry(actual_entries):
-    from publish_component_operators import MetadataReader
+    from tools.publish_component_operators import MetadataReader
     reader = MetadataReader()
     for item in actual_entries:
         components._verify_validation(item, reader)
@@ -143,7 +143,7 @@ def test_all_actual_assessments_bind_exact_candidate_and_geometry(actual_entries
                                             ("BI2_SI7", "BI2_SI17"),
                                             ("BI2_SI77", "BI2_SI87")])
 def test_assessment_cannot_be_attached_to_another_history(actual_entries, selected, other):
-    from publish_component_operators import MetadataReader
+    from tools.publish_component_operators import MetadataReader
     item = copy.deepcopy(next(e for e in actual_entries if e["id"] == selected))
     replacement = next(e for e in actual_entries if e["id"] == other)
     item["validation"]["history"] = replacement["validation"]["history"]
@@ -153,7 +153,7 @@ def test_assessment_cannot_be_attached_to_another_history(actual_entries, select
 
 @pytest.mark.parametrize("fault", ["metric", "geometry", "operator"])
 def test_assessment_scope_and_artifact_variant_are_checked(actual_entries, fault):
-    from publish_component_operators import MetadataReader
+    from tools.publish_component_operators import MetadataReader
     item = copy.deepcopy(actual_entries[0])
     if fault == "metric":
         item["validation"]["max_relative_pct"] = 0.

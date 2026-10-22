@@ -8,7 +8,7 @@ import stat
 
 import pytest
 
-import publish_component_operators as publisher
+import tools.publish_component_operators as publisher
 
 
 @pytest.fixture(scope='module')

@@ -38,7 +38,8 @@ def array_sha(values):
 
 @pytest.fixture(scope="module")
 def material():
-    path = ROOT.parent / "operator_repair_20261015/source/exp12_cu_material_point.py"
+    from mechanics_runtime import shared_distribution_path
+    path = shared_distribution_path(ROOT.parent / "operator_repair_20261015/source/exp12_cu_material_point.py")
     spec = importlib.util.spec_from_file_location("_assembly_bridge_corrected_cu", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module

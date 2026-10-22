@@ -115,7 +115,7 @@ The retained training capture can rebuild the temporary candidate with an
 explicit `YAP_WORK_DIR` on approved host-local scratch (see README setup):
 
 ```bash
-python build_corrected_compact_mechanics.py \
+python -B tools/build_corrected_compact_mechanics.py \
   --capture D2W/output/case_studies/history_mechanics_backend/corrected_native_c1_seed7_coordinates \
   --native-package /path/to/private/operators/BI6_50.json \
   --output "$YAP_WORK_DIR/yap_corrected_p48_b32" --port-rank 48 --bubble-rank 32
@@ -129,7 +129,7 @@ or a common cross-geometry basis must first be established.
 Run the study from the `YAP` directory:
 
 ```bash
-python fabrication_initial_bow_study.py
+python -B tools/fabrication_initial_bow_study.py
 ```
 
 Results are written under

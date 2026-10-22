@@ -17,7 +17,7 @@ from types import SimpleNamespace
 import pytest
 import numpy as np
 
-import operator_grid as grid
+import tools.operator_grid as grid
 
 
 def test_constraint_substitution_has_exact_independent_row_space_witness():
@@ -2096,7 +2096,7 @@ def test_nested_cpu_timer_preserves_earliest_deadline(inner_expires_first):
     code = """
 import signal
 import time
-import operator_grid as grid
+import tools.operator_grid as grid
 start = time.monotonic()
 inner_expires_first = INNER
 def work():

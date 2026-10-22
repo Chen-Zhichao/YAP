@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import operator_grid as grid
-import operator_thermal_validation as thermal
+import tools.operator_grid as grid
+import tools.operator_thermal_validation as thermal
 
 
 def test_initial_capture_remains_strict_but_observed_foreign_pid_is_absent(monkeypatch):

@@ -76,7 +76,7 @@ silently selecting that cached adapter.
 ## Delivered Family And Evidence
 
 The activated delivery is
-`/app/nanocad/projects/personal/zchen/YAP_STACK/distribution/yap_thickness_family_20261021_v2`.
+`/app/nanocad/projects/personal/zchen/YAP_STACK/distribution/operators/thickness_family`.
 Its independent Si32 single-BI graded73 comparison passed all 292 observations
 across 73 states: maximum relative bow error 0.3029311013%, maximum absolute
 error 1.3821059951 um. Each observation passed the strict relative <10% OR

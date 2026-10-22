@@ -23,8 +23,11 @@ import sys
 import time
 from types import SimpleNamespace
 
-import build_prepared_operators as builder
-import operator_grid as grid
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as builder
+import tools.operator_grid as grid
 
 
 CU_SHA = "b3a876bcd8847e5ee2366580155b66ef5a3c01a7971a3b44b152b47eb46db8aa"
@@ -168,7 +171,8 @@ def closure(source):
     common = source.parent / "common/ansys_utils.py"
     if builder.digest(grid.regular(common)) != grid.COMMON_HELPER_SHA:
         raise ValueError("unreviewed solver cleanup helper")
-    seeds = [Path(__file__), Path(grid.__file__), Path(builder.__file__), common,
+    seeds = [Path(__file__), Path(grid.__file__), Path(builder.__file__),
+             Path(__file__).with_name("__init__.py"), common,
              source / TEACHER, source / "run_exp12_m4_all_gauss_offpath_layer_gate.py",
              source / "exp12_all_gauss_exact_acceleration.py"]
     initializer = common.parent / "__init__.py"
@@ -189,10 +193,14 @@ def closure(source):
             roots = [source.parent] if module.startswith("common.") else [source,
                 source.parent / "09_effective_material_die_validation",
                 source.parent / "11_symmetric_mesh_beol_rve_verify"]
+            if module.startswith("tools."):
+                roots = [Path(__file__).resolve().parents[1], *roots]
             matches = [root / (module.replace(".", "/") + ".py") for root in roots]
             matches = [p for p in matches if p.is_file()]
             if len(matches) > 1:
                 raise ValueError(f"ambiguous scientific dependency: {module}")
+            if module.startswith("tools.") and not matches:
+                raise ValueError(f"missing offline tool dependency: {module}")
             if matches and matches[0] not in files:
                 files.add(matches[0])
                 pending.append(matches[0])
@@ -1433,7 +1441,8 @@ def followup_launch(args):
     source = builder.safe_path(args.source)
     source_pins = closure(source)
     controls = [Path(__file__), Path(grid.__file__), Path(builder.__file__)]
-    controls += [Path(__file__).parent / name for name in ("package_assembly_runtime.py", "mechanics_runtime.py")]
+    controls += [Path(__file__).with_name("package_assembly_runtime.py"),
+                 Path(__file__).resolve().parents[1] / "mechanics_runtime.py"]
     controls_sha = {str(grid.regular(p)): builder.digest(p) for p in controls}
     work.mkdir(parents=True)
     archive.mkdir()

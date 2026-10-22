@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import build_prepared_operators as build
+import tools.build_prepared_operators as build
 
 
 @pytest.mark.parametrize("path", ["/tmp/new-build", "/app/nanocad/#snapshot/build", "/app/nanocad/.snapshot/build"])
@@ -457,21 +457,77 @@ def test_legacy_external_map_rejects_tmp_before_open(tmp_path, monkeypatch):
         build.stage_preflight(args)
 
 
-def test_export_launcher_rejects_unpinned_code_before_import(tmp_path, monkeypatch):
+@pytest.mark.parametrize("executable", [
+    "source/package_assembly_runtime.py", "source/tools/package_assembly_runtime.py",
+])
+def test_export_launcher_rejects_unpinned_code_before_import(tmp_path, monkeypatch, executable):
     work = tmp_path / "work"
     root = work / "delivery_source_legacy_v5"
-    source = root / "source/package_assembly_runtime.py"
+    source = root / executable
     source.parent.mkdir(parents=True)
     source.write_text("raise RuntimeError('must never execute')")
     receipt = root / "STAGE.json"
     build.write_json(receipt, {"schema": "yap.prepared_runtime_stage.v1", "application_source": "source",
-                              "files_sha256": {"source/package_assembly_runtime.py": "0" * 64}})
+                              "files_sha256": {executable: "0" * 64}})
     monkeypatch.setattr(build, "OWNED_WORK_ROOT", tmp_path)
     monkeypatch.setattr(build, "configure", lambda _: pytest.fail("no environment or runtime writes before executable pins"))
     monkeypatch.setattr(build, "run_stage", lambda *_: pytest.fail("no executable import"))
     args = SimpleNamespace(work=work, stage_inventory_sha256=build.digest(receipt), archive=tmp_path / "out")
     with pytest.raises(ValueError, match="executable or configuration input changed"):
         build.export_staged(args)
+
+
+@pytest.mark.parametrize("executable", [
+    "source/package_assembly_runtime.py", "source/tools/package_assembly_runtime.py",
+])
+def test_exporter_selection_preserves_the_receipt_layout(tmp_path, executable):
+    assert build.staged_exporter(tmp_path, {executable: "a" * 64}) == tmp_path / executable
+
+
+@pytest.mark.parametrize("files", [
+    {}, {"source/unlisted.py": "a" * 64},
+    {"source/package_assembly_runtime.py": "a" * 64,
+     "source/tools/package_assembly_runtime.py": "b" * 64},
+])
+def test_exporter_selection_rejects_missing_or_ambiguous_bindings(tmp_path, files):
+    with pytest.raises(ValueError, match="exactly one exporter"):
+        build.staged_exporter(tmp_path, files)
+
+
+@pytest.mark.parametrize("executable", [
+    "source/package_assembly_runtime.py", "source/tools/package_assembly_runtime.py",
+])
+def test_frozen_exporter_launch_uses_application_root_for_both_layouts(tmp_path, monkeypatch, executable):
+    work = tmp_path / "work"
+    root = work / "delivery_source_legacy_v5"
+    source = root / executable
+    source.parent.mkdir(parents=True)
+    source.write_text("# synthetic exporter; never executed\n")
+    receipt = root / "STAGE.json"
+    build.write_json(receipt, dict(schema="yap.prepared_runtime_stage.v1", application_source="source",
+                                  files_sha256={executable: build.digest(source)}))
+    original = receipt.read_bytes()
+    destination = Path("/app/nanocad/projects/personal/zchen/YAP_STACK/distribution/yap_prepared_p2_20261006_v1")
+    exists = Path.exists
+    monkeypatch.setattr(Path, "exists", lambda p: False if p == destination else exists(p))
+    monkeypatch.setattr(build, "OWNED_WORK_ROOT", tmp_path)
+    monkeypatch.setattr(build, "configure", lambda _: {})
+    monkeypatch.setattr(build, "resource_check", lambda _: {"fixture": True})
+
+    class LaunchCaptured(Exception):
+        pass
+
+    def capture(command, *_args, **_kwargs):
+        assert command[1:4] == ["-I", "-B", "-c"]
+        assert command[5] == str(root / "source")
+        assert command[6] == str(source)
+        raise LaunchCaptured
+
+    monkeypatch.setattr(build, "run_stage", capture)
+    args = SimpleNamespace(work=work, stage_inventory_sha256=build.digest(receipt), archive=destination)
+    with pytest.raises(LaunchCaptured):
+        build.export_staged(args)
+    assert receipt.read_bytes() == original
 
 
 def test_stage_rejects_runtime_alias_before_disk_or_inventory_access(tmp_path, monkeypatch):

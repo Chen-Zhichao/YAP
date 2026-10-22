@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import operator_thermal_validation as thermal
+import tools.operator_thermal_validation as thermal
 
 
 def process():
@@ -710,8 +710,8 @@ def test_parallel_parent_death_contains_stage_and_retains_lock_until_cleanup(tmp
     root_code = '''
 import json,os,signal,sys,time
 from pathlib import Path
-import operator_grid as g
-import operator_thermal_validation as t
+import tools.operator_grid as g
+import tools.operator_thermal_validation as t
 root=Path(sys.argv[1]); parent=json.loads(sys.argv[2]); lock=json.loads(sys.argv[3])
 os.environ['YAP_PARALLEL_SUPERVISOR']=json.dumps(dict(parent=parent,**lock))
 g.bootstrap_group_environment()
@@ -724,7 +724,7 @@ g.assert_group_worker=lambda *a: None
 leaf="""
 import os,signal,sys,time
 from pathlib import Path
-import build_prepared_operators as b
+import tools.build_prepared_operators as b
 root=Path(sys.argv[1]); descriptor=int(sys.argv[2])
 try:
     os.fstat(descriptor)
@@ -747,8 +747,8 @@ with g.worker_solver_lock(root, {'work':str(root)}):
     parent_code = '''
 import fcntl,json,os,subprocess,sys,time
 from pathlib import Path
-import operator_grid as g
-import build_prepared_operators as b
+import tools.operator_grid as g
+import tools.build_prepared_operators as b
 root=Path(sys.argv[1]); root_code=sys.argv[2]
 descriptor=os.open(root/'lock',os.O_CREAT|os.O_RDWR,0o600)
 fcntl.flock(descriptor,fcntl.LOCK_EX|fcntl.LOCK_NB)

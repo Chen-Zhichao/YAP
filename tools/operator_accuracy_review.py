@@ -10,9 +10,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import time
 
-import build_prepared_operators as storage
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as storage
 
 Q6 = ("eps_x", "eps_y", "gamma_xy", "kappa_x", "kappa_y", "kappa_xy")
 GATES = set(Q6) | {"bottom_ports", "top_ports", "bubble_equilibrium", "inelastic_excitation"}

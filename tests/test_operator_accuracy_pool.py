@@ -2,8 +2,8 @@
 
 import pytest
 
-import operator_accuracy_pool as pool
-import operator_grid as grid
+import tools.operator_accuracy_pool as pool
+import tools.operator_grid as grid
 
 
 def records(n):

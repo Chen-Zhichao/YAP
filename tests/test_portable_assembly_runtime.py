@@ -8,8 +8,8 @@ import numpy as np
 import pytest
 
 import mechanics_runtime as runtime
-import package_assembly_runtime as package
-import verify_assembly_runtime as verifier
+import tools.package_assembly_runtime as package
+import tools.verify_assembly_runtime as verifier
 
 
 def write(path, value):
@@ -212,6 +212,20 @@ def test_export_inventory_is_explicit_and_prepared_mode_is_d2w_only(delivery, tm
                 assert inventory["files_sha256"]["YAP/" + relative] == package.digest(output / relative)
     for filename, expected in inventory["files_sha256"].items():
         assert package.digest(destination / filename) == expected
+
+
+def test_export_includes_relocated_tools_and_their_pins(delivery, tmp_path):
+    for name in ("__init__.py", "operator_grid.py"):
+        write(delivery.source / "tools" / name, "# synthetic offline tool\n")
+    destination = tmp_path / "tools_bundle"
+    package.export(destination, delivery.native, source_root=delivery.source,
+                   map_path=delivery.mapping)
+    output = destination / "YAP"
+    inventory = json.loads((output / "runtime/BUNDLE.json").read_text())
+    for name in ("__init__.py", "operator_grid.py"):
+        path = output / "tools" / name
+        assert path.read_bytes() == (delivery.source / "tools" / name).read_bytes()
+        assert inventory["files_sha256"][f"YAP/tools/{name}"] == package.digest(path)
 
 
 def test_export_paces_copy_and_readback(delivery, tmp_path, monkeypatch):

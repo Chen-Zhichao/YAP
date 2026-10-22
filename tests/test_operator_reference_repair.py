@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from operator_reference_repair import AREA_MM2, score_response
+from tools.operator_reference_repair import AREA_MM2, score_response
 
 
 def metrics(count):

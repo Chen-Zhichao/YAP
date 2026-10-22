@@ -14,9 +14,12 @@ import sys
 import time
 from types import SimpleNamespace
 
-import build_prepared_operators as builder
-import operator_grid as grid
-import operator_thermal_validation as thermal
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+import tools.build_prepared_operators as builder
+import tools.operator_grid as grid
+import tools.operator_thermal_validation as thermal
 
 
 PRECOMPUTE_SECONDS = 43200
