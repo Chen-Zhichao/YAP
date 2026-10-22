@@ -26,13 +26,44 @@ MAX_WORKER_SECONDS = 24 * 60 * 60
 
 
 def _canonical(value):
-    path = Path(value).expanduser().absolute()
-    resolved = path.resolve()
-    if any({"#snapshot", ".snapshot"}.intersection(p.parts) for p in (path, resolved)):
-        raise ValueError("worker storage must not enter snapshots")
-    if not resolved.is_relative_to(PROJECT) or resolved == PROJECT:
-        raise ValueError("worker storage must be inside the canonical project")
-    return resolved
+    from mechanics_runtime import validate_user_write_path
+    return validate_user_write_path(value, label="order worker storage")
+
+
+def _source_path(value):
+    """Read code only from this checkout or the existing shared project."""
+    path = Path(value)
+    if not path.is_absolute() or ".." in path.parts or path.suffix != ".py":
+        raise ValueError("source pin must be an absolute Python source path")
+    if {"#snapshot", ".snapshot"}.intersection(path.parts):
+        raise ValueError("source pins must not enter snapshots")
+    if any(parent.is_symlink() for parent in (path, *path.parents)):
+        raise ValueError("source pins must not follow symlinks")
+    if path.is_relative_to(REPO):
+        relative = path.relative_to(REPO)
+    elif path.is_relative_to(PROJECT):
+        relative = path.relative_to(PROJECT)
+        run_root = os.environ.get("YAP_RUN_ROOT")
+        if "user_runs" in relative.parts or (run_root and path.is_relative_to(Path(run_root))):
+            raise ValueError("run outputs are not trusted source code")
+    else:
+        raise ValueError("source pin is outside the checkout/shared project")
+    if any(part in {"user_runs", "source_snapshot", "input_snapshot", ".cache", "__pycache__",
+                    "results", "output", "work", "temp", "order_workers", "generated_assembly_designs",
+                    "mapdl_run_roots", "mapdl_archives"}
+           or part.startswith((".migration_hold_", "storage_migration")) for part in relative.parts):
+        raise ValueError("source pin enters output or protected storage")
+    return path
+
+
+def _source_relative(value):
+    path = _source_path(value)
+    if path.is_relative_to(REPO):
+        return Path("YAP") / path.relative_to(REPO)
+    validation = PROJECT / "Ansys_Verify"
+    if path.is_relative_to(validation):
+        return Path("shared_validation") / path.relative_to(validation)
+    return Path("shared_project") / path.relative_to(PROJECT)
 
 
 def _hash(path):
@@ -46,7 +77,7 @@ def _digest(value):
 
 def _atomic(path, value):
     path = _canonical(path)
-    temporary = path.with_name(path.name + "." + uuid4().hex + ".partial")
+    temporary = _canonical(path.with_name(path.name + "." + uuid4().hex + ".partial"))
     with temporary.open("x", encoding="utf-8") as stream:
         json.dump(value, stream, allow_nan=False)
         stream.flush()
@@ -78,13 +109,14 @@ def _memory_gate(minimum):
 
 
 def _sources():
-    paths = {Path(__file__).resolve()}
+    paths = {_source_path(Path(__file__).resolve())}
     for module in tuple(sys.modules.values()):
         filename = getattr(module, "__file__", None)
         if filename:
-            path = Path(filename).resolve()
-            if path.suffix == ".py" and path.is_relative_to(PROJECT):
-                paths.add(path)
+            try:
+                paths.add(_source_path(filename))
+            except ValueError:
+                continue
     return {str(path): _hash(path) for path in sorted(paths)}
 
 
@@ -92,7 +124,7 @@ def _check_sources(sources):
     if not isinstance(sources, dict) or not sources:
         raise ValueError("missing worker source pins")
     for filename, digest in sources.items():
-        path = _canonical(filename)
+        path = _source_path(filename)
         if path.suffix != ".py" or _hash(path) != digest:
             raise ValueError(f"source changed during assembly execution: {filename}")
 
@@ -115,8 +147,9 @@ def _environment(directory):
         "HUGGINGFACE_HUB_CACHE": "huggingface-hub", "TRANSFORMERS_CACHE": "transformers",
         "TRITON_CACHE_DIR": "triton",
     }
-    for key, leaf in locations.items():
-        path = _canonical(directory / leaf)
+    paths = {key: _canonical(directory / leaf) for key, leaf in locations.items()}
+    cap_cache = _canonical(env.get("YAP_W2W_SI_CAP_CACHE_DIR", directory.parent / "silicon_cap_cache"))
+    for key, path in paths.items():
         path.mkdir(parents=True, exist_ok=True)
         env[key] = str(path)
     for key in ("OMP_NUM_THREADS", "OMP_THREAD_LIMIT", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
@@ -126,7 +159,6 @@ def _environment(directory):
     env.update(PYTHONDONTWRITEBYTECODE="1", PYTHONPATH=str(REPO),
                NUMBA_THREADING_LAYER="omp", OMP_DYNAMIC="FALSE", MKL_DYNAMIC="FALSE")
     # Small immutable Si-cap matrices may be shared; Cu states never are.
-    cap_cache = _canonical(env.get("YAP_W2W_SI_CAP_CACHE_DIR", directory.parent / "silicon_cap_cache"))
     cap_cache.mkdir(parents=True, exist_ok=True)
     env["YAP_W2W_SI_CAP_CACHE_DIR"] = str(cap_cache)
     return env
@@ -214,7 +246,7 @@ def run_parallel(plan, settings, *, work_dir, minimum_memory_gib=40., progress=N
                  route_complete=None):
     """Evaluate static shards in fresh interpreters and return an ordered archive.
 
-    ``work_dir`` must be new and canonical. Completed callbacks run in plan order
+    ``work_dir`` must be new and below YAP_RUN_ROOT. Completed callbacks run in plan order
     on the caller's thread; a callback failure aborts and reaps every owned child.
     """
     from .assembly_order import _check_plan, archive_template
@@ -252,7 +284,7 @@ def run_parallel(plan, settings, *, work_dir, minimum_memory_gib=40., progress=N
         previous_termination = signal.signal(signal.SIGTERM, terminate)
     try:
         for worker in range(effective):
-            shard = directory / f"worker_{worker:04d}"
+            shard = _canonical(directory / f"worker_{worker:04d}")
             shard.mkdir()
             indices = _indices(list(range(worker, count, effective)), count)
             manifest = dict(run_id=run_id, worker_id=worker, plan=plan, settings=settings,
@@ -260,7 +292,7 @@ def run_parallel(plan, settings, *, work_dir, minimum_memory_gib=40., progress=N
             manifests.append(manifest)
             _atomic(shard / "manifest.json", manifest)
             env = _environment(shard)
-            log = (shard / "worker.log").open("xb")
+            log = _canonical(shard / "worker.log").open("xb")
             logs.append(log)
             process = subprocess.Popen(
                 [sys.executable, "-B", "-m", "W2W.assembly_parallel", "--worker",

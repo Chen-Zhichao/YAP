@@ -48,7 +48,7 @@ def _source(path, pin, name):
 
 
 def _cache_directory(path):
-    path = runtime._component_path(path)
+    path = runtime.validate_user_write_path(path, label='compiled material cache')
     _require(os.environ.get("NUMBA_CACHE_DIR") == str(path),
              "explicit matching canonical NUMBA_CACHE_DIR required")
     descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)

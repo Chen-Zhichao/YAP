@@ -10,6 +10,11 @@ import sys
 
 sys.dont_write_bytecode = True
 
+from mechanics_runtime import user_run_root, validate_user_write_path
+
+if __name__ == '__main__':
+    user_run_root()
+
 from omegaconf import OmegaConf
 
 from D2W.assembly_order import build_plan, load_stack_input
@@ -30,15 +35,7 @@ CALIBRATION_NOTE = (
 
 
 def _canonical_path(value):
-    path = Path(value).expanduser()
-    if not path.is_absolute():
-        raise ValueError("output roots must be absolute canonical-project subdirectories")
-    resolved = path.resolve()
-    if {"#snapshot", ".snapshot"}.intersection(path.parts + resolved.parts):
-        raise ValueError("snapshot paths are forbidden")
-    if resolved == PROJECT_ROOT or not resolved.is_relative_to(PROJECT_ROOT):
-        raise ValueError("all generated files must remain below the canonical project")
-    return resolved
+    return validate_user_write_path(value, label='generated design')
 
 
 def _order(selection, count):
@@ -117,7 +114,7 @@ def generate_design(*, name, dies, pitch, total_thickness, initial_bows,
         raise ValueError("input-root and config-root must be supplied together")
     if output_root is not None and input_root is not None:
         raise ValueError("choose output-root or the input-root/config-root pair")
-    root = _canonical_path(output_root or PROJECT_ROOT / "generated_assembly_designs")
+    root = _canonical_path(output_root or user_run_root() / "designs")
     inputs = _canonical_path(input_root) if input_root is not None else root / domain / "input"
     configs = _canonical_path(config_root) if config_root is not None else root / domain / "configs"
     directory, config_directory = inputs / name, configs / name
@@ -158,7 +155,7 @@ def generate_design(*, name, dies, pitch, total_thickness, initial_bows,
     config = OmegaConf.load(config_template)
     for settings in config.values():
         settings.update(DESIGN=name, INPUT_DIR=str(directory),
-                        OUTPUT_DIR=str(root / domain / "output/assembly_orders"),
+                        OUTPUT_DIR=str(user_run_root() / "results" / domain),
                         PITCH_r_um=float(pitch), PITCH_c_um=float(pitch),
                         PAD_TOP_R_um=pitch / 4., PAD_BOT_R_um=pitch / 4.,
                         PAD_ARR_ROW=math.floor(10000. / pitch),
@@ -207,8 +204,12 @@ def generate_design(*, name, dies, pitch, total_thickness, initial_bows,
     bump = technology["Bump_Types"]["silicon_individual_bonding"]
     bump.update(bump_size=pitch / 2., through_via_size=pitch / 2.)
 
-    directory.mkdir(parents=True, exist_ok=False)
-    config_directory.mkdir(parents=True, exist_ok=False)
+    import os
+    os.umask(0o077)
+    user_run_root().mkdir(mode=0o700, parents=True, exist_ok=True)
+    user_run_root()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=False)
+    config_directory.mkdir(mode=0o700, parents=True, exist_ok=False)
     _write_yaml(directory / "stack.yaml", design, note)
     _write_yaml(directory / "generated_chiplet_definitions.3dbv", definitions)
     _write_yaml(directory / "generated_stack_config.3dbx", topology)

@@ -69,6 +69,11 @@ def _file_sha(path):
 
 
 def _canonical_path(value):
+    from mechanics_runtime import validate_user_write_path
+    return validate_user_write_path(value, label='Si cap cache')
+
+
+def _published_library_path(value):
     path = Path(value)
     _require(path.is_absolute(), "Si cap cache must be absolute")
     _require(not {"#snapshot", ".snapshot"}.intersection(path.parts), "snapshot cache forbidden")
@@ -90,7 +95,7 @@ def _cache_root():
 
 
 def _published_root():
-    return _canonical_path(os.environ.get("YAP_W2W_SI_CAP_LIBRARY_DIR",
+    return _published_library_path(os.environ.get("YAP_W2W_SI_CAP_LIBRARY_DIR",
         str(PROJECT / "distribution/yap_w2w_si_caps_20261021_v1")))
 
 

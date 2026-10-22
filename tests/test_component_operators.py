@@ -57,6 +57,7 @@ def test_wrong_physical_request_is_rejected(monkeypatch, fault):
 
 def test_storage_refuses_external_paths_and_symlink_escape(tmp_path, monkeypatch):
     monkeypatch.setattr(components, "PROJECT", tmp_path)
+    monkeypatch.setenv('YAP_RUN_ROOT', str(tmp_path))
     assert components.canonical_write_path(tmp_path / "output") == tmp_path / "output"
     with pytest.raises(ValueError): components.canonical_write_path("/tmp/forbidden")
     with pytest.raises(ValueError): components.canonical_write_path(tmp_path.parent / "elsewhere")

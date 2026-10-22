@@ -16,6 +16,7 @@ from D2W.compact_layout import compact_regular_geometry
 @pytest.fixture
 def options(tmp_path, monkeypatch):
     monkeypatch.setattr(generator, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv('YAP_RUN_ROOT', str(tmp_path))
     return dict(name="colleague_8hi", dies=8, pitch=2, total_thickness=50.,
                 initial_bows=[10., -10., 20., -20., 5., -5., 15., -15.],
                 output_root=tmp_path / "generated")

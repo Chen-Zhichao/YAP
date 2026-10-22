@@ -5,7 +5,6 @@ import csv
 import hashlib
 from pathlib import Path
 import shutil
-import sys
 from time import perf_counter
 from uuid import uuid4
 
@@ -168,11 +167,12 @@ def _memory_gate(minimum_gib):
 
 
 def write_summary(path, result):
+    from mechanics_runtime import validate_user_write_path
     fields = ["order", "interface", "interface_overlay_yield", "stack_overlay_yield", "event",
               "m_xx_ppm", "m_xy_ppm", "m_yx_ppm", "m_yy_ppm",
               "residual_m_xx_ppm", "residual_m_xy_ppm", "residual_m_yx_ppm", "residual_m_yy_ppm",
               "max_bow_overlay_nm", "max_residual_bow_overlay_nm", "non_bow_overlay_sha256"]
-    with Path(path).open("x", newline="", encoding="ascii") as stream:
+    with validate_user_write_path(path, label="assembly summary").open("x", newline="", encoding="ascii") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for route in result["routes"]:
@@ -189,8 +189,9 @@ def write_summary(path, result):
 
 def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None, config_path=None,
                design_loader=None, operator_loader=None):
-    from mechanics_runtime import configure_runtime_storage, validate_write_path
+    from mechanics_runtime import configure_runtime_storage, user_run_root, validate_user_write_path
 
+    user_root = user_run_root()
     configure_runtime_storage()
     from threadpoolctl import threadpool_limits
 
@@ -209,43 +210,37 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
     root = Path(output_dir or cfg.OUTPUT_DIR)
     if output_dir is None and not root.is_absolute():
         domain = "D2W" if is_die_plan(plan) else "W2W"
-        root = Path(__file__).resolve().parents[1] / domain / root
-    root = validate_write_path(root)
-    if str(settings.get("operator_package", "")).startswith("component:"):
-        from component_operators import canonical_write_path
-        root = canonical_write_path(root)
-    run = validate_write_path(root / design_name / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]))
+        root = user_root / "results" / domain
+    root = validate_user_write_path(root, label="assembly results")
+    run = validate_user_write_path(root / design_name / (datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]),
+                                   label="assembly run")
     run.mkdir(parents=True, exist_ok=False)
     print(f"Assembly-order run: {run}", flush=True)
     if config_path:
         path = Path(config_path).resolve()
         provenance["config_path"] = str(path)
         provenance["config_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
-    frozen = run / "input_snapshot"
+    frozen = validate_user_write_path(run / "input_snapshot", label="assembly input snapshot")
     frozen.mkdir()
     for filename in provenance["input_sha256"]:
-        shutil.copy2(filename, frozen / Path(filename).name)
+        shutil.copy2(filename, validate_user_write_path(frozen / Path(filename).name))
     if config_path:
-        shutil.copy2(config_path, frozen / "calculator_config.yaml")
-    project = Path(__file__).resolve().parents[2]
-    sources = {Path(__file__).resolve(), Path(__file__).with_name("calculator_main.py")}
-    for module in tuple(sys.modules.values()):
-        filename = getattr(module, "__file__", None)
-        if filename:
-            path = Path(filename).resolve()
-            if path.is_relative_to(project) and path.suffix == ".py":
-                sources.add(path)
+        shutil.copy2(config_path, validate_user_write_path(frozen / "calculator_config.yaml"))
+    from .assembly_parallel import _source_path, _source_relative, _sources
+    sources = set(_sources())
+    sources.update((str(Path(__file__).resolve()), str(Path(__file__).with_name("calculator_main.py"))))
     provenance["source_sha256"] = {}
-    for path in sorted(sources):
-        target = run / "source_snapshot" / path.relative_to(project)
+    for filename in sorted(sources):
+        path = _source_path(filename)
+        target = validate_user_write_path(run / "source_snapshot" / _source_relative(path))
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
         provenance["source_sha256"][str(path)] = hashlib.sha256(target.read_bytes()).hexdigest()
     _write_new(run / "INPUTS.json", provenance)
     _write_new(run / "PLAN.json", plan)
-    OmegaConf.save(OmegaConf.create(design), run / "stack.resolved.yaml")
+    OmegaConf.save(OmegaConf.create(design), validate_user_write_path(run / "stack.resolved.yaml"))
     for name, record in resolved.items():
-        OmegaConf.save(OmegaConf.create(record), run / f"{name}.yaml")
+        OmegaConf.save(OmegaConf.create(record), validate_user_write_path(run / f"{name}.yaml"))
     if plan_only:
         print(f"Planned {len(plan['routes'])} orders; no mechanics or yield evaluated.")
         print(f"Order concurrency: requested {order_workers}, effective {min(order_workers, len(plan['routes']))}.")
@@ -283,7 +278,7 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
         def progress(message):
             _memory_gate(minimum)
             print(message, flush=True)
-            with (run / "progress.log").open("a", encoding="ascii") as stream:
+            with validate_user_write_path(run / "progress.log").open("a", encoding="ascii") as stream:
                 stream.write(message + "\n")
         def completed(archive, route):
             number = next(i for i, r in enumerate(plan["routes"], 1) if r["request_id"] == route["request_id"])
@@ -306,31 +301,17 @@ def run_design(cfg, design_dir, design_name, *, plan_only=False, output_dir=None
                     metric=settings["metric"], progress=progress, route_complete=completed)
         # Native modules and the dynamically loaded metric may arrive after the
         # input snapshot. Preserve their exact sources without rewriting receipts.
-        late_sources = set()
-        try:
-            from YAP.history_mechanics_backend import ANSYS_VALIDATION
-        except ModuleNotFoundError:
-            from history_mechanics_backend import ANSYS_VALIDATION
-        native_root = ANSYS_VALIDATION.resolve()
-        for module in tuple(sys.modules.values()):
-            filename = getattr(module, "__file__", None)
-            if filename:
-                path = Path(filename).resolve()
-                if path.suffix == ".py" and (path.is_relative_to(project) or path.is_relative_to(native_root)):
-                    late_sources.add(path)
-        late_sources.update(Path(p) for p in archive.get("native_configuration", {}).get("metric_implementation_sha256", {}))
+        late_sources = {_source_path(filename) for filename in _sources()}
+        late_sources.update(_source_path(p) for p in archive.get("native_configuration", {}).get("metric_implementation_sha256", {}))
         worker_sources = archive.get("native_configuration", {}).get("worker_runtime_sources", {})
         for filename, expected in worker_sources.items():
-            path = Path(filename).resolve()
+            path = _source_path(filename)
             if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
                 raise ValueError(f"worker source changed during assembly execution: {path}")
-            if not (path.is_relative_to(project) or path.is_relative_to(native_root)):
-                raise ValueError(f"worker source is outside the project/native runtime: {path}")
             late_sources.add(path)
         runtime_hashes = {}
         for path in sorted(late_sources):
-            relative = path.relative_to(project) if path.is_relative_to(project) else Path("YAP/runtime/native") / path.relative_to(native_root)
-            target = run / "source_snapshot" / relative
+            target = validate_user_write_path(run / "source_snapshot" / _source_relative(path))
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
             if target.exists():
                 if hashlib.sha256(target.read_bytes()).hexdigest() != digest:

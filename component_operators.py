@@ -319,9 +319,7 @@ def _pinned_cu_card(card_api):
 
 
 def canonical_write_path(value, *, label="component output"):
-    path = runtime.validate_write_path(value, label=label)
-    _require(path.is_relative_to(PROJECT), label + " must be inside " + str(PROJECT))
-    return path
+    return runtime.validate_user_write_path(value, label=label)
 
 
 class OperandReader:

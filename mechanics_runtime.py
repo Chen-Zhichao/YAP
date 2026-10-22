@@ -19,6 +19,64 @@ HISTORICAL_NATIVE_ROOTS = tuple(Path(value) for value in (
 ))
 
 
+def _storage_path(value, label):
+    if not isinstance(value, (str, os.PathLike)) or not os.fspath(value):
+        raise ValueError(f"{label} must be a nonempty absolute path")
+    path = Path(value)
+    if not path.is_absolute() or '..' in path.parts or len(path.parts) > 64:
+        raise ValueError(f"{label} must be an absolute path without traversal")
+    if not path.is_relative_to('/app') or path == Path('/app'):
+        raise ValueError(f"{label} must use /app storage, not /tmp, home or /data")
+    if any(part in {'#snapshot', '.snapshot', '.git', 'Ansys_Verify', 'mapdl_run_roots', 'mapdl_archives'}
+           or part.startswith(('.migration_hold_', 'storage_migration')) for part in path.parts):
+        raise ValueError(f"{label}: protected or snapshot paths are not allowed")
+    project = COMPONENT_PROJECT_ROOT
+    if (path.is_relative_to(project) and not path.is_relative_to(project/'user_runs')) or any(path.is_relative_to(p) for p in (
+            ROOT, project/'YAP', project/'distribution', project/'operator_repair_20261015')):
+        raise ValueError(f"{label}: source and shared mechanics data are read-only")
+    for prefix in reversed((path, *path.parents)):
+        try:
+            info = prefix.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError(f"{label}: symlink storage is not allowed: {prefix}")
+    return path
+
+
+def user_run_root():
+    """An explicitly selected private user directory, never a source fallback."""
+    value = os.environ.get('YAP_RUN_ROOT')
+    if value is None:
+        raise ValueError('set YAP_RUN_ROOT to your own private absolute /app run directory')
+    root = _storage_path(value, 'YAP_RUN_ROOT')
+    if root.exists():
+        info = root.lstat()
+        if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid():
+            raise PermissionError('YAP_RUN_ROOT must be a directory owned by the running UID')
+        if stat.S_IMODE(info.st_mode) != 0o700:
+            raise PermissionError('YAP_RUN_ROOT must have private mode 0700; choose a private run directory')
+        if not os.access(root, os.W_OK | os.X_OK):
+            raise PermissionError('YAP_RUN_ROOT is not writable')
+    return root
+
+
+def validate_user_write_path(value, *, label='output'):
+    """Check existing ownership and links without creating or chmodding files."""
+    root = user_run_root()
+    path = _storage_path(value, label)
+    if not path.is_relative_to(root):
+        raise ValueError(f'{label} must remain inside YAP_RUN_ROOT: {root}')
+    for prefix in (root, *[p for p in reversed(path.parents) if p.is_relative_to(root) and p != root], path):
+        try:
+            info = prefix.lstat()
+        except FileNotFoundError:
+            continue
+        if info.st_uid != os.getuid() or info.st_mode & 0o022:
+            raise PermissionError(f'{label}: existing targets must be owned by this UID and not writable by others: {prefix}')
+    return path
+
+
 def validate_write_path(value, *, label="output"):
     """Reject forbidden destinations, including aliases, without creating files."""
     if not os.fspath(value):
@@ -30,35 +88,52 @@ def validate_write_path(value, *, label="output"):
             raise ValueError(f"{label}: snapshot paths are not allowed")
         if candidate.is_relative_to("/tmp"):
             raise ValueError(f"{label}: /tmp storage is not allowed; choose a working directory")
+    if 'YAP_RUN_ROOT' in os.environ:
+        return validate_user_write_path(path, label=label)
     return resolved
 
 
 def configure_runtime_storage():
     """Initialize caches and Python temporary storage before third-party imports."""
+    run_root = user_run_root()
     override = os.environ.get("YAP_WORK_DIR")
     if override is not None and (not override or not Path(override).expanduser().is_absolute()):
         raise ValueError("YAP_WORK_DIR must be a nonempty absolute path")
-    work = validate_write_path(override if override is not None else ROOT / ".cache/yap",
+    work = validate_user_write_path(override if override is not None else run_root / "work",
                                label="YAP_WORK_DIR")
     temporary = next((os.environ[key] for key in ("TMPDIR", "TEMP", "TMP")
                       if key in os.environ), str(work / "temp"))
     defaults = {"TMPDIR": temporary, "TMP": temporary, "TEMP": temporary,
                 "MPLCONFIGDIR": str(work / "matplotlib"),
-                "NUMBA_CACHE_DIR": str(work / "numba")}
+                "NUMBA_CACHE_DIR": str(work / "numba"),
+                'XDG_CACHE_HOME': str(work/'xdg-cache'),
+                'XDG_CONFIG_HOME': str(work/'xdg-config'),
+                'XDG_DATA_HOME': str(work/'xdg-data'),
+                'XDG_STATE_HOME': str(work/'xdg-state'),
+                'XDG_RUNTIME_DIR': str(work/'xdg-runtime'),
+                'PIP_CACHE_DIR': str(work/'pip'),
+                'PYTHONUSERBASE': str(work/'python-user'),
+                'JOBLIB_TEMP_FOLDER': str(work/'temp')}
     directories = {}
     for key, default in defaults.items():
         value = os.environ.get(key, default)
         if not value or not Path(value).expanduser().is_absolute():
             raise ValueError(f"{key} must be a nonempty absolute path")
-        directories[key] = validate_write_path(value, label=key)
+        directories[key] = validate_user_write_path(value, label=key)
+    directories['HOME'] = validate_user_write_path(work/'home', label='runtime HOME')
     if "PYTHONPYCACHEPREFIX" in os.environ:
-        validate_write_path(os.environ["PYTHONPYCACHEPREFIX"], label="PYTHONPYCACHEPREFIX")
+        validate_user_write_path(os.environ["PYTHONPYCACHEPREFIX"], label="PYTHONPYCACHEPREFIX")
     # Validate every override before any mkdir; never probe tempfile's fallback paths.
+    os.umask(0o077)
+    run_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    user_run_root()
     for directory in set(directories.values()) | {work}:
-        directory.mkdir(parents=True, exist_ok=True)
+        validate_user_write_path(directory)
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
         if not os.access(directory, os.W_OK | os.X_OK):
             raise PermissionError(f"working directory is not writable: {directory}")
     os.environ.update({key: str(directory) for key, directory in directories.items()})
+    os.environ['YAP_WORK_DIR'] = str(work)
     os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
     sys.dont_write_bytecode = True
     tempfile.tempdir = str(directories["TMPDIR"])
