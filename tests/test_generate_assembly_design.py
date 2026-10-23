@@ -151,7 +151,7 @@ def test_other_counts_without_hidden_base(options, count, orders):
     {"operator_package": ""},
     {"legacy_total50": True, "pitch": 3}, {"legacy_total50": True, "total_thickness": 80.},
     {"legacy_total50": True, "operator_package": "component:BI2_SI37"},
-    {"input_root": Path("/tmp/input")},
+    {"input_root": Path("relative/input")},
 ])
 def test_invalid_requests_leave_no_design(options, change):
     with pytest.raises(ValueError):
@@ -169,16 +169,19 @@ def test_roots_and_no_overwrite(options, tmp_path):
     with pytest.raises(FileExistsError):
         generator.generate_design(**custom)
     assert (result["input_dir"] / "stack.yaml").read_bytes() == original
-    for root in (Path("/tmp/assembly"), tmp_path.parent / "outside", tmp_path / "#snapshot/design",
+    for root in (tmp_path / "#snapshot/design",
                  tmp_path / ".snapshot/design", Path("relative")):
         with pytest.raises(ValueError):
             generator.generate_design(**{**options, "output_root": root})
     with pytest.raises(ValueError, match="overlap"):
         generator.generate_design(**{**custom, "config_root": custom["input_root"]})
     link = tmp_path / "escape"
-    link.symlink_to(tmp_path.parent, target_is_directory=True)
-    with pytest.raises(ValueError):
-        generator.generate_design(**{**options, "output_root": link / "outside"})
+    target = tmp_path / 'alias_target'
+    target.mkdir()
+    link.symlink_to(target, target_is_directory=True)
+    with pytest.warns(UserWarning, match='resolved storage path'):
+        result = generator.generate_design(**{**options, 'output_root': link / 'outside'})
+    assert result['input_dir'].is_relative_to(target)
 
 
 @pytest.mark.parametrize("legacy", [False, True])

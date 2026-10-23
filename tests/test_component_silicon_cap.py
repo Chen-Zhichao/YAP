@@ -234,19 +234,20 @@ def test_cache_lock_has_finite_cross_process_wait(tmp_path):
         pass
 
 
-def test_forbidden_output_and_symlink_escape(tmp_path, monkeypatch):
+def test_configured_output_and_aliases_keep_snapshot_protection(tmp_path, monkeypatch):
     monkeypatch.setattr(cap, "PROJECT", tmp_path)
     assert cap._canonical_path(tmp_path/"caps") == tmp_path/"caps"
-    with pytest.raises(ValueError):
-        cap._canonical_path("/tmp/no")
+    with pytest.warns(UserWarning):
+        assert cap._canonical_path('/tmp/location-validation-only-caps') == Path('/tmp/location-validation-only-caps')
     with pytest.raises(ValueError):
         cap._canonical_path(tmp_path/".snapshot"/"caps")
     (tmp_path/"link").symlink_to(tmp_path, target_is_directory=True)
-    with pytest.raises(ValueError):
-        cap._canonical_path(tmp_path/"link"/"caps")
+    with pytest.warns(UserWarning, match='resolved storage path'):
+        assert cap._canonical_path(tmp_path/'link'/'caps') == tmp_path/'caps'
 
 
-def test_published_hit_never_creates_writable_cache(tmp_path, monkeypatch, sources):
+@pytest.mark.parametrize('relocated', [False, True])
+def test_published_hit_never_creates_writable_cache(tmp_path, monkeypatch, sources, relocated):
     from W2W import assembly_operator_library as adapter
     published, writable = tmp_path/"published", tmp_path/"absent_cache"
     published.mkdir()
@@ -255,7 +256,18 @@ def test_published_hit_never_creates_writable_cache(tmp_path, monkeypatch, sourc
     spec = dict(fixture=True, thickness_um=10., thickness_intervals=6)
     key = cap.hashlib.sha256(cap._json(spec).encode()).hexdigest()
     cap._publish_cache(published, key, np.eye(134), np.zeros(134), cache_metadata(spec))
-    monkeypatch.setattr(cap, "_published_root", lambda: published)
+    if relocated:
+        import component_operators as components
+        for name in ('PROJECT', '_read_cache', '_publish_cache'):
+            monkeypatch.setattr(cap, name, getattr(cap, name))
+        monkeypatch.setattr(cap, '_yap_storage_binding', None, raising=False)
+        monkeypatch.setenv('YAP_W2W_SI_CAP_LIBRARY_DIR', str(published))
+        source_sha = cap._file_sha(cap.__file__)
+        components._configure_cap_storage(cap)
+        assert cap._file_sha(cap.__file__) == source_sha
+    else:
+        monkeypatch.setattr(cap, "_published_root", lambda: published)
+    monkeypatch.setattr(cap, '_assemble', lambda *_a, **_k: pytest.fail('published hit must not run FE'))
     monkeypatch.setattr(adapter, "_linear_operator", lambda k, f, scale, card: (k, f))
     _, proof = cap._segment(writable, dict(fixture=True), xs, zs,
                             trace["face_lifts"][0, :, 6:70], scale, 10., library, sources)

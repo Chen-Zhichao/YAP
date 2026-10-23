@@ -25,6 +25,7 @@ def _artifact_manifest(tmp_path, monkeypatch, files, *, raw=None):
     manifest.chmod(0o444)
     monkeypatch.setattr(runtime, "COMPONENT_PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(runtime, "ARTIFACT_LOCATIONS_SHA256", hashlib.sha256(payload).hexdigest())
+    monkeypatch.setattr(runtime, "ARTIFACT_LOCATION_SUPPLEMENTS", ())
     return manifest
 
 
@@ -68,6 +69,60 @@ def test_artifact_relocation_refuses_symlink_manifest(tmp_path, monkeypatch):
     manifest.symlink_to(target)
     with pytest.raises(OSError):
         runtime.shared_distribution_path(tmp_path / "operator_repair_20261015/source/a.py")
+
+
+def _artifact_supplement(manifest, monkeypatch, files):
+    path = manifest.with_name('LOCATIONS_TEST_SUPPLEMENT.json')
+    payload = json.dumps(dict(schema='yap.operator_artifact_locations.v1', files=files)).encode()
+    path.write_bytes(payload)
+    path.chmod(0o444)
+    monkeypatch.setattr(runtime, 'ARTIFACT_LOCATION_SUPPLEMENTS', (
+        (path.name, hashlib.sha256(payload).hexdigest()),))
+    return path
+
+
+def test_supplement_extends_exact_paths_without_changing_baseline(tmp_path, monkeypatch):
+    original = 'operator_repair_20261015/source/original.py'
+    extra = 'operator_repair_20261015/new/REPORT.json'
+    manifest = _artifact_manifest(tmp_path, monkeypatch, [original])
+    before = manifest.read_bytes()
+    _artifact_supplement(manifest, monkeypatch, [extra])
+    locations = runtime._artifact_locations.__wrapped__(tmp_path)
+    assert Path(original) in locations and Path(extra) in locations
+    assert Path(extra).parent in locations
+    assert Path(extra).with_name('OTHER.json') not in locations
+    assert manifest.read_bytes() == before
+
+
+def test_supplement_cannot_override_or_duplicate_original_entry(tmp_path, monkeypatch):
+    relative = 'operator_repair_20261015/source/original.py'
+    manifest = _artifact_manifest(tmp_path, monkeypatch, [relative])
+    _artifact_supplement(manifest, monkeypatch, [relative])
+    with pytest.raises(ValueError, match='disjoint'):
+        runtime._artifact_locations.__wrapped__(tmp_path)
+
+
+def test_missing_or_changed_supplement_fails_closed(tmp_path, monkeypatch):
+    manifest = _artifact_manifest(tmp_path, monkeypatch, ['operator_repair_20261015/source/original.py'])
+    supplement = _artifact_supplement(manifest, monkeypatch, ['operator_repair_20261015/new/REPORT.json'])
+    monkeypatch.setattr(runtime, 'ARTIFACT_LOCATION_SUPPLEMENTS', ((supplement.name, '0' * 64),))
+    with pytest.raises(ValueError, match='SHA256'):
+        runtime._artifact_locations.__wrapped__(tmp_path)
+    supplement.unlink()
+    with pytest.raises(FileNotFoundError):
+        runtime._artifact_locations.__wrapped__(tmp_path)
+
+
+def test_supplements_cannot_escape_or_repeat_manifest_names(tmp_path, monkeypatch):
+    manifest = _artifact_manifest(tmp_path, monkeypatch, ['operator_repair_20261015/source/original.py'])
+    supplement = _artifact_supplement(manifest, monkeypatch, ['operator_repair_20261015/new/REPORT.json'])
+    entry = runtime.ARTIFACT_LOCATION_SUPPLEMENTS[0]
+    monkeypatch.setattr(runtime, 'ARTIFACT_LOCATION_SUPPLEMENTS', (entry, entry))
+    with pytest.raises(ValueError, match='filename'):
+        runtime._artifact_locations.__wrapped__(tmp_path)
+    monkeypatch.setattr(runtime, 'ARTIFACT_LOCATION_SUPPLEMENTS', (('../escape.json', entry[1]),))
+    with pytest.raises(ValueError, match='filename'):
+        runtime._artifact_locations.__wrapped__(tmp_path)
 
 
 def test_artifact_metadata_reads_relocated_bytes_without_rewriting_evidence(tmp_path, monkeypatch):
@@ -161,9 +216,9 @@ def test_storage_sets_safe_defaults_and_replaces_cached_tempdir(storage_environm
 
 @pytest.mark.parametrize("key", ["YAP_WORK_DIR", "TMPDIR", "TMP", "TEMP",
                                   "MPLCONFIGDIR", "NUMBA_CACHE_DIR", "PYTHONPYCACHEPREFIX"])
-def test_storage_rejects_unsafe_overrides_before_creation(storage_environment, monkeypatch, key):
-    monkeypatch.setenv(key, "/tmp/yap-forbidden-test")
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+def test_storage_rejects_snapshot_overrides_before_creation(storage_environment, monkeypatch, key):
+    monkeypatch.setenv(key, str(storage_environment.parent / '.snapshot/cache'))
+    with pytest.raises(ValueError, match="protected or snapshot"):
         runtime.configure_runtime_storage()
     assert not storage_environment.exists()
 
@@ -184,14 +239,16 @@ def test_storage_preserves_safe_overrides(storage_environment, tmp_path, monkeyp
         assert os.environ[key] == str(tmp_path / key.lower())
 
 
-def test_storage_rejects_symlink_to_tmp(tmp_path):
+def test_storage_resolves_explicit_alias_with_warning(tmp_path):
     alias = tmp_path / "alias"
-    alias.symlink_to("/tmp", target_is_directory=True)
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
-        runtime.validate_write_path(alias / "forbidden")
+    target = tmp_path / 'actual'
+    target.mkdir()
+    alias.symlink_to(target, target_is_directory=True)
+    with pytest.warns(runtime.StorageWarning, match='resolved storage path'):
+        assert runtime.validate_write_path(alias / 'cache') == target / 'cache'
 
 
-@pytest.mark.parametrize("value", ["/tmp/yap", "/tmp/../yap", "/some/.snapshot/yap", "/some/#snapshot/yap"])
+@pytest.mark.parametrize("value", ["/tmp/../yap", "/some/.snapshot/yap", "/some/#snapshot/yap"])
 def test_forbidden_output_paths_are_rejected(value):
     with pytest.raises(ValueError):
         runtime.validate_write_path(value)
@@ -204,13 +261,17 @@ def test_storage_unwritable_directory_does_not_fallback(storage_environment, mon
     assert tempfile.tempdir is None
 
 
-def test_large_mechanics_requires_explicit_non_home_scratch(storage_environment, monkeypatch):
+def test_large_mechanics_honors_explicit_scratch_with_warning(storage_environment, monkeypatch):
     monkeypatch.delenv("YAP_WORK_DIR")
-    with pytest.raises(ValueError, match="approved host-local"):
+    with pytest.raises(ValueError, match="set YAP_WORK_DIR"):
         runtime.mechanics_work_directory()
-    monkeypatch.setenv("YAP_WORK_DIR", "/w/yap-forbidden-test")
-    with pytest.raises(ValueError, match="shared-home"):
-        runtime.mechanics_work_directory()
+    monkeypatch.setenv("YAP_WORK_DIR", "/scratch/yap-location-only-test")
+    monkeypatch.setattr(runtime, 'configure_runtime_storage', lambda: {})
+    created = []
+    monkeypatch.setattr(Path, 'mkdir', lambda path, **kw: created.append(path))
+    with pytest.warns(runtime.StorageWarning):
+        assert runtime.mechanics_work_directory() == Path('/scratch/yap-location-only-test/mechanics').resolve()
+    assert created == [Path('/scratch/yap-location-only-test/mechanics').resolve()]
 
 
 def test_history_child_inherits_validated_storage(storage_environment, tmp_path, monkeypatch):
@@ -235,21 +296,21 @@ def test_history_child_inherits_validated_storage(storage_environment, tmp_path,
     assert captured["env"]["PYTHONDONTWRITEBYTECODE"] == "1"
     assert "-B" in captured["command"]
     captured.clear()
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
-        backend.run_mechanics_history("test", "/tmp/yap-forbidden-output", batch, maximum_cycle=1)
+    with pytest.raises(ValueError, match="protected or snapshot"):
+        backend.run_mechanics_history("test", tmp_path / '.snapshot/output', batch, maximum_cycle=1)
     assert not captured
 
 
 @pytest.mark.parametrize("entry", ["D2W/calculator_main.py", "D2W/simulator_main.py",
                                    "W2W/calculator_main.py", "W2W/simulator_main.py"])
-def test_cli_rejects_tmp_before_third_party_imports(tmp_path, entry):
+def test_cli_rejects_snapshot_before_third_party_imports(tmp_path, entry):
     env = dict(os.environ)
-    env.update(TMPDIR="/tmp/yap-forbidden-test", PYTHONDONTWRITEBYTECODE="1")
+    env.update(TMPDIR=str(tmp_path / '.snapshot/cache'), PYTHONDONTWRITEBYTECODE="1")
     env.pop("PYTHONPYCACHEPREFIX", None)
     result = subprocess.run([sys.executable, "-B", str(runtime.ROOT / entry), "--help"],
                             cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30)
     assert result.returncode != 0
-    assert "TMPDIR must use /app storage, not /tmp, home or /data" in result.stderr
+    assert "protected or snapshot paths are not allowed" in result.stderr
     assert "matplotlib" not in result.stderr
 
 
@@ -257,16 +318,16 @@ def test_legacy_d2w_temporary_output_validates_final_join(tmp_path):
     from D2W.utils.util import get_runtime_temp_dir
 
     cfg = SimpleNamespace(OUTPUT_DIR=str(tmp_path), INTERFACE="I1")
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
-        get_runtime_temp_dir(cfg, {"ds_name": "/tmp/yap-forbidden-design"})
+    with pytest.raises(ValueError, match="protected or snapshot"):
+        get_runtime_temp_dir(cfg, {"ds_name": str(tmp_path / '.snapshot/design')})
     alias = tmp_path / "design"
-    alias.symlink_to("/tmp", target_is_directory=True)
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
+    alias.symlink_to(tmp_path / '.snapshot', target_is_directory=True)
+    with pytest.raises(ValueError, match="protected or snapshot"):
         get_runtime_temp_dir(cfg, {"ds_name": "design"})
 
 
 @pytest.mark.parametrize("domain", ["D2W", "W2W"])
-def test_legacy_generated_configs_reject_tmp_before_saving(tmp_path, monkeypatch, domain):
+def test_legacy_generated_configs_reject_snapshot_before_saving(tmp_path, monkeypatch, domain):
     import importlib
     util = importlib.import_module(f"{domain}.utils.util")
     cfg = SimpleNamespace(WAF_R_um=150000)
@@ -275,8 +336,8 @@ def test_legacy_generated_configs_reject_tmp_before_saving(tmp_path, monkeypatch
         monkeypatch.setattr(util, "finalize_cfg_for_mode", lambda value, **_kwargs: value)
     saved = []
     monkeypatch.setattr(util.OmegaConf, "save", lambda *_args: saved.append(True))
-    with pytest.raises(ValueError, match="/tmp storage is not allowed"):
-        util.get_config_dict(cfg_folder="/tmp/yap-forbidden-config", cfg_skeleton=None,
+    with pytest.raises(ValueError, match="protected or snapshot"):
+        util.get_config_dict(cfg_folder=str(tmp_path / '.snapshot/config'), cfg_skeleton=None,
                              ds_name="test", input_ds_dir=str(tmp_path), _3dbv_path="unused",
                              _3dbx_path="unused", mode="w2w_modeling")
     assert not saved

@@ -10,8 +10,8 @@ Normal assembly-order runs do not need to invoke maintenance tools.
 
 ## 1. Set Up
 
-Choose a private directory in your own `/app` project. All generated inputs,
-results and caches go here; shared operators are read-only and are not in Git.
+Choose your run directory. `/app` is recommended on the shared server, but other
+absolute locations are supported. Operators are read-only and are not in Git.
 
 ```bash
 export YAP_RUN_ROOT=/app/your_project/YAP_runs
@@ -38,9 +38,10 @@ Bind the shared operator data in every new shell. These paths apply on the
 shared server; request access if any dependency is unreadable.
 
 ```bash
-R=/app/nanocad/projects/personal/zchen/YAP_STACK
+export YAP_DATA_ROOT=/app/nanocad/projects/personal/zchen/YAP_STACK
+R="$YAP_DATA_ROOT"
 DATA="$R/distribution/operators/components"
-export YAP_COMPONENT_OPERATOR_CATALOG_V2="$DATA/CATALOG.json"
+export YAP_COMPONENT_OPERATOR_CATALOG_V2="$DATA/coverage_20261023_v8/CATALOG.json"
 export YAP_NATIVE_RUNTIME_DIR="$DATA/runtime/native"
 export YAP_RUNTIME_RESOURCES="$DATA/runtime/RESOURCES.json"
 export YAP_W2W_SI_CAP_LIBRARY_DIR="$R/distribution/operators/silicon_caps"
@@ -51,8 +52,21 @@ python -B component_operators.py list
 
 Shared data are grouped under `distribution/operators/`: `components/`,
 `artifacts/` (operands, geometry, pinned material sources and validation evidence),
-`thickness_family/`, `silicon_caps/`, and `legacy/` for older supported inputs.
+`thickness_family/`, `silicon_caps/`, `validation/` (supplementary checks), and
+`legacy/` for older supported inputs.
 The dated operator experiment folders are not required for normal assembly runs.
+
+On another server, copy the required data to
+`$YAP_DATA_ROOT/distribution/operators/`, preserving the relative layout and
+read-only files, and set `YAP_DATA_ROOT` to that server's location **before
+starting Python**. Existing frozen records keep their original paths and hashes;
+YAP resolves them to the selected data root without rewriting them. Missing or
+changed data are errors, with no fallback to the original server.
+
+`YAP_RUN_ROOT`, `YAP_WORK_DIR`, `TMPDIR`, `NUMBA_CACHE_DIR`, `MPLCONFIGDIR` and
+`XDG_*` may use independently chosen absolute directories. Locations outside the
+run root or recommended storage produce warnings rather than placement errors.
+Existing specific catalog/native/library overrides take precedence over defaults.
 
 ## 2. Create Your Design
 
@@ -82,10 +96,41 @@ supports at most eight. `--order-workers 1` runs serially.
 Current component coverage:
 - BI2: total thickness 20, 30, 40, 50, 60, 70, 80, 90 or 100 um;
   intermediate thicknesses from 40 through 50 um are also available.
-- BI6: total thickness 50 um.
-- BI3: total thickness 50 um; add
-  `--operator-package component:BI3_SI37_COARSE45` (coarse-time qualification).
+- BI6: total thickness 20, 30, 40, 50, 60, 70, 90 or 100 um; use
+  `--operator-package component:BI6_SI7` for 20 um,
+  `--operator-package component:BI6_SI27` for 40 um,
+  `--operator-package component:BI6_SI47` for 60 um,
+  `--operator-package component:BI6_SI57` for 70 um,
+  `--operator-package component:BI6_SI77` for 90 um, or
+  `--operator-package component:BI6_SI87` for 100 um.
+- BI3: total thickness 20, 30, 40, 50, 60, 70, 80, 90 or 100 um; add
+  `--operator-package component:BI3_SI7_COARSE45` for 20 um,
+  `--operator-package component:BI3_SI17_COARSE45` for 30 um,
+  `--operator-package component:BI3_SI27_COARSE45` for 40 um,
+  `--operator-package component:BI3_SI37_COARSE45` for 50 um,
+  `--operator-package component:BI3_SI47_COARSE45` for 60 um,
+  `--operator-package component:BI3_SI57_COARSE45` for 70 um,
+  `--operator-package component:BI3_SI67_COARSE45` for 80 um,
+  `--operator-package component:BI3_SI77_COARSE45` for 90 um, or
+  `--operator-package component:BI3_SI87_COARSE45` for 100 um.
+  These use the coarse spatial mesh; fine-mesh thermal-history validation is pending.
 - Current layer geometry uses d/p = 0.5, BEOL 10 um and BI 1.5 um per face.
+
+Catalog entries reuse BI, BEOL and Si/TSV sublayer operators across geometry
+combinations within a certified common-cell/trace family; they are not
+independently trained full-die operators. Cross-cell mixing is not automatic.
+For fixed remaining layer parameters, the requested grid targets nine BI pitch
+families plus nine Si/TSV thickness families, with a shared BEOL operator.
+The resulting 81 pitch/thickness pairs are not 81 independently trained
+operators; component availability and validated combinations are separate.
+
+Direct MAPDL bow-check supplements are under
+`distribution/operators/validation/*_DIRECT_MAPDL_20261023_v1/`:
+`BI3_SI7_COARSE45` (4.46% maximum relative error), `BI3_SI77_COARSE45`
+(2.46%) and `BI6_SI77` (3.14%). They compare 73 actual ROM states and
+time-interpolated bow observables with 1,081 MAPDL states. These checks use
+single-BI coupons (18.5 um for Si7; 88.5 um for Si77), not the prepared
+dual-BI bodies or complete assembly orders. See each `MANIFEST.json` for scope.
 
 D2W bodies keep their prepared thickness. W2W starts from 775-um wafers and
 uses F2B-only bonding with thinning/backside BI preparation. W2W input bows
@@ -198,9 +243,18 @@ bonding pitch, not BI thickness. A 45-um total uses `SI32`; noninteger Si
 thicknesses use `p` as the decimal marker, as in `SI48p5`. The exact ID and
 interpolation eligibility are resolved by the loader.
 
+The current catalog also contains `BI2_SI8p5`, `BI2_SI18p5` and `BI2_SI38p5`
+single-BI unit variants. Their single-BI totals are 20, 30 and 50 um; selecting
+them in a two-BI prepared model adds another 1.5 um. They do not replace
+`BI2_SI7`, `BI2_SI17` and `BI2_SI37` for prepared totals 20, 30 and 50 um.
+
 The component catalog binds BI, BEOL and Si/TSV operands to their geometry,
 material, construction and validation evidence. File identity and hash checks
 protect those bindings. A catalog is an index, not the numerical operator data.
+
+`BI6_SI17` selects a prepared total of 30 um. Its single-BI unit passed a
+three-cycle bow comparison against 1081 full-order FE states, with 5.28% maximum
+relative error. This is not a direct MAPDL or prepared-stack accuracy validation.
 
 ```bash
 # Metadata inspection; this does not run a thermal history.
@@ -333,17 +387,20 @@ prototype's timing to a different public execution path.
 
 ### F. Output, Progress and Interruption
 
-All writable paths must remain under the user's own absolute `/app` run root.
-`YAP_RUN_ROOT` must be owned by the running UID with mode `0700`; pre-existing
-directories created with a different mode are not fixed by `mkdir -p`.
-Do not use this checkout, shared operator data, another user's run directory,
-shared home, `/tmp`, `/data`, or symlink aliases as output storage.
+Set `YAP_RUN_ROOT` explicitly. Private mode `0700` is recommended, not required;
+YAP warns about shared permissions and leaves existing modes unchanged. Explicit
+storage aliases resolve to their real paths with a warning. Home, scratch and
+temporary locations are allowed, but their capacity, lifetime and host policy
+are the user's responsibility. Source code, selected read-only operator/library
+data, snapshots and protected migration directories remain forbidden write targets.
 
 `YAP_WORK_DIR` holds temporary data and caches. `XDG_*`, `NUMBA_CACHE_DIR` and
 `MPLCONFIGDIR` are dependency cache/config locations, not scientific model
-parameters. YAP assigns private defaults; stale inherited overrides can fail
-storage validation. Prefer the setup above over inventing alternate fallback
-directories. Re-export the shared-data variables in each new shell.
+parameters. YAP assigns private defaults and honors explicit cache overrides,
+including directories outside the run root. Use trusted private writable caches;
+cache hashes are corruption checks, not protection from malicious writers.
+Incomplete Si-cap cache pairs require manual review and are never overwritten.
+Re-export the data variables in each new shell; restart Python to change roots.
 
 Useful run artifacts include:
 
@@ -394,6 +451,10 @@ provide those data. Relevant branches of the shared distribution are:
 - `thickness_family/`: parameterized thickness data and activation evidence.
 - `silicon_caps/`: published W2W pure-Si cap data.
 - `legacy/`: dependencies for explicitly selected older resource packages.
+
+The original `components/CATALOG.json` and artifact location index remain
+unchanged for older checkouts. Updated code uses the versioned catalog in
+Section 1 and a separately verified supplementary location index.
 
 Copying only a few NPZ files is not a complete deployment. Another server needs
 the full selected dependency closure and a checked path/publication setup;

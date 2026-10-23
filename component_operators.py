@@ -12,9 +12,11 @@ import math
 import os
 from pathlib import Path
 import re
+import stat
 import sys
+import threading
 import time
-from types import FunctionType
+from types import FunctionType, SimpleNamespace
 import zipfile
 
 import mechanics_runtime as runtime
@@ -22,12 +24,13 @@ import mechanics_runtime as runtime
 
 PROJECT = runtime.COMPONENT_PROJECT_ROOT
 DELIVERY = PROJECT / "distribution/operators/components"
-DEFAULT_CATALOG = DELIVERY / "CATALOG.json"
+DEFAULT_CATALOG = DELIVERY / "coverage_20261023_v8/CATALOG.json"
 DEFAULT_THICKNESS_FAMILY = PROJECT / "distribution/operators/thickness_family"
 CU_MATERIAL_CARD_SHA256 = "b3a876bcd8847e5ee2366580155b66ef5a3c01a7971a3b44b152b47eb46db8aa"
 ARRAY_LIMIT = 6 * 1024**3
 READ_LIMIT = 24 * 1024**3
 ROLES = ("bi", "beol", "si")
+_CAP_STORAGE_LOCK = threading.Lock()
 ARRAY_KEYS = ("kaa", "c", "kff_data", "kff_indices", "kff_indptr", "kff_shape",
               "fm", "ff", "B_macro", "B_free", "weights", "reference_cu_stiffness",
               "reference_cu_alpha", "reference_temperature_c")
@@ -80,11 +83,12 @@ def _projected_work(component):
 
 def _verify_validation(entry, reader):
     """Use the publisher's exact assessment/candidate/artifact evidence chain."""
-    from tools.publish_component_operators import _assessment, _components
+    from tools.publish_component_operators import PITCH_THICKNESS_CASES, _assessment, _components
 
     geometry, validation = entry["geometry"], entry["validation"]
     pitch, si = geometry["bi_pitch_um"], geometry["si_tsv_thickness_um"]
-    _require(pitch in (2, 3, 6) and (pitch == 2 or si == 37)
+    _require(pitch in (2, 3, 6)
+             and (pitch == 2 or si == 37 or (pitch, si) in PITCH_THICKNESS_CASES)
              and geometry == dict(bi_pitch_um=pitch, diameter_pitch_ratio=.5,
                  bi_thickness_um=1.5, beol_thickness_um=10, si_tsv_thickness_um=si,
                  total_thickness_um=si+11.5, bi_layer_count=1, tsv_pitch_um=6, cell_side_um=6),
@@ -107,6 +111,16 @@ def _verify_validation(entry, reader):
                  "validated history used a different component operand")
 
 
+def _metadata_reader():
+    from tools.publish_component_operators import MetadataReader
+
+    class RelocatedReader(MetadataReader):
+        def path(self, value):
+            return super().path(runtime.shared_distribution_path(value))
+
+    return RelocatedReader(PROJECT)
+
+
 def load_catalog(catalog_path=None):
     """Read exact construction, reference and bow evidence without NPZ payloads."""
     path = runtime._component_path(catalog_path or os.environ.get(
@@ -116,8 +130,7 @@ def load_catalog(catalog_path=None):
              and catalog["schema"] == "yap.component_operator_catalog.v2"
              and isinstance(catalog["entries"], list) and 1 <= len(catalog["entries"]) <= 128,
              "invalid shared component v2 catalog")
-    from tools.publish_component_operators import MetadataReader
-    evidence_reader = MetadataReader(PROJECT)
+    evidence_reader = _metadata_reader()
     entries, identifiers = [], set()
     required = {"id", "geometry", "components", "construction", "reference", "validation", "capabilities"}
     for original in catalog["entries"]:
@@ -561,11 +574,59 @@ def load_w2w_component_library(package, geometry, *, frozen_preview=False):
     request = w2w_operator_request(package, geometry, frozen_preview=frozen_preview)
     library, provenance, trace = _component_library_and_trace(package,
         _w2w_prepared_geometry(geometry), frozen_preview=frozen_preview)
-    from W2W.component_silicon_cap import augment_w2w_library
-    library, cap_provenance = augment_w2w_library(library, geometry, trace)
+    from W2W import component_silicon_cap as caps
+    cap_storage = _configure_cap_storage(caps)
+    library, cap_provenance = caps.augment_w2w_library(library, geometry, trace)
     return library, dict(provenance, geometry=dict(geometry), w2w_component_request=request,
-        w2w_si_caps=cap_provenance, W2W_thinning_available=True,
+        w2w_si_caps=cap_provenance, cap_storage=cap_storage, W2W_thinning_available=True,
         physics_qualification="EXPERIMENTAL_F2B_COMPONENTS_WITH_CHECKED_PURE_SI_CAPS_ASSEMBLY_ACCURACY_PENDING")
+
+
+def _configure_cap_storage(caps):
+    """Adapt locations/publication, leaving the authenticated Si-cap bytes intact."""
+    root = runtime._component_path(os.environ.get('YAP_W2W_SI_CAP_LIBRARY_DIR',
+        PROJECT/'distribution/operators/silicon_caps'))
+    with _CAP_STORAGE_LOCK:
+        bound = getattr(caps, '_yap_storage_binding', None)
+        if bound is not None:
+            _require(bound['published_root'] == str(root),
+                     'published Si cap root already selected; restart Python to change roots')
+            return dict(bound)
+        read, publish = caps._read_cache, caps._publish_cache
+
+        def checked_read(npz_path, json_path, key):
+            _require(os.path.lexists(npz_path) == os.path.lexists(json_path),
+                     'incomplete Si cap cache pair; preserve it for manual review')
+            if os.path.lexists(npz_path):
+                _require(all(stat.S_ISREG(Path(path).lstat().st_mode) for path in (npz_path, json_path)),
+                         'Si cap cache pair must contain regular files, not symlinks or special files')
+            return read(npz_path, json_path, key)
+
+        def exclusive_replace(source, destination):
+            source, destination = Path(source), Path(destination)
+            _require(source.parent == destination.parent, 'cache publication must be directory-local')
+            runtime.validate_user_write_path(destination, label='Si cap cache publication')
+            os.link(source, destination, follow_symlinks=False)
+            source.unlink()
+
+        local_os = SimpleNamespace(**dict(vars(os), replace=exclusive_replace))
+        writer = FunctionType(publish.__code__, dict(publish.__globals__, os=local_os),
+                              publish.__name__, publish.__defaults__, publish.__closure__)
+
+        def checked_publish(directory, key, stiffness, load, metadata):
+            directory = runtime.validate_user_write_path(directory, label='Si cap cache publication')
+            _require(not any(os.path.lexists(directory/(key+suffix)) for suffix in ('.npz', '.json')),
+                     'Si cap cache entry already exists; refusing to overwrite it')
+            return writer(directory, key, stiffness, load, metadata)
+
+        caps.PROJECT = root
+        os.environ['YAP_W2W_SI_CAP_LIBRARY_DIR'] = str(root)
+        caps._read_cache, caps._publish_cache = checked_read, checked_publish
+        bound = dict(published_root=str(root), frozen_numerical_source_sha256=caps._file_sha(caps.__file__),
+                     source_bytes_unchanged=True, exclusive_cache_publication=True,
+                     incomplete_cache_requires_manual_review=True)
+        caps._yap_storage_binding = bound
+        return dict(bound)
 
 
 def main(argv=None):

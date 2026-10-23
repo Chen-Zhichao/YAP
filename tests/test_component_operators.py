@@ -55,14 +55,19 @@ def test_wrong_physical_request_is_rejected(monkeypatch, fault):
                                              layout=layout, frozen_preview=preview)
 
 
-def test_storage_refuses_external_paths_and_symlink_escape(tmp_path, monkeypatch):
+def test_storage_accepts_explicit_external_paths_and_resolves_aliases(tmp_path, monkeypatch):
     monkeypatch.setattr(components, "PROJECT", tmp_path)
     monkeypatch.setenv('YAP_RUN_ROOT', str(tmp_path))
     assert components.canonical_write_path(tmp_path / "output") == tmp_path / "output"
-    with pytest.raises(ValueError): components.canonical_write_path("/tmp/forbidden")
-    with pytest.raises(ValueError): components.canonical_write_path(tmp_path.parent / "elsewhere")
+    with pytest.warns(components.runtime.StorageWarning):
+        assert components.canonical_write_path('/tmp/location-validation-only') == Path('/tmp/location-validation-only')
+    with pytest.warns(components.runtime.StorageWarning, match='outside YAP_RUN_ROOT'):
+        assert components.canonical_write_path(tmp_path.parent / 'elsewhere') == tmp_path.parent / 'elsewhere'
     (tmp_path / "alias").symlink_to(tmp_path.parent, target_is_directory=True)
-    with pytest.raises(ValueError): components.canonical_write_path(tmp_path / "alias/result")
+    with pytest.warns(components.runtime.StorageWarning):
+        assert components.canonical_write_path(tmp_path / 'alias/result') == tmp_path.parent / 'result'
+    with pytest.raises(ValueError, match='snapshot'):
+        components.canonical_write_path(tmp_path / '.snapshot/result')
 
 
 def test_reference_work_certificate_is_required():
@@ -137,6 +142,46 @@ def test_all_actual_assessments_bind_exact_candidate_and_geometry(actual_entries
     for item in actual_entries:
         components._verify_validation(item, reader)
     reader.verify_unchanged()
+
+
+@pytest.mark.parametrize("selected_id,other_id", [
+    ("BI6_SI17", "BI6_SI37"),
+    ("BI6_SI27", "BI6_SI37"),
+    ("BI6_SI47", "BI6_SI37"),
+    ("BI6_SI57", "BI6_SI47"),
+    ("BI6_SI77", "BI6_SI37"),
+    ("BI6_SI87", "BI6_SI37"),
+    ("BI6_SI7", "BI6_SI37"),
+    ("BI3_SI17_COARSE45", "BI3_SI37_COARSE45"),
+    ("BI3_SI27_COARSE45", "BI3_SI37_COARSE45"),
+    ("BI3_SI47_COARSE45", "BI3_SI37_COARSE45"),
+    ("BI3_SI57_COARSE45", "BI3_SI47_COARSE45"),
+    ("BI3_SI67_COARSE45", "BI3_SI57_COARSE45"),
+    ("BI3_SI7_COARSE45", "BI3_SI37_COARSE45"),
+    ("BI3_SI77_COARSE45", "BI3_SI37_COARSE45"),
+    ("BI3_SI87_COARSE45", "BI3_SI37_COARSE45"),
+])
+def test_incremental_pitch_thickness_admission_keeps_geometry_and_history_bound(
+        actual_entries, selected_id, other_id):
+    from tools.publish_component_operators import MetadataReader
+    selected = next((e for e in actual_entries if e["id"] == selected_id), None)
+    if selected is None:
+        pytest.skip("incremental release is not installed: " + selected_id)
+    reader = MetadataReader()
+    components._verify_validation(selected, reader)
+    reader.verify_unchanged()
+
+    unsupported = copy.deepcopy(selected)
+    unsupported["geometry"]["si_tsv_thickness_um"] = 18
+    unsupported["geometry"]["total_thickness_um"] = 29.5
+    with pytest.raises(ValueError, match="geometry differs"):
+        components._verify_validation(unsupported, MetadataReader())
+
+    other = next(e for e in actual_entries if e["id"] == other_id)
+    wrong_history = copy.deepcopy(selected)
+    wrong_history["validation"]["history"] = other["validation"]["history"]
+    with pytest.raises(ValueError, match="different candidate history"):
+        components._verify_validation(wrong_history, MetadataReader())
 
 
 @pytest.mark.parametrize("selected,other", [("BI2_SI37", "BI2_SI48p5"),
