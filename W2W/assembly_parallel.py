@@ -17,7 +17,9 @@ import traceback
 from uuid import uuid4
 
 
-PROJECT = Path("/app/nanocad/projects/personal/zchen/YAP_STACK")
+from mechanics_runtime import COMPONENT_PROJECT_ROOT
+
+PROJECT = COMPONENT_PROJECT_ROOT
 REPO = Path(__file__).resolve().parents[1]
 PROTOCOL = "yap.assembly_order_worker.v1"
 POLL_SECONDS = 0.5
