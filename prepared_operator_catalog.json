@@ -1,0 +1,17 @@
+{
+  "schema": "yap.prepared_p2_operator_catalog.v1",
+  "packages": {
+    "30": {
+      "package_sha256": "61730eb6a6fb91a239599426ced5f87163bdcf0394a1afa9c5e8058ded1bd6e9",
+      "audit_sha256": "a99798b89889ec945de63dba9eada4f95d3cff573ce515ba6b696ad465d3e4cd",
+      "parent_package_sha256": "ad734f2a4a09e704a9c229aff75398bf5817eeb9352e19201c7f63a0846a2791",
+      "port_basis_sha256": "8c2941e8358dba9626177cfd54c2187d4d0878d4ca1108d2652261efd318cb06"
+    },
+    "80": {
+      "package_sha256": "3bdcbf04d70534513dc5a8b266182a8748a5651c72fa24926bb23e2576c7e761",
+      "audit_sha256": "5daa9e9e3ce56b49c72c3ca39327df603d99e7d5aa0a34dee12296ad17068d59",
+      "parent_package_sha256": "ad734f2a4a09e704a9c229aff75398bf5817eeb9352e19201c7f63a0846a2791",
+      "port_basis_sha256": "8c2941e8358dba9626177cfd54c2187d4d0878d4ca1108d2652261efd318cb06"
+    }
+  }
+}

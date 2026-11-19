@@ -1,0 +1,30 @@
+# Runtime Delivery
+
+For normal same-server D2W/W2W runs, follow [README.md](README.md).
+The operator catalog and numerical dependencies are shared read-only data,
+not files installed by Git or `pip`. Another server needs a separately
+prepared data delivery with all referenced operators and evidence.
+
+`tools/package_assembly_runtime.py` and `tools/verify_assembly_runtime.py` maintain the
+legacy standalone runtime format. They do not export the component-v2 catalog
+or the thickness family used by the current generator. Do not use a legacy
+bundle as a substitute for the component-v2 data.
+
+The exporter includes the common `tools/operators` runtime and, when present,
+`prepared_coupon_catalog.json`, but not maintainer migration code or per-pitch
+Python loaders. Normalized coupon packets and their verification receipts still
+require a separate data delivery under `distribution/operators/normalized/`;
+including the catalog does not include those packets. See README for data-root
+and catalog overrides.
+
+Maintainers can inspect the exporter and verifier options with:
+
+```bash
+python -B tools/package_assembly_runtime.py --help
+python -B tools/verify_assembly_runtime.py --help
+```
+
+Use the README storage setup first. Every new delivery, cache and verification
+output must stay under the selected private `YAP_RUN_ROOT`; shared source and
+published data remain read-only. Export only to a new directory and retain the
+bundle's inventory, resource map and immutable provenance.

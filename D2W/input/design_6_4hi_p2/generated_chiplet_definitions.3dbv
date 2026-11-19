@@ -1,0 +1,39 @@
+Header:
+  version: 2.0
+  unit: micron
+  precision: 2000
+ChipletDef:
+  Die_1:
+    type: die
+    design_area: [10000.0, 10000.0]
+    thickness: 50.0
+    shrink: 1
+    tsv: true
+    regions:
+      To_Die_2: {side: back, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}
+  Die_2:
+    type: die
+    design_area: [10000.0, 10000.0]
+    thickness: 50.0
+    shrink: 1
+    tsv: true
+    regions:
+      From_Die_1: {side: front, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}
+      To_Die_3: {side: back, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}
+  Die_3:
+    type: die
+    design_area: [10000.0, 10000.0]
+    thickness: 50.0
+    shrink: 1
+    tsv: true
+    regions:
+      From_Die_2: {side: front, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}
+      To_Die_4: {side: back, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}
+  Die_4:
+    type: die
+    design_area: [10000.0, 10000.0]
+    thickness: 50.0
+    shrink: 1
+    tsv: true
+    regions:
+      From_Die_3: {side: front, layer: UBM, coords: [[0, 0], [10000, 0], [10000, 10000], [0, 10000]]}

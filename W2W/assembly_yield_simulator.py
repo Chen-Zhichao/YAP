@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#### Overall yield simulator for hybrid bonding
+#### Author: Zhichao Chen
+#### Date: Sep 26, 2024
+
+import numpy as np
+import time
+import os
+
+from wafer_die_stack_initialization import wafer_stack_list_initialize
+from overlay_yield_simulator import overlay_term_simulator
+from defect_yield_simulator import defect_yield_simulator
+from overall_yield_simulator import overall_yield_simulator
+from chiplet_yield import (
+    chiplet_yield_records,
+    print_chiplet_yield_table,
+    sample_chiplet_stack_survival,
+)
+from utils.util import result_wrapper
+from warpage_yield_simulator import sample_w2w_warpage_process
+from yield_mechanism_policy import (
+    FAILURE_MECHANISMS,
+    active_failure_mechanisms,
+    disabled_requested_mechanisms,
+)
+
+
+_CLEAR_LINE = "\033[K"
+
+
+def _print_progress(message: str):
+    print(f"\r{message}{_CLEAR_LINE}", end="", flush=True)
+
+
+def Assembly_Yield_Simulator(
+    input_args: dict,
+    cfg_skeleton: object,
+    cfg_dict: dict,
+    pad_bitmap_collection_dict: dict,
+): 
+    NUM_WAFER_STACKS = int(cfg_skeleton.NUM_WAFER_STACKS)
+    SIM_BATCH_SIZE = int(cfg_skeleton.SIM_BATCH_SIZE)
+    if NUM_WAFER_STACKS <= 0 or SIM_BATCH_SIZE <= 0:
+        raise ValueError("NUM_WAFER_STACKS and SIM_BATCH_SIZE must be positive.")
+    num_sim_epoch = int(np.ceil(NUM_WAFER_STACKS / SIM_BATCH_SIZE))
+
+    failure_mechanism_list = list(FAILURE_MECHANISMS) + ['overall']
+    active_mechanisms = active_failure_mechanisms(input_args)
+    disabled_requested = disabled_requested_mechanisms(input_args)
+    if disabled_requested:
+        print(
+            "Temporarily disabled yield mechanisms ignored: {}. "
+            "Warpage remains enabled only as an overlay-error input.".format(
+                ", ".join(sorted(disabled_requested))
+            )
+        )
+    if not active_mechanisms:
+        print("Requested yield mechanisms are disabled; returning unity yield.")
+        return 1.0, [1.0] * NUM_WAFER_STACKS
+    run_overlay = 'overlay' in active_mechanisms
+    run_particle = 'particle' in active_mechanisms
+    run_warpage = 'warpage' in active_mechanisms
+    epoch_yield_list = []
+    chiplet_records = []
+    chiplet_survival_sum = 0
+    chiplet_site_count = 0
+    if 'chiplet' in active_mechanisms:
+        design_root_dir = input_args.get('design_root_dir') or input_args.get('ds_dir', '')
+        chiplet_records = chiplet_yield_records(
+            cfg_dict,
+            design_root_dir,
+        )
+        print_chiplet_yield_table(chiplet_records)
+
+    if input_args['verbose']:
+        print("Verbose mode enabled: Tracking failure reasons for each die.")
+        print("Active failure mechanisms: {}.".format(", ".join(sorted(active_mechanisms))))
+        # Initialize a temporary wafer stack to get die count and initialize fail maps/vectors
+        temp_waf_stack_list = wafer_stack_list_initialize(
+            cfg_dict                    =       cfg_dict,
+            pad_bitmap_collection_dict  =       pad_bitmap_collection_dict,
+            num_stack_samples           =       1,
+            mode                        =       input_args['mode'],
+        )
+        fail_map_per_interface_dict = {}
+        fail_vec_per_interface_dict = {}
+        num_dies_per_wafer = temp_waf_stack_list[0].num_dies_per_wafer
+        for interface_name, waf_interface in temp_waf_stack_list[0].interfaces.interface_dict.items():
+            cfg = cfg_dict[interface_name]
+            fail_map_per_interface_dict[interface_name], fail_vec_per_interface_dict[interface_name] = {}, {}
+            for failure_mechanism in failure_mechanism_list:
+                fail_map_per_interface_dict[interface_name][failure_mechanism] = np.zeros((cfg.PAD_ARR_ROW, cfg.PAD_ARR_COL))
+                fail_vec_per_interface_dict[interface_name][failure_mechanism] = np.zeros((NUM_WAFER_STACKS, num_dies_per_wafer))
+        del temp_waf_stack_list
+
+    simulated_stack_count = 0
+    _3dbx_path = os.path.join(input_args['ds_dir'], "generated_stack_config.3dbx")
+    progress_interval = max(1, NUM_WAFER_STACKS // 20)
+
+    # Iterate over simulation epochs
+    for epoch in range(num_sim_epoch):
+        current_batch_size = min(
+            SIM_BATCH_SIZE,
+            NUM_WAFER_STACKS - simulated_stack_count,
+        )
+        # Record the time for each epoch
+        start_time = time.time()
+        # Initialize the wafer stack
+        waf_stack_list = wafer_stack_list_initialize(
+            cfg_dict                    =       cfg_dict,
+            pad_bitmap_collection_dict  =       pad_bitmap_collection_dict,
+            num_stack_samples           =       current_batch_size,
+            mode                        =       input_args['mode'],
+        )
+        num_dies_per_wafer = waf_stack_list[0].num_dies_per_wafer
+
+        if run_overlay or run_warpage:
+            warpage_process_samples = sample_w2w_warpage_process(
+                cfg_dict            =       cfg_dict,
+                _3dbx_path          =       _3dbx_path,
+                num_samples         =       current_batch_size,
+                num_dies_per_wafer  =       num_dies_per_wafer,
+            )
+        else:
+            warpage_process_samples = {
+                "stack_pass_vector": np.ones(current_batch_size, dtype=bool),
+                "interface_bow_difference_samples": {
+                    interface_name: np.zeros(current_batch_size, dtype=float)
+                    for interface_name in cfg_dict
+                },
+            }
+
+        # Generate overlay misalignment component samples for each bonding interface in each stack
+        if run_overlay:
+            overlay_term_simulator(
+                cfg_dict                        =       cfg_dict,
+                waf_stack_list                  =       waf_stack_list,
+                _3dbx_path                      =       _3dbx_path,
+                bow_difference_samples_by_interface =   warpage_process_samples["interface_bow_difference_samples"],
+            )
+    
+        # Generate void defects for each bonding interface
+        if run_particle:
+            defect_yield_simulator(
+                cfg_dict            =       cfg_dict,
+                waf_stack_list      =       waf_stack_list,
+            )
+
+        warpage_fail_vector = ~warpage_process_samples["stack_pass_vector"]
+        if run_warpage:
+            for stack_idx, warpage_failed in enumerate(warpage_fail_vector):
+                if warpage_failed:
+                    waf_stack_list[stack_idx].die_stack_survival[:] = False
+        
+        # Calculate the overall yield
+        runtime_input_args = dict(input_args)
+        runtime_input_args['global_stack_offset'] = simulated_stack_count
+        yield_list, \
+        epoch_fail_map_per_interface_dict, \
+        epoch_fail_vec_per_interface_dict = overall_yield_simulator(
+            input_args                      =       runtime_input_args,
+            cfg_dict                        =       cfg_dict,
+            epoch                           =       epoch,
+            waf_stack_list                  =       waf_stack_list,
+            num_dies_per_wafer              =       num_dies_per_wafer,
+            pad_bitmap_collection_dict      =       pad_bitmap_collection_dict,
+        )
+        # Sample physical-die fabrication yield after interface simulation so
+        # that per-interface process-yield statistics remain unconditional.
+        if chiplet_records:
+            chiplet_survival = sample_chiplet_stack_survival(
+                chiplet_records,
+                (current_batch_size, num_dies_per_wafer),
+            )
+            chiplet_survival_sum += int(np.count_nonzero(chiplet_survival))
+            chiplet_site_count += int(chiplet_survival.size)
+            for stack_idx, waf_stack in enumerate(waf_stack_list):
+                waf_stack.die_stack_survival &= chiplet_survival[stack_idx]
+            yield_list = [
+                float(np.mean(waf_stack.die_stack_survival))
+                for waf_stack in waf_stack_list
+            ]
+        if run_warpage and input_args['verbose']:
+            for interface_name in cfg_dict:
+                for stack_idx, warpage_failed in enumerate(warpage_fail_vector):
+                    if warpage_failed:
+                        epoch_fail_vec_per_interface_dict[interface_name]['warpage'][stack_idx, :] = 1
+                        epoch_fail_vec_per_interface_dict[interface_name]['overall'][stack_idx, :] = 1
+        epoch_yield_list.extend(np.asarray(yield_list, dtype=float).reshape(-1).tolist())
+
+        # Update the overall fail maps/vectors
+        for interface_name, cfg in cfg_dict.items()   :
+            if input_args['verbose']:
+                for failure_mechanism in failure_mechanism_list:
+                    fail_map_per_interface_dict[interface_name][failure_mechanism]   \
+                          += epoch_fail_map_per_interface_dict[interface_name][failure_mechanism]
+
+                for failure_mechanism in failure_mechanism_list:
+                    fail_vec_per_interface_dict[interface_name][failure_mechanism][simulated_stack_count:simulated_stack_count + current_batch_size, :] \
+                        = epoch_fail_vec_per_interface_dict[interface_name][failure_mechanism]
+        simulated_stack_count += current_batch_size
+        if (
+            input_args['verbose']
+            or simulated_stack_count == NUM_WAFER_STACKS
+            or simulated_stack_count % progress_interval < current_batch_size
+        ):
+            _print_progress(
+                f"Simulation progress: {simulated_stack_count}/{NUM_WAFER_STACKS} wafer stacks simulated. "
+                f"Epoch yield: {np.mean(yield_list):.4f}. Time taken: {time.time() - start_time:.2f} seconds."
+            )
+
+        del waf_stack_list
+
+    print(f"\r{_CLEAR_LINE}\nSimulation for all epochs completed.")
+    assembly_yield = np.mean(epoch_yield_list)
+    if chiplet_records:
+        print(
+            "Simulated chiplet stack yield: "
+            f"{chiplet_survival_sum / chiplet_site_count:.6f}"
+        )
+    # Remove temporary files if any
+    temp_dir = cfg.OUTPUT_DIR + cfg.DESIGN + '/temp'
+    if os.path.isdir(temp_dir):
+        for name in os.listdir(temp_dir):
+            file_path = os.path.join(temp_dir, name)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+    for interface_name, cfg in cfg_dict.items():
+        if input_args['verbose']:
+            for failure_mechanism in failure_mechanism_list:
+                fail_map_per_interface_dict[interface_name][failure_mechanism]   \
+                      /= (NUM_WAFER_STACKS * num_dies_per_wafer)
+            # Report the failure reasons statistics
+            print("{} die stack failures due to overlay misalignment.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overlay']))))
+            print("{} die stack failures due to particle defects.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['particle']))))
+            print("{} die stack failures due to mechanical issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['mechanical']))))
+            print("{} die stack failures due to ESD issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['ESD']))))
+            print("{} die stack failures due to warpage issues.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['warpage']))))
+            print("{} die stack failures in total.".format(int(np.sum(fail_vec_per_interface_dict[interface_name]['overall']))))
+            # Save fail map dict
+            np.savez(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_map_per_interface_dict.npz', **fail_map_per_interface_dict)
+            print("Failure heat maps saved to {}.".format(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_map_per_interface_dict.npz'))
+            # Save fail vec dict
+            np.savez(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_vec_per_interface_dict.npz', **fail_vec_per_interface_dict)
+            print("Failure vectors for all die samples saved to {}.".format(cfg.OUTPUT_DIR + cfg.DESIGN + '/assembly_fail_vec_per_interface_dict.npz'))
+
+        # Plot the results for this interface and save the figures
+        result_wrapper(
+            mode = input_args['mode'],
+            cfg = cfg,
+            fail_map_per_interface_dict = fail_map_per_interface_dict if input_args['verbose'] else None,
+        )
+    return assembly_yield, epoch_yield_list

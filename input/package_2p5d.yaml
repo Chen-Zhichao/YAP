@@ -1,0 +1,35 @@
+# Experimental overlay-only package model; paths are relative to this file.
+# Final package anneal and all later steps cause no additional yield loss by assumption.
+name: two_stacks_on_interposer
+samples: 8192
+seed: 20261118
+
+interposer:
+  width_mm: 30.0
+  length_mm: 30.0
+  total_thickness_um: 100.0  # Pure Si plus the top BI; no BEOL or TSVs.
+  bi_thickness_um: 1.5
+  source_cv: 0.20  # Existing source statistics transferred to top BI (assumption).
+  # Alternatively, remove source_cv and supply a fixed signed initial_bow_um.
+
+attachment:
+  # Defaults: each stack's pad layout, overlay noise and tolerance from its config.
+  magnification_correction: 0.86
+  # Optional critical_coordinates_um: [[x1, y1], [x2, y2], ...]
+  # Coordinates are relative to that stack's center, including noncentral regions.
+
+stacks:
+  - name: left
+    center_mm: [-6.0, 0.0]
+    design_dir: ../D2W/input/design_6_4hi_p2
+    config: ../D2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml
+    operator_package: component:BI2_SI37  # Current total-50-um component model.
+    assembly_order: '(((1,2),3),4)'
+    annealing: sequential
+  - name: right
+    center_mm: [6.0, 0.0]
+    design_dir: ../D2W/input/design_6_4hi_p2
+    config: ../D2W/configs/design_6_4hi_p2/design_6_4hi_p2.yaml
+    operator_package: component:BI2_SI37
+    assembly_order: '((1,2),(3,4))'
+    annealing: batch

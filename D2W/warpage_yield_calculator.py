@@ -1,0 +1,1038 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Substack-level total warpage estimates for D2W stacks.
+
+The main entry point, ``get_interface_stack_warpage_map``, returns the
+pre-bond bottom-stack warpage distribution for each interface. The warpage
+span is referenced to the current top die size, so lateral 2.5D substacks and
+small-on-large die cases use the bonding die footprint directly.
+
+The Cu elastic-plastic functions below support separate D2D anneal-history
+experiments; they are not part of the default D2W yield calculation.
+"""
+
+import math
+from dataclasses import dataclass
+
+import numpy as np
+import pandas as pd
+
+try:
+    from utils.util import stack_graph_from_3dbx
+except (ModuleNotFoundError, ImportError):
+    from D2W.utils.util import stack_graph_from_3dbx
+
+
+def bow_um_to_curvature(W0_um, L_m):
+    """Convert signed bow in um over half-length L_m to curvature in 1/m."""
+    return 2.0 * (np.asarray(W0_um, dtype=float) * 1e-6) / (L_m**2)
+
+
+def curvature_to_bow_um(kappa, L_m):
+    """Convert signed curvature in 1/m to signed bow in um."""
+    return 0.5 * kappa * L_m**2 * 1e6
+
+
+def _d2d_sublayer_group_size(layer_df):
+    """
+    Return the repeated sublayer count for exp01 D2D tables, or 0 otherwise.
+
+    The legacy exp01 D2D verification represents each die as two consecutive
+    sublayers, Si plus interface, with the same initial bow.  Older sandwich
+    decks represented each die as three consecutive sublayers: bottom interface,
+    Si, top interface.  Current explicit-interface sandwich decks instead put
+    one full interface below each incoming die; those are detected separately by
+    `interface_layout`/`die_index`.  The production D2W stack model usually has
+    one effective layer per chiplet, so D2D detection stays conservative.
+    """
+    row_count = int(len(layer_df))
+    if row_count == 0:
+        return 0
+    if "W0_um" not in layer_df.columns:
+        return 0
+
+    if "sublayer" in layer_df.columns:
+        sublayers = [str(value) for value in layer_df["sublayer"].tolist()]
+        patterns = (
+            ("si_substrate", "hybrid_bond_interface_eq_sio2_cu"),
+            (
+                "hybrid_bond_interface_bottom_eq_sio2_cu",
+                "si_substrate",
+                "hybrid_bond_interface_top_eq_sio2_cu",
+            ),
+        )
+        for pattern in patterns:
+            group_size = len(pattern)
+            if row_count % group_size != 0:
+                continue
+            if all(tuple(sublayers[idx : idx + group_size]) == pattern for idx in range(0, row_count, group_size)):
+                w0 = layer_df["W0_um"].to_numpy(dtype=float)
+                same_bow = True
+                for idx in range(0, row_count, group_size):
+                    ref = float(w0[idx])
+                    if any(
+                        not math.isclose(ref, float(w0[idx + offset]), rel_tol=0.0, abs_tol=1.0e-9)
+                        for offset in range(1, group_size)
+                    ):
+                        same_bow = False
+                        break
+                if same_bow:
+                    return group_size
+        return 0
+
+    if row_count % 2 != 0:
+        return 0
+
+    w0 = layer_df["W0_um"].to_numpy(dtype=float)
+    paired = True
+    for idx in range(0, row_count, 2):
+        if not math.isclose(float(w0[idx]), float(w0[idx + 1]), rel_tol=0.0, abs_tol=1.0e-9):
+            paired = False
+            break
+    return 2 if paired else 0
+
+
+def _infer_bonded_die_count(layer_df):
+    """Infer the number of bonded die/wafer bodies represented by layer_df."""
+    row_count = int(len(layer_df))
+    if "die_index" in layer_df.columns:
+        return int(pd.Series(layer_df["die_index"]).nunique())
+    group_size = _d2d_sublayer_group_size(layer_df)
+    return row_count // group_size if group_size else row_count
+
+
+def _is_paired_d2d_layer_table(layer_df):
+    """Return True for D2D tables represented as repeated die sublayer groups."""
+    if "interface_layout" in layer_df.columns and "die_index" in layer_df.columns:
+        layouts = {str(value) for value in layer_df["interface_layout"].dropna().tolist()}
+        if layouts and layouts.issubset({"top", "sandwich"}):
+            return True
+    if "sublayer" in layer_df.columns:
+        sublayers = {str(value) for value in layer_df["sublayer"].dropna().tolist()}
+        if "hybrid_bond_interface_bottom_eq_sio2_cu" in sublayers and "die_index" in layer_df.columns:
+            return True
+    return _d2d_sublayer_group_size(layer_df) > 0
+
+
+def compute_total_stack_warpage(layer_df, DeltaT_K, L_m, thermal_layer_df=None):
+    """
+    Compute multilayer total stack bow using the model from
+    total_stack_warpage_16die.ipynb.
+
+    Required layer_df columns:
+      - h_um
+      - E_GPa
+      - nu
+      - alpha_ppm_K
+      - W0_um
+    """
+    required = ["h_um", "E_GPa", "nu", "alpha_ppm_K", "W0_um"]
+    missing = [col for col in required if col not in layer_df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = layer_df.copy().reset_index(drop=True)
+    h = df["h_um"].to_numpy(dtype=float) * 1e-6
+    E = df["E_GPa"].to_numpy(dtype=float) * 1e9
+    nu = df["nu"].to_numpy(dtype=float)
+    alpha = df["alpha_ppm_K"].to_numpy(dtype=float) * 1e-6
+    kappa0 = bow_um_to_curvature(df["W0_um"].to_numpy(dtype=float), L_m)
+
+    if np.any(h <= 0):
+        raise ValueError("All layer thicknesses must be positive.")
+    if np.any((nu <= -1.0) | (nu >= 0.5)):
+        raise ValueError("Poisson ratios should be in the elastic range (-1, 0.5).")
+
+    E_biaxial = E / (1.0 - nu)
+    lam = 1.0 / (E_biaxial * h)
+    weights = 1.0 / lam
+
+    h_cumsum = np.cumsum(h)
+    hk0_cumsum = np.cumsum(h * kappa0)
+
+    a = h_cumsum - 0.5 * (h[0] + h)
+    b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
+    delta_alpha = alpha - alpha[0]
+
+    if thermal_layer_df is None:
+        thermal_df = df
+    else:
+        thermal_df = thermal_layer_df.copy().reset_index(drop=True)
+        missing_thermal = [col for col in required if col not in thermal_df.columns]
+        if missing_thermal:
+            raise ValueError(f"Missing required thermal-layer columns: {missing_thermal}")
+
+    h_t = thermal_df["h_um"].to_numpy(dtype=float) * 1e-6
+    E_t = thermal_df["E_GPa"].to_numpy(dtype=float) * 1e9
+    nu_t = thermal_df["nu"].to_numpy(dtype=float)
+    alpha_t = thermal_df["alpha_ppm_K"].to_numpy(dtype=float) * 1e-6
+    if np.any(h_t <= 0):
+        raise ValueError("All thermal layer thicknesses must be positive.")
+    if np.any((nu_t <= -1.0) | (nu_t >= 0.5)):
+        raise ValueError("Thermal-layer Poisson ratios should be in the elastic range (-1, 0.5).")
+
+    # The Suhir/Kim axial compatibility terms use E/(1-nu).  For the thermal
+    # curvature moment measured as an edge bow of a 3D plate, the finite-element
+    # comparison follows the plane-stress plate modulus E/(1-nu^2) more closely.
+    E_thermal = E_t / (1.0 - nu_t**2)
+    thermal_weights = E_thermal * h_t
+    h_t_cumsum = np.cumsum(h_t)
+    a_t = h_t_cumsum - 0.5 * (h_t[0] + h_t)
+    delta_alpha_t = alpha_t - alpha_t[0]
+    s_alpha = np.sum(delta_alpha_t * thermal_weights) / np.sum(thermal_weights)
+    s_a = np.sum(a * weights) / np.sum(weights)
+    s_b = np.sum(b * weights) / np.sum(weights)
+
+    D = E_biaxial * h**3 / 12.0
+    # D2D batch stacks in exp01 are represented as repeated Si/interface layer
+    # pairs. They are flattened and tied at anneal temperature, then the
+    # flattening constraints are released while cooling. With the positive bow
+    # convention used here, that release sequence puts the CTE-gradient moment
+    # on the opposite branch from the raw free-strain expression. Keep the
+    # original branch for ordinary one-layer-per-chiplet D2W inputs.
+    thermal_branch_sign = -1.0 if _is_paired_d2d_layer_table(df) else 1.0
+    thermal_strain_t = thermal_branch_sign * (delta_alpha_t - s_alpha) * DeltaT_K
+    thermal_strain = thermal_branch_sign * (delta_alpha - s_alpha) * DeltaT_K
+    M_T = np.sum(a_t * thermal_weights * thermal_strain_t)
+    M_b = np.sum((a / lam) * (b - s_b))
+    K_a = np.sum((a / lam) * (a - s_a))
+    K_D = np.sum(D)
+    M_D0 = np.sum(D * kappa0)
+
+    denominator = K_D + K_a
+    W_nonthermal_um = curvature_to_bow_um((M_D0 + M_b) / denominator, L_m)
+    W_thermal_um = curvature_to_bow_um(M_T / denominator, L_m)
+    inferred_die_count = _infer_bonded_die_count(df)
+    thermal_moment_scale = 1.0
+
+    kappa = (M_D0 + M_T + M_b) / denominator
+    W_um = curvature_to_bow_um(kappa, L_m)
+
+    strain_term = (
+        thermal_strain
+        - (a - s_a) * kappa
+        + (b - s_b)
+    )
+    F = weights * strain_term
+    sigma = E_biaxial * strain_term
+
+    summary = {
+        "kappa_1_per_m": float(kappa),
+        "signed_W_um": float(W_um),
+        "abs_W_um": float(abs(W_um)),
+        "DeltaT_K": float(DeltaT_K),
+        "L_m": float(L_m),
+        "inferred_die_count": int(inferred_die_count),
+        "thermal_moment_scale": float(thermal_moment_scale),
+        "thermal_branch_sign": float(thermal_branch_sign),
+        "nonthermal_W_um": float(W_nonthermal_um),
+        "thermal_W_um": float(W_thermal_um),
+    }
+    layer_out = df.copy()
+    layer_out["E_biaxial_GPa"] = E_biaxial / 1e9
+    layer_out["E_thermal_plate_GPa"] = E / (1.0 - nu**2) / 1e9
+    layer_out["kappa0_1_per_m"] = kappa0
+    layer_out["F_N_per_m"] = F
+    layer_out["sigma_MPa"] = sigma / 1e6
+    return summary, layer_out
+
+
+def _cfg_get(cfg, key, default=None):
+    if hasattr(cfg, "get"):
+        value = cfg.get(key, default)
+    else:
+        value = getattr(cfg, key, default)
+    if value in (None, "None"):
+        return default
+    return value
+
+
+def _cfg_float(cfg, key, default=None):
+    value = _cfg_get(cfg, key, default)
+    if value in (None, "None"):
+        if default is None:
+            raise ValueError(f"Missing required config value: {key}")
+        value = default
+    return float(value)
+
+
+def _first_existing_float(cfg, keys, default=None):
+    for key in keys:
+        value = _cfg_get(cfg, key, None)
+        if value not in (None, "None"):
+            return float(value)
+    if default is None:
+        raise ValueError(f"None of these config values are available: {keys}")
+    return float(default)
+
+
+def _initial_bow_stats_um(cfg, side):
+    side = side.upper()
+    if side not in ("TOP", "BOT"):
+        raise ValueError(f"Unknown initial bow side: {side}")
+
+    mean = _first_existing_float(
+        cfg,
+        [
+            f"{side}_INI_BOW_MEAN_um",
+        ],
+    )
+    std = _first_existing_float(
+        cfg,
+        [
+            f"{side}_INI_BOW_STD_um",
+        ],
+    )
+    return mean, std
+
+
+def _delta_t_from_cfg(cfg):
+    if _cfg_get(cfg, "T_R", None) is None or _cfg_get(cfg, "T_anl", None) is None:
+        return 0.0
+    return _cfg_float(cfg, "T_R") - _cfg_float(cfg, "T_anl")
+
+
+def _anneal_mode_from_cfg(cfg):
+    mode = str(_cfg_get(cfg, "ANNEAL_MODE", "batch")).strip().lower()
+    aliases = {
+        "batch": "batch",
+        "batch_anneal": "batch",
+        "sequential": "sequential",
+        "layer_by_layer": "sequential",
+        "per_layer": "sequential",
+    }
+    if mode not in aliases:
+        raise ValueError(
+            f"Unsupported ANNEAL_MODE='{mode}'. Use 'batch' or 'sequential'."
+        )
+    return aliases[mode]
+
+
+def _prebond_delta_t_from_cfg(current_cfg, last_completed_cfg):
+    """
+    Return the thermal excursion already seen by an existing lower substack
+    before bonding the current interface.
+
+    In D2W batch anneal, all layers are bonded first and annealed once at the
+    end, so prebond overlay should not include thermal stack warpage.
+    """
+    if _anneal_mode_from_cfg(current_cfg) == "batch" or last_completed_cfg is None:
+        return 0.0
+    return _delta_t_from_cfg(last_completed_cfg)
+
+
+def _top_die_half_length_m(cfg):
+    die_w_um = _cfg_float(cfg, "DIE_W_um")
+    die_l_um = _cfg_float(cfg, "DIE_L_um")
+    return 0.5 * max(die_w_um, die_l_um) * 1e-6
+
+
+def _layer_cfg_and_side(cfg_dict, interfaces_bottom_to_top, layer_index):
+    if layer_index == 0:
+        if not interfaces_bottom_to_top:
+            raise ValueError("A root-only substack does not have an interface cfg.")
+        return cfg_dict[interfaces_bottom_to_top[0]], "BOT"
+    return cfg_dict[interfaces_bottom_to_top[layer_index - 1]], "TOP"
+
+
+def _effective_material_properties_from_volume_fraction(cfg, mix_prefix):
+    """
+    Return effective E/nu/alpha for a three-material Cu/SiO2/Si mixture.
+
+    Missing volume fractions fall back to a pure-Si placeholder. Present
+    fractions are normalized before applying a linear rule of mixtures, matching
+    the local effective-layer convention used by debond.py.
+    """
+    material_defaults = {
+        "Cu": {
+            "E_GPa": _first_existing_float(cfg, ["CU_E_GPA"], default=91.8),
+            "nu": _first_existing_float(cfg, ["CU_NU"], default=0.34),
+            "alpha_ppm_K": _first_existing_float(cfg, ["CU_ALPHA_PPM"], default=17.6),
+        },
+        "Sio2": {
+            "E_GPa": _first_existing_float(cfg, ["OX_E_GPA"], default=73.0),
+            "nu": _first_existing_float(cfg, ["OX_NU"], default=0.17),
+            "alpha_ppm_K": _first_existing_float(cfg, ["OX_ALPHA_PPM"], default=0.5),
+        },
+        "Si": {
+            "E_GPa": _first_existing_float(cfg, ["SI_E_GPA"], default=131.0),
+            "nu": _first_existing_float(cfg, ["SI_NU"], default=0.28),
+            "alpha_ppm_K": _first_existing_float(cfg, ["SI_ALPHA_PPM"], default=2.6),
+        },
+    }
+    volume_keys = {
+        "Cu": f"{mix_prefix}_Cu_V",
+        "Sio2": f"{mix_prefix}_Sio2_V",
+        "Si": f"{mix_prefix}_Si_V",
+    }
+    has_any_volume = any(_cfg_get(cfg, key, None) is not None for key in volume_keys.values())
+
+    if has_any_volume:
+        volumes = {
+            material: _first_existing_float(cfg, [key], default=0.0)
+            for material, key in volume_keys.items()
+        }
+        source = "config_volume_fraction"
+    else:
+        volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
+        source = "placeholder_pure_si"
+
+    if any(value < 0.0 for value in volumes.values()):
+        raise ValueError(f"{mix_prefix} volume fractions must be non-negative: {volumes}")
+
+    total_volume = sum(volumes.values())
+    if total_volume <= 0.0:
+        volumes = {"Cu": 0.0, "Sio2": 0.0, "Si": 1.0}
+        total_volume = 1.0
+        source = "placeholder_pure_si"
+
+    weights = {
+        material: volume / total_volume
+        for material, volume in volumes.items()
+    }
+    E_GPa = sum(material_defaults[material]["E_GPa"] * weights[material] for material in weights)
+    nu = sum(material_defaults[material]["nu"] * weights[material] for material in weights)
+    alpha_ppm_K = sum(
+        material_defaults[material]["alpha_ppm_K"] * weights[material]
+        for material in weights
+    )
+
+    return {
+        "E_GPa": float(E_GPa),
+        "nu": float(nu),
+        "alpha_ppm_K": float(alpha_ppm_K),
+        "Cu_V": float(volumes["Cu"]),
+        "Sio2_V": float(volumes["Sio2"]),
+        "Si_V": float(volumes["Si"]),
+        "volume_sum": float(total_volume),
+        "material_property_source": source,
+    }
+
+
+def _build_layer_df(cfg_dict, chiplets_bottom_to_top, interfaces_bottom_to_top):
+    rows = []
+    sigmas = []
+    for layer_index, chiplet in enumerate(chiplets_bottom_to_top):
+        cfg, side = _layer_cfg_and_side(cfg_dict, interfaces_bottom_to_top, layer_index)
+        h_key = "ITF_BOT_THICK_um" if side == "BOT" else "ITF_TOP_THICK_um"
+        mix_prefix = "B_Sub" if side == "BOT" else "T_Sub"
+        bow_mean_um, bow_std_um = _initial_bow_stats_um(cfg, side)
+        effective_material = _effective_material_properties_from_volume_fraction(cfg, mix_prefix)
+
+        rows.append({
+            "chiplet": chiplet,
+            "side": side.lower(),
+            "material_mix": mix_prefix,
+            "h_um": _cfg_float(cfg, h_key),
+            "E_GPa": effective_material["E_GPa"],
+            "nu": effective_material["nu"],
+            "alpha_ppm_K": effective_material["alpha_ppm_K"],
+            "W0_um": bow_mean_um,
+            "Cu_V": effective_material["Cu_V"],
+            "Sio2_V": effective_material["Sio2_V"],
+            "Si_V": effective_material["Si_V"],
+            "volume_sum": effective_material["volume_sum"],
+            "material_property_source": effective_material["material_property_source"],
+        })
+        sigmas.append(bow_std_um)
+
+    return pd.DataFrame(rows), np.asarray(sigmas, dtype=float)
+
+
+def _stack_warpage_gaussian(layer_df, layer_bow_sigma_um, DeltaT_K, L_m):
+    base_summary, _ = compute_total_stack_warpage(
+        layer_df,
+        DeltaT_K=DeltaT_K,
+        L_m=L_m,
+    )
+    base_mu_um = float(base_summary["signed_W_um"])
+
+    sensitivities = []
+    base_w0 = layer_df["W0_um"].to_numpy(dtype=float)
+    for layer_index in range(len(layer_df)):
+        perturbed = layer_df.copy()
+        perturbed_w0 = base_w0.copy()
+        perturbed_w0[layer_index] += 1.0
+        perturbed["W0_um"] = perturbed_w0
+        perturbed_summary, _ = compute_total_stack_warpage(
+            perturbed,
+            DeltaT_K=DeltaT_K,
+            L_m=L_m,
+        )
+        sensitivities.append(float(perturbed_summary["signed_W_um"]) - base_mu_um)
+
+    sensitivities = np.asarray(sensitivities, dtype=float)
+    sigma_um = float(np.sqrt(np.sum((sensitivities * layer_bow_sigma_um) ** 2)))
+    return base_mu_um, sigma_um, sensitivities
+
+
+def _normal_cdf(x):
+    return 0.5 * (1.0 + math.erf(float(x) / math.sqrt(2.0)))
+
+
+def _gaussian_abs_below_probability(mu, sigma, threshold):
+    if threshold < 0.0:
+        raise ValueError("Warpage threshold must be non-negative.")
+    if sigma < 0.0:
+        raise ValueError("Gaussian sigma must be non-negative.")
+    if sigma == 0.0:
+        return 1.0 if abs(mu) <= threshold else 0.0
+
+    lower = (-threshold - mu) / sigma
+    upper = (threshold - mu) / sigma
+    probability = _normal_cdf(upper) - _normal_cdf(lower)
+    return float(np.clip(probability, 0.0, 1.0))
+
+
+def _stack_warpage_threshold_um(cfg):
+    return _first_existing_float(
+        cfg,
+        [
+            "STACK_WARPAGE_TH",
+            "WARPAGE_LIMIT_UM",
+        ],
+        default=20.0,
+    )
+
+
+def get_interface_stack_warpage_map(cfg_dict, _3dbx_path):
+    """
+    Return pre-bond stack warpage distribution for every D2W interface.
+
+    For interface j in a substack, the returned ``mu_um`` and ``sigma_um`` are
+    the Gaussian parameters of the already-bonded bottom stack before bonding
+    interface j. The length scale is the current top die half-length from that
+    interface cfg.
+    """
+    substacks = stack_graph_from_3dbx(_3dbx_path)
+    interface_stack_warpage = {}
+
+    for substack in substacks:
+        chiplets = substack["chiplets_bottom_to_top"]
+        interfaces = substack["interfaces_bottom_to_top"]
+
+        for interface_index, interface in enumerate(interfaces):
+            if interface not in cfg_dict:
+                raise KeyError(f"Interface '{interface}' from {_3dbx_path} is missing in cfg_dict.")
+
+            current_cfg = cfg_dict[interface]
+            top_die_mu_um, top_die_sigma_um = _initial_bow_stats_um(current_cfg, "TOP")
+            L_m = _top_die_half_length_m(current_cfg)
+
+            prebond_chiplets = chiplets[:interface_index + 1]
+            prebond_interfaces = interfaces[:interface_index]
+            layer_df, layer_bow_sigma_um = _build_layer_df(
+                cfg_dict,
+                prebond_chiplets,
+                interfaces,
+            )
+
+            if interface_index == 0:
+                DeltaT_K = 0.0
+                last_completed_interface = None
+            else:
+                last_completed_interface = interfaces[interface_index - 1]
+                DeltaT_K = _prebond_delta_t_from_cfg(
+                    current_cfg,
+                    cfg_dict[last_completed_interface],
+                )
+
+            stack_mu_um, stack_sigma_um, sensitivities = _stack_warpage_gaussian(
+                layer_df,
+                layer_bow_sigma_um,
+                DeltaT_K=DeltaT_K,
+                L_m=L_m,
+            )
+
+            interface_stack_warpage[interface] = {
+                "substack_id": int(substack["substack_id"]),
+                "chiplets_before_bond": list(prebond_chiplets),
+                "interfaces_before_bond": list(prebond_interfaces),
+                "last_completed_interface": last_completed_interface,
+                "incoming_top_chiplet": chiplets[interface_index + 1],
+                "mu_um": stack_mu_um,
+                "sigma_um": stack_sigma_um,
+                "top_die_mu_um": float(top_die_mu_um),
+                "top_die_sigma_um": float(top_die_sigma_um),
+                "L_m": float(L_m),                  # Die half-length
+                "DeltaT_K": float(DeltaT_K),
+                "anneal_mode": _anneal_mode_from_cfg(current_cfg),
+                "layers": layer_df.to_dict(orient="records"),
+                "initial_bow_sensitivity": sensitivities.tolist(),
+            }
+
+    return interface_stack_warpage
+
+def compute_warpage_yield(cfg_dict, _3dbx_path):
+    """
+    Compute final total-warpage yield for every substack in a design.
+
+    For each substack, all chiplets in the root-to-leaf path are treated as the
+    final bonded stack. The pass condition is:
+
+        abs(W_total) <= STACK_WARPAGE_TH
+
+    where W_total is modeled as a Gaussian distribution in micrometers.
+    """
+    substacks = stack_graph_from_3dbx(_3dbx_path)
+    substack_results = {}
+    overall_warpage_yield = 1.0
+
+    for substack in substacks:
+        substack_id = int(substack["substack_id"])
+        chiplets = substack["chiplets_bottom_to_top"]
+        interfaces = substack["interfaces_bottom_to_top"]
+        if not interfaces:
+            raise ValueError(
+                f"Substack {substack_id} has no bonding interfaces; "
+                "cannot infer final stack warpage cfg."
+            )
+
+        interface_name = interfaces[-1]
+        if interface_name not in cfg_dict:
+            raise KeyError(f"Interface '{interface_name}' from {_3dbx_path} is missing in cfg_dict.")
+
+        final_cfg = cfg_dict[interface_name]
+        threshold_um = _stack_warpage_threshold_um(final_cfg)
+        L_m = _top_die_half_length_m(final_cfg)
+        DeltaT_K = _delta_t_from_cfg(final_cfg)
+        layer_df, layer_bow_sigma_um = _build_layer_df(
+            cfg_dict,
+            chiplets,
+            interfaces,
+        )
+
+        mu_um, sigma_um, sensitivities = _stack_warpage_gaussian(
+            layer_df,
+            layer_bow_sigma_um,
+            DeltaT_K=DeltaT_K,
+            L_m=L_m,
+        )
+        yield_value = _gaussian_abs_below_probability(
+            mu=mu_um,
+            sigma=sigma_um,
+            threshold=threshold_um,
+        )
+        overall_warpage_yield *= yield_value
+
+        substack_results[substack_id] = {
+            "substack_id": substack_id,
+            "chiplets_bottom_to_top": list(chiplets),
+            "interfaces_bottom_to_top": list(interfaces),
+            "final_interface": interface_name,
+            "mu_um": float(mu_um),
+            "sigma_um": float(sigma_um),
+            "threshold_um": float(threshold_um),
+            "warpage_yield": float(yield_value),
+            "pass_condition": "abs(W_total_um) <= threshold_um",
+            "L_m": float(L_m),
+            "DeltaT_K": float(DeltaT_K),
+            "layers": layer_df.to_dict(orient="records"),
+            "initial_bow_sensitivity": sensitivities.tolist(),
+        }
+
+    return {
+        "overall_warpage_yield": float(overall_warpage_yield),
+        "substack_results": substack_results,
+    }
+
+
+def stack_warpage_yield_calculator(
+    cfg_dict: dict,
+    die_stack,
+    _3dbx_path: str,
+):
+    """
+    Calculate final substack warpage yield and write it into ``die_stack``.
+
+    Warpage is a final-substack criterion, not a per-interface bonding
+    criterion. To avoid double counting, every interface is initialized to
+    warpage yield 1.0, and each substack writes its final-warpage yield only to
+    the final interface in that substack.
+    """
+    substacks = stack_graph_from_3dbx(_3dbx_path)
+    substack_warpage_yield_dict = {}
+
+    for interface_name in cfg_dict:
+        die_stack.die_yield_per_interface_dict[interface_name]["warpage"] = 1.0
+
+    for substack in substacks:
+        substack_id = int(substack["substack_id"])
+        chiplets = substack["chiplets_bottom_to_top"]
+        interfaces = substack["interfaces_bottom_to_top"]
+        if not interfaces:
+            raise ValueError(
+                f"Substack {substack_id} has no bonding interfaces; "
+                "cannot infer final stack warpage cfg."
+            )
+
+        interface_name = interfaces[-1]
+        if interface_name not in cfg_dict:
+            raise KeyError(f"Interface '{interface_name}' from {_3dbx_path} is missing in cfg_dict.")
+
+        final_cfg = cfg_dict[interface_name]
+        threshold_um = _stack_warpage_threshold_um(final_cfg)
+        L_m = _top_die_half_length_m(final_cfg)
+        DeltaT_K = _delta_t_from_cfg(final_cfg)
+        layer_df, layer_bow_sigma_um = _build_layer_df(
+            cfg_dict,
+            chiplets,
+            interfaces,
+        )
+
+        mu_um, sigma_um, sensitivities = _stack_warpage_gaussian(
+            layer_df,
+            layer_bow_sigma_um,
+            DeltaT_K=DeltaT_K,
+            L_m=L_m,
+        )
+        warpage_yield = _gaussian_abs_below_probability(
+            mu=mu_um,
+            sigma=sigma_um,
+            threshold=threshold_um,
+        )
+
+        die_stack.die_yield_per_interface_dict[interface_name]['warpage'] = float(warpage_yield)
+
+
+# Cu elastic-plastic residual-strain model for D2D anneal histories.
+CU_E_GPA = 91.8
+CU_NU = 0.34
+CU_ALPHA_PPM_K = 17.6
+
+
+@dataclass(frozen=True)
+class CuEpParams:
+    """Scalar equibiaxial Cu plasticity parameters used by the reduced model."""
+
+    yield_room_MPa: float = 220.0
+    yield_anneal_MPa: float = 80.0
+    tangent_hardening_MPa: float = 1000.0
+    anneal_temperature_C: float = 300.0
+    plastic_tolerance_MPa: float = 1.0e-6
+    local_iterations: int = 4
+
+
+def _required_arrays(layer_df: pd.DataFrame) -> dict[str, np.ndarray]:
+    required = ["h_um", "E_GPa", "nu", "alpha_ppm_K", "W0_um"]
+    missing = [column for column in required if column not in layer_df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    df = layer_df.copy().reset_index(drop=True)
+    arrays = {
+        "h": df["h_um"].to_numpy(dtype=float) * 1.0e-6,
+        "E": df["E_GPa"].to_numpy(dtype=float) * 1.0e9,
+        "nu": df["nu"].to_numpy(dtype=float),
+        "alpha": df["alpha_ppm_K"].to_numpy(dtype=float) * 1.0e-6,
+        "kappa0": None,
+    }
+    arrays["kappa0"] = bow_um_to_curvature(df["W0_um"].to_numpy(dtype=float), 1.0)
+    if np.any(arrays["h"] <= 0.0):
+        raise ValueError("All layer thicknesses must be positive.")
+    if np.any((arrays["nu"] <= -1.0) | (arrays["nu"] >= 0.5)):
+        raise ValueError("Poisson ratios should be in the elastic range (-1, 0.5).")
+    return arrays
+
+
+def _cu_volume_fraction(layer_df: pd.DataFrame) -> np.ndarray:
+    for column in ("interface_cu_volume_fraction", "Cu_V", "cu_vf"):
+        if column in layer_df.columns:
+            values = pd.to_numeric(layer_df[column], errors="coerce").fillna(0.0).to_numpy(dtype=float)
+            return np.clip(values, 0.0, 1.0)
+    if "sublayer" in layer_df.columns:
+        sublayer = layer_df["sublayer"].astype(str).str.lower()
+        return np.where(sublayer.str.contains("cu").to_numpy(), 0.10, 0.0)
+    return np.zeros(len(layer_df), dtype=float)
+
+
+def compute_stack_warpage_with_eigenstrain(
+    layer_df: pd.DataFrame,
+    *,
+    L_m: float,
+    eigenstrain: np.ndarray | list[float] | None = None,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """
+    Compute stack bow using the existing elastic curvature form plus eigenstrain.
+
+    ``eigenstrain`` is the stress-free scalar strain carried by each analytical
+    layer.  It can include thermal strain, plastic strain, or both.  The
+    implementation follows the current D2D model's stiffness conventions:
+    ``E/(1-nu)`` for mechanical compatibility and ``E/(1-nu^2)`` for the
+    thermal/eigenstrain bending-force weight.
+    """
+
+    df = layer_df.copy().reset_index(drop=True)
+    arrays = _required_arrays(df)
+    h = arrays["h"]
+    E = arrays["E"]
+    nu = arrays["nu"]
+    alpha = arrays["alpha"]
+    kappa0 = bow_um_to_curvature(df["W0_um"].to_numpy(dtype=float), L_m)
+    free = np.zeros(len(df), dtype=float) if eigenstrain is None else np.asarray(eigenstrain, dtype=float)
+    if free.shape != h.shape:
+        raise ValueError("eigenstrain length must match layer_df length.")
+
+    E_biaxial = E / (1.0 - nu)
+    E_thermal = E / (1.0 - nu**2)
+    lam = 1.0 / (E_biaxial * h)
+    weights = 1.0 / lam
+    thermal_weights = E_thermal * h
+
+    h_cumsum = np.cumsum(h)
+    hk0_cumsum = np.cumsum(h * kappa0)
+    a = h_cumsum - 0.5 * (h[0] + h)
+    b = hk0_cumsum - 0.5 * (h[0] * kappa0[0] + h * kappa0)
+
+    free_delta = free - free[0]
+    s_free = float(np.sum(free_delta * thermal_weights) / np.sum(thermal_weights))
+    free_centered = free_delta - s_free
+    s_a = float(np.sum(a * weights) / np.sum(weights))
+    s_b = float(np.sum(b * weights) / np.sum(weights))
+
+    D = E_biaxial * h**3 / 12.0
+    M_T = float(np.sum(a * thermal_weights * free_centered))
+    M_b = float(np.sum((a / lam) * (b - s_b)))
+    K_a = float(np.sum((a / lam) * (a - s_a)))
+    K_D = float(np.sum(D))
+    M_D0 = float(np.sum(D * kappa0))
+
+    denominator = K_D + K_a
+    kappa = (M_D0 + M_T + M_b) / denominator
+    common_mechanical_strain = -(a - s_a) * kappa + (b - s_b)
+    strain_term = free_centered + common_mechanical_strain
+    sigma = E_biaxial * strain_term
+    W_um = curvature_to_bow_um(kappa, L_m)
+
+    summary = {
+        "kappa_1_per_m": float(kappa),
+        "signed_W_um": float(W_um),
+        "abs_W_um": float(abs(W_um)),
+        "L_m": float(L_m),
+        "M_T_N": M_T,
+        "M_b_N": M_b,
+        "M_D0_N": M_D0,
+        "K_a_N_m": K_a,
+        "K_D_N_m": K_D,
+        "s_free_strain": s_free,
+        "s_a_m": s_a,
+        "s_b": s_b,
+    }
+    layer_out = df.copy()
+    layer_out["E_biaxial_GPa"] = E_biaxial / 1.0e9
+    layer_out["E_thermal_plate_GPa"] = E_thermal / 1.0e9
+    layer_out["kappa0_1_per_m"] = kappa0
+    layer_out["eigenstrain"] = free
+    layer_out["centered_eigenstrain"] = free_centered
+    layer_out["common_mechanical_strain"] = common_mechanical_strain
+    layer_out["sigma_MPa"] = sigma / 1.0e6
+    return summary, layer_out
+
+
+def compute_d2d_roomtemp_bond_pre_anneal(
+    layer_df: pd.DataFrame,
+    *,
+    L_m: float,
+) -> tuple[dict[str, float], pd.DataFrame]:
+    """Return the bonded/released room-temperature bow before annealing."""
+
+    return compute_stack_warpage_with_eigenstrain(layer_df, L_m=L_m)
+
+
+def _yield_at_temperature(T_C: float, params: CuEpParams) -> float:
+    if params.anneal_temperature_C == 25.0:
+        return float(params.yield_room_MPa)
+    ratio = (float(T_C) - 25.0) / (float(params.anneal_temperature_C) - 25.0)
+    ratio = min(1.0, max(0.0, ratio))
+    return (1.0 - ratio) * float(params.yield_room_MPa) + ratio * float(params.yield_anneal_MPa)
+
+
+def _temperature_schedule(
+    *,
+    t_room_C: float,
+    t_anneal_C: float,
+    heat_steps: int,
+    cool_steps: int,
+    include_anneal_hold: bool,
+) -> list[tuple[str, float]]:
+    heat_steps = max(1, int(heat_steps))
+    cool_steps = max(1, int(cool_steps))
+    schedule: list[tuple[str, float]] = [("pre_anneal_rt", float(t_room_C))]
+    for value in np.linspace(float(t_room_C), float(t_anneal_C), heat_steps + 1)[1:]:
+        schedule.append(("heat_to_anneal", float(value)))
+    if include_anneal_hold:
+        schedule.append(("anneal_hold", float(t_anneal_C)))
+    for value in np.linspace(float(t_anneal_C), float(t_room_C), cool_steps + 1)[1:]:
+        label = "post_anneal_rt" if abs(float(value) - float(t_room_C)) < 1.0e-9 else "cool_to_room"
+        schedule.append((label, float(value)))
+    return schedule
+
+
+def compute_d2d_roomtemp_bond_cu_ep_history(
+    layer_df: pd.DataFrame,
+    *,
+    L_m: float,
+    t_room_C: float,
+    t_anneal_C: float,
+    heat_steps: int = 30,
+    cool_steps: int = 30,
+    include_anneal_hold: bool = True,
+    cu_params: CuEpParams | None = None,
+) -> tuple[dict[str, object], pd.DataFrame, pd.DataFrame]:
+    """
+    Compute exp05 pre/post RT bow while carrying Cu plastic strain.
+
+    The reduced model treats each Cu-bearing interface layer as an elastic
+    SiO2/Cu homogenized layer for stiffness, but carries a separate scalar Cu
+    plastic strain state.  The plastic strain enters the interface layer as a
+    residual eigenstrain weighted by the Cu stiffness share.
+    """
+
+    params = cu_params or CuEpParams(anneal_temperature_C=float(t_anneal_C))
+    params = CuEpParams(
+        yield_room_MPa=params.yield_room_MPa,
+        yield_anneal_MPa=params.yield_anneal_MPa,
+        tangent_hardening_MPa=params.tangent_hardening_MPa,
+        anneal_temperature_C=float(t_anneal_C),
+        plastic_tolerance_MPa=params.plastic_tolerance_MPa,
+        local_iterations=params.local_iterations,
+    )
+
+    df = layer_df.copy().reset_index(drop=True)
+    arrays = _required_arrays(df)
+    h = arrays["h"]
+    E = arrays["E"]
+    nu = arrays["nu"]
+    alpha = arrays["alpha"]
+    E_biaxial = E / (1.0 - nu)
+    cu_vf = _cu_volume_fraction(df)
+    cu_biaxial_MPa = CU_E_GPA * 1000.0 / (1.0 - CU_NU)
+    layer_biaxial_MPa = E_biaxial / 1.0e6
+    cu_plastic_weight = np.where(
+        cu_vf > 0.0,
+        np.clip(cu_vf * cu_biaxial_MPa / np.maximum(layer_biaxial_MPa, 1.0e-30), 0.0, 1.0),
+        0.0,
+    )
+    is_cu_layer = cu_vf > 1.0e-12
+    eps_p_cu = np.zeros(len(df), dtype=float)
+    eq_p_cu = np.zeros(len(df), dtype=float)
+
+    schedule = _temperature_schedule(
+        t_room_C=t_room_C,
+        t_anneal_C=t_anneal_C,
+        heat_steps=heat_steps,
+        cool_steps=cool_steps,
+        include_anneal_hold=include_anneal_hold,
+    )
+    history_rows: list[dict[str, float | int | str]] = []
+    layer_rows: list[pd.DataFrame] = []
+    selected: dict[str, dict[str, float]] = {}
+
+    def eigenstrain_for_temperature(T_C: float) -> np.ndarray:
+        delta_T = float(T_C) - float(t_room_C)
+        thermal = alpha * delta_T
+        return thermal - cu_plastic_weight * eps_p_cu
+
+    for step_index, (stage, T_C) in enumerate(schedule):
+        for _ in range(max(1, int(params.local_iterations))):
+            eigenstrain = eigenstrain_for_temperature(T_C)
+            summary, out = compute_stack_warpage_with_eigenstrain(df, L_m=L_m, eigenstrain=eigenstrain)
+            if not np.any(is_cu_layer):
+                break
+            s_free = float(summary["s_free_strain"])
+            common = out["common_mechanical_strain"].to_numpy(dtype=float)
+            reference_free = eigenstrain[0]
+            yielded = False
+            for idx in np.where(is_cu_layer)[0]:
+                cu_thermal = CU_ALPHA_PPM_K * 1.0e-6 * (float(T_C) - float(t_room_C))
+                cu_free_delta = (cu_thermal - eps_p_cu[idx]) - reference_free
+                cu_strain = cu_free_delta - s_free + common[idx]
+                trial_MPa = cu_biaxial_MPa * cu_strain
+                flow_MPa = _yield_at_temperature(T_C, params) + float(params.tangent_hardening_MPa) * eq_p_cu[idx]
+                overstress = abs(trial_MPa) - flow_MPa
+                if overstress <= float(params.plastic_tolerance_MPa):
+                    continue
+                delta_gamma = overstress / (cu_biaxial_MPa + float(params.tangent_hardening_MPa))
+                eps_p_cu[idx] += np.sign(trial_MPa) * delta_gamma
+                eq_p_cu[idx] += delta_gamma
+                yielded = True
+            if not yielded:
+                break
+
+        eigenstrain = eigenstrain_for_temperature(T_C)
+        summary, out = compute_stack_warpage_with_eigenstrain(df, L_m=L_m, eigenstrain=eigenstrain)
+        out = out.copy()
+        out["history_step_index"] = step_index
+        out["history_stage"] = stage
+        out["temperature_C"] = float(T_C)
+        out["cu_volume_fraction"] = cu_vf
+        out["cu_plastic_weight"] = cu_plastic_weight
+        out["cu_plastic_strain"] = eps_p_cu
+        out["cu_equivalent_plastic_strain"] = eq_p_cu
+        layer_rows.append(out)
+
+        row = {
+            "model_step_index": int(step_index),
+            "model_stage": stage,
+            "temperature_C": float(T_C),
+            "model_stack_bow_um": float(summary["signed_W_um"]),
+            "model_kappa_1_per_m": float(summary["kappa_1_per_m"]),
+            "max_abs_cu_plastic_strain": float(np.max(np.abs(eps_p_cu))) if len(eps_p_cu) else 0.0,
+            "max_cu_equivalent_plastic_strain": float(np.max(eq_p_cu)) if len(eq_p_cu) else 0.0,
+            "active_cu_layer_count": int(np.count_nonzero(is_cu_layer)),
+        }
+        history_rows.append(row)
+        if stage == "pre_anneal_rt":
+            selected["pre_anneal_rt"] = row
+        if stage in ("heat_to_anneal", "anneal_hold") and abs(float(T_C) - float(t_anneal_C)) < 1.0e-9:
+            selected["anneal"] = row
+        if stage == "post_anneal_rt":
+            selected["post_anneal_rt"] = row
+
+    pre = selected.get("pre_anneal_rt", history_rows[0])
+    post = selected.get("post_anneal_rt", history_rows[-1])
+    anneal = selected.get("anneal", history_rows[-1])
+    summary = {
+        "pre_anneal_rt": pre,
+        "anneal": anneal,
+        "post_anneal_rt": post,
+        "pre_anneal_rt_bow_um": float(pre["model_stack_bow_um"]),
+        "anneal_bow_um": float(anneal["model_stack_bow_um"]),
+        "post_anneal_rt_bow_um": float(post["model_stack_bow_um"]),
+        "post_minus_pre_bow_um": float(post["model_stack_bow_um"]) - float(pre["model_stack_bow_um"]),
+        "max_abs_cu_plastic_strain": float(max(row["max_abs_cu_plastic_strain"] for row in history_rows)),
+    }
+    history_df = pd.DataFrame(history_rows)
+    layer_history_df = pd.concat(layer_rows, ignore_index=True) if layer_rows else pd.DataFrame()
+    return summary, history_df, layer_history_df
+
+
+def compute_d2d_roomtemp_bond_cu_ep_pre_post(
+    layer_df: pd.DataFrame,
+    *,
+    L_m: float,
+    t_room_C: float,
+    t_anneal_C: float,
+    heat_steps: int = 30,
+    cool_steps: int = 30,
+    cu_params: CuEpParams | None = None,
+) -> dict[str, float]:
+    """Convenience wrapper returning only the official exp05 comparison values."""
+
+    summary, _, _ = compute_d2d_roomtemp_bond_cu_ep_history(
+        layer_df,
+        L_m=L_m,
+        t_room_C=t_room_C,
+        t_anneal_C=t_anneal_C,
+        heat_steps=heat_steps,
+        cool_steps=cool_steps,
+        cu_params=cu_params,
+    )
+    return {
+        "pre_anneal_rt_bow_um": float(summary["pre_anneal_rt_bow_um"]),
+        "post_anneal_rt_bow_um": float(summary["post_anneal_rt_bow_um"]),
+        "post_minus_pre_bow_um": float(summary["post_minus_pre_bow_um"]),
+        "max_abs_cu_plastic_strain": float(summary["max_abs_cu_plastic_strain"]),
+    }

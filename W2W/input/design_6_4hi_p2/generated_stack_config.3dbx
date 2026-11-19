@@ -1,0 +1,27 @@
+Header:
+  version: 2.0
+  unit: micron
+  precision: 2000
+  include: [generated_chiplet_definitions.3dbv]
+Design:
+  name: design_6_4hi_p2
+ChipletInst:
+  Wafer_1: {reference: Wafer_1, is_master: true}
+  Wafer_2: {reference: Wafer_2, is_master: true}
+  Wafer_3: {reference: Wafer_3, is_master: true}
+  Wafer_4: {reference: Wafer_4, is_master: true}
+Stack:
+  Wafer_1: {loc: [0.0, 0.0], z: 0.0, root: true}
+  Wafer_2: {loc: [0.0, 0.0], z: 775.0}
+  Wafer_3: {loc: [0.0, 0.0], z: 1550.0}
+  Wafer_4: {loc: [0.0, 0.0], z: 2325.0}
+Connection:
+  Conn1:
+    top: Wafer_2.regions.From_Wafer_1
+    bot: Wafer_1.regions.To_Wafer_2
+  Conn2:
+    top: Wafer_3.regions.From_Wafer_2
+    bot: Wafer_2.regions.To_Wafer_3
+  Conn3:
+    top: Wafer_4.regions.From_Wafer_3
+    bot: Wafer_3.regions.To_Wafer_4

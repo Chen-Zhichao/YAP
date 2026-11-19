@@ -1,0 +1,13 @@
+# CPU assembly-order runtime: Python 3.11 or 3.12.
+# NumPy 1.26 is required by the verified Numba 0.59 runtime.
+matplotlib==3.8.4
+numpy==1.26.4
+pandas==2.2.2
+omegaconf==2.3.0
+opencv-python==4.11.0.86
+scipy==1.13.1
+sympy==1.12
+scikit-learn==1.4.2
+numba==0.59.1
+llvmlite==0.42.0
+threadpoolctl==3.6.0

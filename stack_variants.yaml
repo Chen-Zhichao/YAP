@@ -1,0 +1,24 @@
+design_family: design_6
+die_width_um: 10000.0
+die_length_um: 10000.0
+die_thickness_um: 100.0
+critical_pad_fraction: 0.30
+power_ground_pad_fraction: 0.50
+dummy_pad_fraction: 0.20
+variants:
+  - name: design_6_4hi_p6
+    dram_tiers: 4
+    pitch_um: 6.0
+    pad_diameter_um: 3.0
+  - name: design_6_4hi_p1
+    dram_tiers: 4
+    pitch_um: 1.0
+    pad_diameter_um: 0.5
+  - name: design_6_8hi_p6
+    dram_tiers: 8
+    pitch_um: 6.0
+    pad_diameter_um: 3.0
+  - name: design_6_16hi_p6
+    dram_tiers: 16
+    pitch_um: 6.0
+    pad_diameter_um: 3.0

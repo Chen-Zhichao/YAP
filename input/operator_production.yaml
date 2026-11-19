@@ -1,0 +1,23 @@
+schema: yap.operator_production.v1
+project_root: /app/nanocad/projects/personal/zchen/YAP_STACK
+catalog: distribution/operators/components/coverage_20261117_v12/CATALOG.json
+pitches_um: [2, 3, 4, 5, 6, 7, 8, 9, 10]
+prepared_totals_um: [20, 30, 40, 50, 60, 70, 80, 90, 100]
+diameter_pitch_ratio: 0.5
+resources:
+  cores_per_job: 8
+  reserve_ram_gib: 0
+
+# Deliberately no fabricated universal backend. The currently reviewed builders
+# are geometry-specific. Add only reviewed FOREGROUND recipes with actual source
+# and prerequisite SHA256s. Missing recipes appear as BLOCKED_IMPLEMENTATION.
+# Existing catalog entries are metadata locators, not fresh payload validation.
+# A recipe requires a registered qualified backend id, then:
+# select {pitch_um,total_um,variant: inner|outer}, stage,
+# foreground: true, argv (list), source_pins (path: SHA), prerequisites (path: SHA),
+# memory_gib, file_cap_gib, timeout_seconds,
+# report {path: "{stage_dir}/REPORT.json", equals: {"/state": exact_backend_state}}.
+# Stages: reference, construct, history, assess, publish. A later stage must bind
+# closed predecessor evidence in prerequisites; this queue never creates approvals.
+# Only an evidence-gated scientific publisher may implement the publish recipe.
+recipes: []
